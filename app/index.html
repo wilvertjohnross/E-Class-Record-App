@@ -485,6 +485,34 @@
   .import-summary{background:#F5EFE0;border:1px solid var(--border);padding:9px 11px;border-radius:4px;font-size:12.5px;margin:8px 0;}
   @media (max-width:720px){.import-grid{grid-template-columns:1fr;}}
   .badge-count{background:var(--paper-deep);border:1px solid var(--border);border-radius:10px;padding:1px 9px;font-size:11.5px;margin-left:6px;}
+  .role-tabs{display:flex;gap:0;align-items:stretch;background:var(--paper-deep);border-bottom:1px solid var(--border);padding:0 18px;}
+  .role-tabs .tab{border-radius:0;border:none;border-bottom:3px solid transparent;background:transparent;color:var(--ink-soft);padding:12px 18px;font-weight:800;box-shadow:none;}
+  .role-tabs .tab:hover{background:var(--manila);color:var(--ink);transform:none;box-shadow:none;}
+  .role-tabs .tab.active{background:var(--paper);color:var(--red-pen);border-bottom-color:var(--red-pen);}
+  .control-hub{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin-top:14px;}
+  .control-card{border:1px solid var(--border);background:var(--white);border-radius:8px;padding:18px;min-height:150px;display:flex;flex-direction:column;justify-content:space-between;box-shadow:0 1px 5px var(--shadow);}
+  .control-card h3{margin:0 0 6px;font-size:17px;color:var(--ink);}
+  .control-card p{margin:0;color:var(--ink-soft);font-size:13px;line-height:1.45;}
+  .control-card .module-code{display:inline-flex;align-items:center;justify-content:center;min-width:42px;height:30px;padding:0 9px;border-radius:5px;background:var(--paper-deep);border:1px solid var(--border);font-weight:900;color:var(--green-chalk);margin-bottom:10px;}
+  .control-card .card-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:16px;}
+  .control-card.coming-soon{opacity:.72;background:#F7F4EC;}
+  .control-card.coming-soon .module-code{color:var(--ink-soft);}
+  .control-card .status-chip{font-size:11px;font-weight:800;border:1px solid var(--border);border-radius:999px;padding:2px 8px;background:var(--paper-deep);color:var(--ink-soft);}
+  .control-card .status-chip.ok{color:var(--green-chalk);}
+  .control-card .status-chip.warn{color:var(--red-pen);}
+  .hub-title-row{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;}
+  .hub-title-row .hub-context{font-size:12.5px;color:var(--ink-soft);text-align:right;}
+  .workflow-nav{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 14px;padding:10px 12px;background:var(--white);border:1px solid var(--border);border-radius:6px;}
+  .workflow-nav .workflow-label{font-size:11px;font-weight:900;letter-spacing:.45px;text-transform:uppercase;color:var(--ink-soft);margin-right:4px;}
+  .workflow-nav button{padding:6px 11px;font-size:12.5px;}
+  .workflow-nav button.active{background:var(--green-chalk);color:var(--white);border-color:var(--green-chalk);}
+  .term-nav{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:0 0 14px;}
+  .term-nav button.active{background:var(--green-chalk);color:var(--white);border-color:var(--green-chalk);}
+  .class-management{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:12px;padding-top:12px;border-top:1px solid var(--paper-deep);}
+  .coming-soon-panel{text-align:center;padding:54px 24px;}
+  .coming-soon-panel .module-code{display:inline-flex;align-items:center;justify-content:center;padding:8px 14px;border-radius:6px;background:var(--paper-deep);border:1px solid var(--border);font-weight:900;color:var(--ink-soft);margin-bottom:14px;}
+  @media (max-width:920px){.control-hub{grid-template-columns:1fr 1fr;}}
+  @media (max-width:620px){.control-hub{grid-template-columns:1fr;}.role-tabs{padding:0 8px;}.role-tabs .tab{flex:1;padding:10px 8px;font-size:12px;}}
 
 
   /* ===== v1.0.16 usability polish ===== */
@@ -668,6 +696,20 @@
   html[data-theme="dark"] table.cr-table tbody tr[data-sid] > td.sticky-learner{background:var(--surface-raised);box-shadow:2px 0 0 var(--border-strong);}
   html[data-theme="dark"] table.cr-table tbody tr[data-sid]:hover > td.sticky-learner{background:var(--surface-subtle);}
 
+  html[data-theme="dark"] .role-tabs{background:#1E2228;border-bottom-color:var(--border);}
+  html[data-theme="dark"] .role-tabs .tab{color:var(--text-secondary);}
+  html[data-theme="dark"] .role-tabs .tab:hover{background:var(--surface-subtle);color:var(--text-primary);}
+  html[data-theme="dark"] .role-tabs .tab.active{background:var(--surface);color:var(--error);border-bottom-color:var(--error);}
+  html[data-theme="dark"] .control-card,html[data-theme="dark"] .workflow-nav{background:var(--surface);border-color:var(--border);box-shadow:none;}
+  html[data-theme="dark"] .control-card.coming-soon{background:var(--surface-subtle);}
+  html[data-theme="dark"] .control-card h3{color:var(--text-primary);}
+  html[data-theme="dark"] .control-card p,html[data-theme="dark"] .hub-title-row .hub-context{color:var(--text-secondary);}
+  html[data-theme="dark"] .control-card .module-code,html[data-theme="dark"] .control-card .status-chip,html[data-theme="dark"] .coming-soon-panel .module-code{background:var(--surface-subtle);border-color:var(--border);color:var(--text-secondary);}
+  html[data-theme="dark"] .control-card .status-chip.ok{color:var(--success);}
+  html[data-theme="dark"] .control-card .status-chip.warn{color:var(--error);}
+  html[data-theme="dark"] .workflow-nav .workflow-label{color:var(--text-secondary);}
+  html[data-theme="dark"] .workflow-nav button.active,html[data-theme="dark"] .term-nav button.active{background:var(--accent-fill);color:var(--on-accent);border-color:var(--border-strong);}
+  html[data-theme="dark"] .class-management{border-top-color:var(--border);}
   /* Status/grade accents: slightly desaturated to avoid vibration on dark gray. */
   html[data-theme="dark"] .desc-band{color:var(--on-accent);}
   html[data-theme="dark"] .band-Advancing{background:#345E44;}
@@ -693,28 +735,20 @@
 <header class="appbar">
   <h1>E-Class Record App <span>with GS and SF9</span></h1>
   <div class="class-picker no-print">
-    <select id="classSelect"></select>
+    <select id="classSelect" title="Active class"></select>
     <button id="btnTheme" class="ghost theme-toggle" title="Toggle light/dark working view">🌙 Dark</button>
-    <button id="btnNewClass" class="ghost">+ New Class</button>
-    <button id="btnDupClass" class="ghost">Duplicate</button>
-    <button id="btnDelClass" class="ghost">Delete</button>
     <button id="btnExport" class="ghost">Export Backup</button>
     <button id="btnImport" class="ghost">Import Backup</button>
     <input type="file" id="fileImport" accept="application/json" style="display:none;">
+    <button id="btnNewClass" style="display:none;">+ New Class</button>
+    <button id="btnDupClass" style="display:none;">Duplicate</button>
+    <button id="btnDelClass" style="display:none;">Delete</button>
   </div>
 </header>
 
-<nav class="tabs no-print" id="tabs">
-  <button class="tab" data-tab="setup">Class Setup</button>
-  <button class="tab" data-tab="roster">Roster</button>
-  <button class="tab" data-tab="sf2">SF2 Attendance</button>
-  <button class="tab" data-tab="term1">Term 1</button>
-  <button class="tab" data-tab="term2">Term 2</button>
-  <button class="tab" data-tab="term3">Term 3</button>
-  <button class="tab" data-tab="final">Final Grades</button>
-  <button class="tab" data-tab="summary">Summary of Term Grade</button>
-  <button class="tab" data-tab="sf9setup">SF9 Setup</button>
-  <button class="tab" data-tab="report">SF9 Report Cards</button>
+<nav class="tabs role-tabs no-print" id="tabs">
+  <button class="tab" data-tab="subjecthome">Subject Teacher Controls</button>
+  <button class="tab" data-tab="adviserhome">Adviser Controls</button>
 </nav>
 
 <main id="main"></main>

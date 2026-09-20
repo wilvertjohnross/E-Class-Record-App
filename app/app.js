@@ -88,7 +88,7 @@ function unicodeText(value){
 const STORE_KEY = "eclass_record_app_v1";
 const LEGACY_STORE_KEY = "ledger_gradebook_v1";
 let APP = loadState();
-let activeTab = "setup";
+let activeTab = "subjecthome";
 
 function uid(prefix){
   if(window.crypto && typeof window.crypto.randomUUID === "function") return prefix + "_" + window.crypto.randomUUID();
@@ -704,6 +704,61 @@ function studentFinalResult(cls, studentId){
 /* =========================================================================
    RENDER: shell
    ========================================================================= */
+const SUBJECT_WORKFLOW_TABS=new Set(["subjecthome","setup","term1","term2","term3","final","summary"]);
+const ADVISER_WORKFLOW_TABS=new Set(["adviserhome","roster","sf2","sf5","report","sf9setup","sf10"]);
+function roleForTab(tab){
+  if(ADVISER_WORKFLOW_TABS.has(tab)) return "adviser";
+  return "subject";
+}
+function subjectWorkflowKey(tab){
+  if(tab==="setup") return "classes";
+  if(["term1","term2","term3","final"].includes(tab)) return "record";
+  if(tab==="summary") return "summary";
+  return "";
+}
+function adviserWorkflowKey(tab){
+  if(tab==="roster") return "sf1";
+  if(tab==="sf2") return "sf2";
+  if(tab==="sf5") return "sf5";
+  if(tab==="report"||tab==="sf9setup") return "sf9";
+  if(tab==="sf10") return "sf10";
+  return "";
+}
+function workflowNavHtml(role,current){
+  if(role==="subject"){
+    const key=subjectWorkflowKey(current);
+    return `<div class="workflow-nav no-print"><span class="workflow-label">Subject Teacher</span>
+      <button class="small ${key==="classes"?"active":""}" data-go-tab="setup">Classes</button>
+      <button class="small ${key==="record"?"active":""}" data-go-tab="term1">Class Record</button>
+      <button class="small ${key==="summary"?"active":""}" data-go-tab="summary">Summary of Grades</button>
+    </div>`;
+  }
+  const key=adviserWorkflowKey(current);
+  return `<div class="workflow-nav no-print"><span class="workflow-label">Adviser</span>
+    <button class="small ${key==="sf1"?"active":""}" data-go-tab="roster">SF1</button>
+    <button class="small ${key==="sf2"?"active":""}" data-go-tab="sf2">SF2</button>
+    <button class="small ${key==="sf5"?"active":""}" data-go-tab="sf5">SF5</button>
+    <button class="small ${key==="sf9"?"active":""}" data-go-tab="report">SF9</button>
+    <button class="small ${key==="sf10"?"active":""}" data-go-tab="sf10">SF10</button>
+  </div>`;
+}
+function prependWorkflowNavigation(main,current){
+  const role=roleForTab(current);
+  const wrap=document.createElement("div");
+  wrap.innerHTML=workflowNavHtml(role,current);
+  if(wrap.firstElementChild) main.insertBefore(wrap.firstElementChild,main.firstChild);
+  if(["term1","term2","term3","final"].includes(current)){
+    const term=document.createElement("div");
+    term.className="term-nav no-print";
+    term.innerHTML=`<span class="workflow-label">Class Record Period</span>
+      <button class="small ${current==="term1"?"active":""}" data-go-tab="term1">Term 1</button>
+      <button class="small ${current==="term2"?"active":""}" data-go-tab="term2">Term 2</button>
+      <button class="small ${current==="term3"?"active":""}" data-go-tab="term3">Term 3</button>
+      <button class="small ${current==="final"?"active":""}" data-go-tab="final">Final Grades</button>`;
+    const nav=main.querySelector(".workflow-nav");
+    if(nav&&nav.nextSibling) main.insertBefore(term,nav.nextSibling); else main.appendChild(term);
+  }
+}
 function render(){
   renderClassPicker();
   const cls = activeClass();
@@ -712,26 +767,30 @@ function render(){
     ensureClassRecordSubject(cls);
     syncClassRecordToSummary(cls);
   }
-  const sf2Tab = document.querySelector('nav.tabs .tab[data-tab="sf2"]');
-  const sf2Enabled = !!(cls && cls.meta && cls.meta.sf2Enabled === true);
-  if(sf2Tab) sf2Tab.hidden = !sf2Enabled;
-  if(activeTab === "sf2" && !sf2Enabled) activeTab = "setup";
+  const role=roleForTab(activeTab);
   document.querySelectorAll("nav.tabs .tab").forEach(b=>{
-    b.classList.toggle("active", b.dataset.tab === activeTab);
+    const roleHome=role==="adviser"?"adviserhome":"subjecthome";
+    b.classList.toggle("active", b.dataset.tab === roleHome);
   });
   const main = document.getElementById("main");
   main.innerHTML = "";
-  if(!cls){ if(sf2Tab) sf2Tab.hidden=true; main.innerHTML = `<div class="empty-state"><h2>No class yet</h2><p>Create one with "+ New Class" above.</p></div>`; return; }
+  if(activeTab==="subjecthome"){renderSubjectTeacherHome(main,cls);return;}
+  if(activeTab==="adviserhome"){renderAdviserHome(main,cls);return;}
+  if(!cls){activeTab="subjecthome";renderSubjectTeacherHome(main,null);return;}
   if(activeTab==="setup") renderSetup(main, cls);
   else if(activeTab==="sf9setup") renderSf9Setup(main, cls);
   else if(activeTab==="roster") renderRoster(main, cls);
   else if(activeTab==="sf2") renderSf2(main, cls);
+  else if(activeTab==="sf5") renderComingSoon(main,"SF5","School Form 5","The official template and computation logic will be added after we establish the SF5 specification.");
+  else if(activeTab==="sf10") renderComingSoon(main,"SF10","School Form 10","The official template and learner-record logic will be added after the new SF10 specification is established.");
   else if(activeTab==="term1") renderTerm(main, cls, "term1", "Term 1");
   else if(activeTab==="term2") renderTerm(main, cls, "term2", "Term 2");
   else if(activeTab==="term3") renderTerm(main, cls, "term3", "Term 3");
   else if(activeTab==="final") renderFinal(main, cls);
   else if(activeTab==="summary") renderSummary(main, cls);
   else if(activeTab==="report") renderReport(main, cls);
+  else {activeTab="subjecthome";renderSubjectTeacherHome(main,cls);return;}
+  prependWorkflowNavigation(main,activeTab);
 }
 
 function renderClassPicker(){
@@ -746,6 +805,46 @@ function renderClassPicker(){
   });
 }
 
+function renderSubjectTeacherHome(main,cls){
+  if(!cls){
+    main.innerHTML=`<div class="card coming-soon-panel"><div class="module-code">CLASS</div><h2>No class yet</h2><p class="sub">Create your first class to begin building a Class Record and Summary of Grades.</p><button class="primary" data-click-id="btnNewClass">+ Create New Class</button></div>`;
+    return;
+  }
+  const link=classRecordLinkStatus(cls);
+  main.innerHTML=`
+    <div class="card">
+      <div class="hub-title-row"><div><h2>Subject Teacher Controls</h2><div class="sub">Build and maintain the grading records for the active class.</div></div><div class="hub-context"><strong>${esc(cls.meta.className||"Current Class")}</strong><br>${esc(cls.meta.gradeLevel||"")} ${esc(cls.meta.section||"")}</div></div>
+      <div class="control-hub">
+        <div class="control-card"><div><div class="module-code">CLASS</div><h3>Classes</h3><p>Configure school/class information and choose the active Class Record Subject for this grading sheet.</p></div><div class="card-actions"><button class="primary" data-go-tab="setup">Open Class Setup</button><span class="status-chip">${cls.students.length} learners</span></div></div>
+        <div class="control-card"><div><div class="module-code">CR</div><h3>Class Record</h3><p>Encode raw scores, view the Grading Sheet, and manage Term 1–3 plus Final Grades for <strong>${esc(classRecordSubjectLabel(cls))}</strong>.</p></div><div class="card-actions"><button class="primary" data-go-tab="term1">Open Class Record</button><span class="status-chip ${link.ok?"ok":"warn"}">${link.ok?"Linked to Summary":"Link needs attention"}</span></div></div>
+        <div class="control-card"><div><div class="module-code">SUMMARY</div><h3>Summary of Grades</h3><p>Consolidate all learning-area grades. This is the single grade source used by SF9.</p></div><div class="card-actions"><button class="primary" data-go-tab="summary">Open Summary</button></div></div>
+      </div>
+      <div class="class-management no-print"><strong>Class management</strong><button class="small ghost-alt" data-click-id="btnNewClass">+ New Class</button><button class="small ghost-alt" data-click-id="btnDupClass">Duplicate Class</button><button class="small danger" data-click-id="btnDelClass">Delete Class</button></div>
+    </div>`;
+}
+function renderAdviserHome(main,cls){
+  if(!cls){
+    main.innerHTML=`<div class="card coming-soon-panel"><div class="module-code">ADVISER</div><h2>No active class</h2><p class="sub">Create or select a class first, then return to Adviser Controls.</p><button class="primary" data-go-tab="subjecthome">Go to Subject Teacher Controls</button></div>`;
+    return;
+  }
+  const sf2On=!!(cls.meta&&cls.meta.sf2Enabled===true);
+  const sc=ensureSubjectConfig(cls);
+  main.innerHTML=`
+    <div class="card">
+      <div class="hub-title-row"><div><h2>Adviser Controls</h2><div class="sub">Adviser forms and learner records for the active advisory class.</div></div><div class="hub-context"><strong>${esc(cls.meta.className||"Current Class")}</strong><br>${esc(cls.meta.adviser||"Adviser not set")}</div></div>
+      <div class="control-hub">
+        <div class="control-card"><div><div class="module-code">SF1</div><h3>School Form 1</h3><p>Maintain the learner masterlist and import learner information from an official SF1 workbook.</p></div><div class="card-actions"><button class="primary" data-go-tab="roster">Open SF1 / Masterlist</button><span class="status-chip">${cls.students.length} learners</span></div></div>
+        <div class="control-card"><div><div class="module-code">SF2</div><h3>School Form 2</h3><p>Maintain daily attendance and monthly attendance summaries that feed SF9 automatically.</p></div><div class="card-actions"><button class="primary" data-go-tab="sf2">Open SF2</button><span class="status-chip ${sf2On?"ok":"warn"}">${sf2On?"Enabled":"Not enabled"}</span></div></div>
+        <div class="control-card coming-soon"><div><div class="module-code">SF5</div><h3>School Form 5</h3><p>Promotion, retention, and end-of-year reporting. Template and logic will be established next.</p></div><div class="card-actions"><button class="ghost-alt" data-go-tab="sf5">View Placeholder</button><span class="status-chip">Coming Soon</span></div></div>
+        <div class="control-card"><div><div class="module-code">SF9</div><h3>School Form 9</h3><p>Generate learner report cards from Summary of Grades and SF2 attendance. Curriculum: <strong>${esc(sc.classType)}</strong>.</p></div><div class="card-actions"><button class="primary" data-go-tab="report">Open SF9</button></div></div>
+        <div class="control-card coming-soon"><div><div class="module-code">SF10</div><h3>School Form 10</h3><p>Permanent learner record. Template and logic will be integrated once the specification is established.</p></div><div class="card-actions"><button class="ghost-alt" data-go-tab="sf10">View Placeholder</button><span class="status-chip">Coming Soon</span></div></div>
+      </div>
+    </div>`;
+}
+function renderComingSoon(main,code,title,message){
+  main.innerHTML=`<div class="card coming-soon-panel"><div class="module-code">${esc(code)}</div><h2>${esc(title)}</h2><p class="sub">${esc(message)}</p><div class="hint">No placeholder calculations or unofficial form logic have been added.</div></div>`;
+}
+
 /* =========================================================================
    RENDER: Setup tab
    ========================================================================= */
@@ -756,7 +855,7 @@ function renderSetup(main, cls){
   main.innerHTML = `
     <div class="card">
       <h2>Class Setup</h2>
-      <div class="sub">This area defines the class and the specific Class Record / Grading Sheet being built. SF9 curriculum choices are configured separately in the <strong>SF9 Setup</strong> tab.</div>
+      <div class="sub">This area defines the class and the specific Class Record / Grading Sheet being built. SF9 curriculum choices are configured separately from <strong>Adviser Controls → SF9 → Modify SF9 Setup</strong>.</div>
       <div class="field"><label>Class label (shown in the class switcher)</label>
         <input type="text" id="f_className" value="${esc(m.className)}"></div>
       <div class="grid3">
@@ -783,11 +882,6 @@ function renderSetup(main, cls){
       <div class="field"><label>School Address</label><input type="text" id="f_schoolAddress" value="${esc(m.schoolAddress||"")}"></div>
     </div>
 
-    <div class="card">
-      <h2>SF2 / Advisory Class</h2>
-      <div class="sub">SF2 is an adviser-level attendance form. Enable it only for the class where you maintain the official daily attendance record.</div>
-      <label class="sf2-enable-option"><input type="checkbox" id="f_sf2Enabled" ${m.sf2Enabled===true?"checked":""}> <span><strong>Enable SF2 Daily Attendance for this class</strong><small>When enabled, the SF2 Attendance tab appears and its monthly attendance automatically feeds SF9.</small></span></label>
-    </div>
 
     <div class="card">
       <h2>School Logo</h2>
@@ -856,10 +950,6 @@ function renderSetup(main, cls){
     saveState();render();
   });
 
-  document.getElementById("f_sf2Enabled").addEventListener("change", e=>{
-    m.sf2Enabled = !!e.target.checked;
-    saveState();render();
-  });
   const logoFile = document.getElementById("schoolLogoFile");
   const changeLogoBtn = document.getElementById("btnChangeSchoolLogo");
   const resetLogoBtn = document.getElementById("btnResetSchoolLogo");
@@ -901,8 +991,7 @@ function renderSf9Setup(main, cls){
   const regular=sc.classType==="Regular";
   main.innerHTML=`
     <div class="card">
-      <h2>SF9 Setup</h2>
-      <div class="sub">SF9 curriculum configuration is independent from the Class Record setup. Shared class information is inherited automatically and cannot be edited here.</div>
+      <div class="hub-title-row"><div><h2>SF9 Setup</h2><div class="sub">SF9 curriculum configuration is independent from the Class Record setup. Shared class information is inherited automatically and cannot be edited here.</div></div><div><button class="ghost-alt no-print" data-go-tab="report">← Back to SF9 Report Cards</button></div></div>
       <div class="grid3">
         <div class="field"><label>Region — automatic</label><input value="${esc(m.region||"")}" readonly></div>
         <div class="field"><label>Division — automatic</label><input value="${esc(m.division||"")}" readonly></div>
@@ -1194,7 +1283,7 @@ function renderRoster(main, cls){
   }
   main.innerHTML = `
     <div class="card">
-      <h2>Roster <span class="badge-count">${cls.students.length} learners</span></h2>
+      <h2>SF1 / Learner Masterlist <span class="badge-count">${cls.students.length} learners</span></h2>
       <div class="sub">Grouped Male then Female, matching the standard class record layout.</div>
       <div class="toolbar">
         <button id="importSf1" class="primary">Import SF1 (.xls/.xlsx)</button>
@@ -1316,7 +1405,8 @@ function refreshSf2CalculatedView(cls,monthKey){
 
 function renderSf2(main,cls){
   if(!(cls && cls.meta && cls.meta.sf2Enabled===true)){
-    main.innerHTML=`<div class="card"><h2>SF2 Daily Attendance is not enabled for this class</h2><p class="sub">Go to Setup → SF2 / Advisory Class and enable it for the advisory section whose attendance you maintain.</p></div>`;
+    main.innerHTML=`<div class="card"><h2>SF2 Daily Attendance is not enabled for this class</h2><p class="sub">Enable SF2 for this advisory class to begin maintaining official daily attendance. Once enabled, its monthly attendance feeds SF9 automatically.</p><div class="toolbar"><button id="enableSf2Now" class="primary">Enable SF2 for This Class</button></div></div>`;
+    document.getElementById("enableSf2Now").addEventListener("click",()=>{cls.meta.sf2Enabled=true;ensureSf2Class(cls);saveState();render();});
     return;
   }
   const sf2=ensureSf2Class(cls), opts=sf2MonthOptions(cls), key=sf2.activeMonth, month=ensureSf2Month(cls,key), info=sf2MonthInfo(key);
@@ -2452,7 +2542,7 @@ function renderTerm(main, cls, termKey, termLabel){
         <div class="sub">You can build the class manually from Roster, or import an already-filled compatible Excel Class Record.</div>
         <div class="toolbar"><button id="termImportOfficial" class="primary">Import ECR (.xlsx)</button></div>
       </div>
-      <div class="empty-state"><h2>No learners yet</h2><p>Import a compatible filled ECR to bring in learner names, HPS and raw scores automatically, or add learners from the Roster tab.</p></div>`;
+      <div class="empty-state"><h2>No learners yet</h2><p>Import a compatible filled ECR to bring in learner names, HPS and raw scores automatically, or add learners from Adviser Controls → SF1.</p></div>`;
     document.getElementById("termImportOfficial").addEventListener("click",()=>importOfficialEcrIntoClass(cls,termKey));
     return;
   }
@@ -2588,7 +2678,7 @@ function renderTerm(main, cls, termKey, termLabel){
    ========================================================================= */
 function renderFinal(main, cls){
   if(!cls.students.length){
-    main.innerHTML = `<div class="empty-state"><h2>No learners yet</h2><p>Add learners in the Roster tab first.</p></div>`;
+    main.innerHTML = `<div class="empty-state"><h2>No learners yet</h2><p>Add learners in Adviser Controls → SF1 first.</p></div>`;
     return;
   }
   const males = cls.students.filter(s=>s.sex==="M");
@@ -2863,13 +2953,13 @@ function renderSummary(main, cls){
   syncClassRecordToSummary(cls);
   const linkStatus=classRecordLinkStatus(cls);
   if(!cls.students.length){
-    main.innerHTML = `<div class="empty-state"><h2>No learners yet</h2><p>Add learners in the Roster tab first.</p></div>`;
+    main.innerHTML = `<div class="empty-state"><h2>No learners yet</h2><p>Add learners in Adviser Controls → SF1 first.</p></div>`;
     return;
   }
   cls.students.forEach(s=>ensureStudentExtras(cls, s.id));
   main.innerHTML = `
     <div class="card">
-      <h2>Summary of Term Grade</h2>
+      <h2>Summary of Grades</h2>
       <div class="sub">This is the <strong>single source of truth for all SF9 learning-area grades</strong>. The active Class Record subject, <strong>${esc(classRecordSubjectLabel(cls))}</strong>, is synchronized automatically from the Term tabs. Other subjects are entered here or imported from a Summary workbook.</div>
       ${linkStatus.ok?`<div class="import-summary"><strong>Active Class Record link:</strong> ${esc(classRecordSubjectLabel(cls))} → ${esc(linkStatus.key)}. This column is read-only because its values come from the current Class Record / Grading Sheet.</div>`:`<div class="import-summary" style="border-color:var(--red-pen);"><strong>Active Class Record is not linked:</strong> ${esc(linkStatus.message)} The grading sheet will not write into an elective Summary column until this is resolved in SF9 Setup.</div>`}
       <div class="toolbar">
@@ -2909,7 +2999,7 @@ function renderSummary(main, cls){
 function renderReport(main, cls){
   syncClassRecordToSummary(cls);
   if(!cls.students.length){
-    main.innerHTML = `<div class="empty-state"><h2>No learners yet</h2><p>Add learners in the Roster tab first.</p></div>`;
+    main.innerHTML = `<div class="card"><div class="hub-title-row"><div><h2>School Form 9</h2><div class="sub">No learners are available for report-card preview yet. Add learners in Adviser Controls → SF1 first.</div></div><div><button class="ghost-alt no-print" data-go-tab="sf9setup">Modify SF9 Setup</button></div></div></div>`;
     return;
   }
   cls.students.forEach(s=>ensureStudentExtras(cls, s.id));
@@ -2923,6 +3013,7 @@ function renderReport(main, cls){
       <div class="sub">SF9 learning-area grades are <strong>read-only here</strong> and come exclusively from Summary of Grades. The current Class Record / Grading Sheet synchronizes its active subject into Summary automatically; other subject grades are entered or imported in Summary.${sf2ReportNote} Teacher comments remain editable here.</div>
       <div class="toolbar">
         <select id="rcStudent"></select>
+        <button class="ghost-alt" data-go-tab="sf9setup">Modify SF9 Setup</button>
         <button id="rcPreview" class="ghost-alt" style="background:var(--paper-deep);">SF9 Preview</button>
         <button id="rcPrint" class="primary">Print SF9 — This Learner</button>
         <button id="rcPrintAll" class="ghost-alt" style="background:var(--paper-deep);">Print SF9 — All Learners</button>
@@ -3350,6 +3441,18 @@ document.getElementById("tabs").addEventListener("click", e=>{
   const btn = e.target.closest("button.tab");
   if(!btn) return;
   activeTab = btn.dataset.tab;
+  render();
+});
+document.getElementById("main").addEventListener("click",e=>{
+  const clickTarget=e.target.closest("[data-click-id]");
+  if(clickTarget){
+    const target=document.getElementById(clickTarget.dataset.clickId);
+    if(target) target.click();
+    return;
+  }
+  const go=e.target.closest("[data-go-tab]");
+  if(!go||go.disabled)return;
+  activeTab=go.dataset.goTab;
   render();
 });
 document.getElementById("classSelect").addEventListener("change", e=>{
