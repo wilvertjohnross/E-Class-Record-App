@@ -1,0 +1,51 @@
+{
+  "name": "e-class-record-app-gs-sf9",
+  "version": "1.0.0",
+  "description": "Offline E-Class Record App with Grading Sheets and SF9",
+  "main": "main.js",
+  "author": "",
+  "license": "UNLICENSED",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win nsis",
+    "dist:portable": "electron-builder --win portable"
+  },
+  "devDependencies": {
+    "electron": "44.2.0",
+    "electron-builder": "26.15.3"
+  },
+  "build": {
+    "appId": "ph.edu.eclassrecord.gs.sf9",
+    "productName": "E-Class Record App with GS and SF9",
+    "artifactName": "E-Class Record App with GS and SF9 Setup ${version}.${ext}",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "app/**/*",
+      "assets/**/*"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "assets/app.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "E-Class Record App with GS and SF9",
+      "deleteAppDataOnUninstall": false
+    }
+  }
+}
