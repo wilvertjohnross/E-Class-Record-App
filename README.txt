@@ -1,31 +1,55 @@
 E-Class Record App with GS and SF9
-Version 1.0.3
+Version 1.0.5
 
+
+OFFICIAL CLASS RECORD TEMPLATE EXPORT IN v1.0.5
+The Class Record view now uses the supplied official Excel template for filing
+and printing instead of relying on the app's HTML Class Record printout.
+
+In Class Record view:
+- Download Official ECR (.xlsx) fills a fresh copy of the bundled official
+  template and lets you choose where to save it.
+- Open Official ECR for Printing creates the filled workbook and opens it in
+  your computer's default spreadsheet application (normally Microsoft Excel),
+  where you can use the template's own print layout.
+- Grading Sheet printing remains the app's existing native print workflow.
+
+The master template is bundled at:
+  templates\ECR official Template.xlsx
+It is never overwritten. Every export is a fresh copy.
+
+The official template has fixed capacity/columns: 50 male learners, 50 female
+learners, 5 WW components, 3 PT components, and 3 Examination components. The
+app checks these requirements before export.
+
+The original template contains links to a separate INPUT DATA / HELPER workbook.
+v1.0.5 deliberately replaces those linked formulas with the values already
+computed by the app, then removes the external-link metadata from the exported
+copy. This makes each exported ECR standalone and avoids broken-link warnings.
+The original template formatting, merged cells, logos, page setup, margins and
+print area are preserved.
+
+VERSION 1.0.4 — IMPORT SCORES FROM CSV
+Open Term 1, Term 2, or Term 3 and click "Import Scores CSV". CSV values should
+be RAW SCORES. The mapping screen can match different CSV column headings to the
+app's WW/PT/EXAM components.
 
 SCHOOL LOGO IN v1.0.3
-Setup now includes Upload / Change School Logo. The selected school logo is a
-global app setting and is automatically shown on the Class Record, Grading
-Sheet, and SF9 for every class. PNG, JPG/JPEG, and WebP are supported. PNG is
-recommended for transparent-background school logos. Use Reset to Default to
-restore the logo bundled with the app. The DepEd seal and wordmark stay fixed.
+Setup includes Upload / Change School Logo for the app's Class Record, Grading
+Sheet and SF9 views. The official v1.0.5 ECR export preserves the logos that are
+already part of the supplied official Excel template.
 
 NEW CLASS FIX IN v1.0.2
-The + New Class button now uses an in-app dialog instead of window.prompt().
-This fixes the issue where clicking + New Class appeared to do nothing in the
-standalone Electron app. Roster > Paste names was updated to use the same
-desktop-safe dialog because it relied on the same unsupported prompt mechanism.
++ New Class and Roster > Paste names use in-app dialogs instead of unsupported
+browser prompt() dialogs.
 
 PRINTING FIX IN v1.0.1
-The in-app Print buttons now use Electron's native Windows printing API instead
-of Chromium's unsupported browser print-preview screen. This applies to:
-- Class Record / Grading Sheet: Print this view
-- SF9: Print this learner
-- SF9: Print all learners
+The in-app print functions use Electron's native Windows printing API.
 
 WINDOWS BUILD
 1. Install Node.js LTS on a Windows computer.
 2. Double-click BUILD_WINDOWS.bat.
-3. The script installs the required build dependencies.
+3. The script installs the required dependencies.
 4. It builds the Windows installer.
 5. The completed installer is placed in and opens the dist folder.
 
@@ -38,23 +62,13 @@ RUN FOR TESTING
   npm start
 
 DESKTOP DATA
-The installed application automatically stores its working data under:
+The installed application stores its working data under:
 Documents\E-Class Record App with GS and SF9\eclass-record-data.json
 
 Automatic daily backups are stored under:
 Documents\E-Class Record App with GS and SF9\Backups\
 
+Generated official ECR files opened for printing are stored under:
+Documents\E-Class Record App with GS and SF9\Official ECR Exports\
+
 Upgrading or uninstalling the program does not delete the gradebook data folder.
-
-
-VERSION 1.0.4 — IMPORT SCORES FROM CSV
----------------------------------------
-Open Term 1, Term 2, or Term 3 and click "Import Scores CSV".
-
-Recommended CSV layout:
-Name,LRN,WW1,WW2,WW3,WW4,WW5,PT1,PT2,PT3,ST1,ST2,TE
-"Dela Cruz, Juan",123456789012,45,27,29,50,28,48,46,50,22,23,44
-
-The column names do not have to be exactly the same. The import screen attempts to map common headers automatically and lets you correct each mapping before import.
-
-Important: the CSV values should be RAW SCORES, not percentage scores or transmuted grades. Make sure the component names and Highest Possible Scores (HPS) configured in Setup match the source Excel class record. Existing scores are preserved unless you explicitly enable overwrite.

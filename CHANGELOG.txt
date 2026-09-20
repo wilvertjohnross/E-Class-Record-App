@@ -1,3 +1,18 @@
+E-Class Record App with GS and SF9 — v1.0.5
+
+NEW
+- Bundled the supplied official Class Record Excel template under templates/.
+- Added Download Official ECR (.xlsx) in Class Record view.
+- Class Record printing now generates the official XLSX and opens it in the default spreadsheet app for printing.
+- Term 1, Term 2 and Term 3 exports reuse the official layout and update the term label/sheet name automatically.
+- Automatically fills Region, Division, School ID, School Name, School Year, Grade Level, Section, Teacher and Subject.
+- Automatically fills HPS, raw scores, totals, PS, WS, component examination percentages, Initial Grade, Term Grade and Descriptor.
+- Learners are placed in the template's MALE/FEMALE sections (up to 50 each).
+- Export validation requires the official template's fixed 5 WW / 3 PT / 3 EX structure.
+- The exported copy is static and standalone: original external INPUT DATA / HELPER links and calc-chain metadata are removed.
+- Master template formatting, merged cells, drawings/logos, page setup, margins and print area are preserved.
+- The master template is never overwritten.
+
 E-Class Record App with GS and SF9 — v1.0.4
 
 NEW

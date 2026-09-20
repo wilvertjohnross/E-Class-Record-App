@@ -1655,6 +1655,78 @@ function showImportResult(stats, termKey){
   return showInfoDialog(`CSV Import Complete — ${TERM_LABELS[termKey]}`,parts.join(" • "));
 }
 
+
+/* ===== v1.0.5: Official Class Record template export =====================
+   The bundled XLSX is the actual required Class Record form. The renderer
+   sends already-computed values to Electron; the main process fills a copy of
+   that workbook without changing its formatting or print layout. */
+function officialEcrPayload(cls, termKey){
+  const cats=cls.categories || {};
+  const ww=cats.WW, pt=cats.PT, ex=cats.EXAM;
+  if(!ww || !pt || !ex) throw new Error("The Class Record grading components are incomplete.");
+  if(ww.components.length!==5 || pt.components.length!==3 || ex.components.length!==3){
+    throw new Error("The official ECR template has fixed columns for 5 Written/Oral Works, 3 Performance Tasks, and 3 Examination components. Adjust the Class Record setup to 5 WW, 3 PT and 3 EX components before exporting.");
+  }
+  const males=cls.students.filter(s=>s.sex==="M"), females=cls.students.filter(s=>s.sex==="F");
+  if(males.length>50 || females.length>50){
+    throw new Error("The official ECR template provides 50 rows for male learners and 50 rows for female learners.");
+  }
+
+  const rawArray=(scoreMap,cat)=>cat.components.map(c=>{
+    const v=scoreMap && scoreMap[c.id];
+    return (v===undefined || v===null || v==="") ? "" : Number(v);
+  });
+  const anyRaw=(arr)=>arr.some(v=>v!=="");
+  const round2=(v)=>Math.round(Number(v)*100)/100;
+
+  const students=cls.students.map(st=>{
+    const sm=(cls.scores[termKey] && cls.scores[termKey][st.id]) || {WW:{},PT:{},EXAM:{}};
+    const result=studentTermResult(cls,termKey,st.id);
+    const wwRaw=rawArray(sm.WW||{},ww), ptRaw=rawArray(sm.PT||{},pt), exRaw=rawArray(sm.EXAM||{},ex);
+    const wwAny=anyRaw(wwRaw), ptAny=anyRaw(ptRaw), exAny=anyRaw(exRaw);
+    const componentPs=ex.components.map((c,i)=>{
+      if(exRaw[i]==="") return "";
+      const h=Number(c.hps||0), sw=Number(c.subWeight||0);
+      return h>0 ? round2(Number(exRaw[i])/h*sw) : "";
+    });
+    return {
+      name:st.name||"", sex:st.sex||"M",
+      WW:{scores:wwRaw,total:wwAny?round2(wwRaw.reduce((a,v)=>a+(v===""?0:Number(v)),0)):"",ps:result.parts.WW.ps??"",ws:result.parts.WW.ws??""},
+      PT:{scores:ptRaw,total:ptAny?round2(ptRaw.reduce((a,v)=>a+(v===""?0:Number(v)),0)):"",ps:result.parts.PT.ps??"",ws:result.parts.PT.ws??""},
+      EXAM:{scores:exRaw,componentPs,ps:exAny?(result.parts.EXAM.ps??""):"",ws:exAny?(result.parts.EXAM.ws??""):""},
+      initial:result.initial??"", term:result.term??"", descriptor:result.band||""
+    };
+  });
+
+  return {
+    termKey,
+    meta:{...cls.meta},
+    categories:{
+      WW:{weight:Number(ww.weight||0),components:ww.components.map(c=>({name:c.name,hps:Number(c.hps||0),subWeight:Number(c.subWeight||0)}))},
+      PT:{weight:Number(pt.weight||0),components:pt.components.map(c=>({name:c.name,hps:Number(c.hps||0),subWeight:Number(c.subWeight||0)}))},
+      EXAM:{weight:Number(ex.weight||0),components:ex.components.map(c=>({name:c.name,hps:Number(c.hps||0),subWeight:Number(c.subWeight||0)}))}
+    },
+    students
+  };
+}
+
+async function exportOfficialEcr(cls,termKey,mode="save"){
+  if(!window.eclassAPI || typeof window.eclassAPI.exportOfficialEcr!=="function"){
+    alert("Official ECR export is available in the installed desktop app."); return;
+  }
+  try{
+    const payload=officialEcrPayload(cls,termKey);
+    const result=await window.eclassAPI.exportOfficialEcr(payload,mode);
+    if(!result || (!result.ok && !result.cancelled)){
+      alert("Could not create the Official ECR: "+(result&&result.error?result.error:"Unknown error"));
+      return;
+    }
+    if(result && result.ok && mode==="save"){
+      await showInfoDialog("Official ECR Saved",`The required Class Record template was filled and saved successfully.\n\n${result.path||""}`);
+    }
+  }catch(err){ alert("Could not create the Official ECR: "+(err&&err.message?err.message:String(err))); }
+}
+
 function renderTerm(main, cls, termKey, termLabel){
   if(!cls.students.length){
     main.innerHTML = `<div class="empty-state"><h2>No learners yet</h2><p>Add learners in the Roster tab first.</p></div>`;
@@ -1675,6 +1747,7 @@ function renderTerm(main, cls, termKey, termLabel){
         </div>
         <button id="termImportCsv" class="ghost-alt" style="background:var(--paper-deep);">Import Scores CSV</button>
         <input type="file" id="termScoresCsvFile" accept=".csv,text/csv,.txt,text/plain" style="display:none;">
+        <button id="termExportOfficial" class="ghost-alt" style="background:var(--paper-deep);">Download Official ECR (.xlsx)</button>
         <button id="termPrint" class="ghost-alt" style="background:var(--paper-deep);">Print this view</button>
       </div>
     </div>
@@ -1743,11 +1816,18 @@ function renderTerm(main, cls, termKey, termLabel){
   }
   function draw(){ TERM_VIEW_MODE[termKey]==="gs" ? drawGS() : drawRecord(); }
 
+  function updateTermActions(){
+    const isRecord=TERM_VIEW_MODE[termKey]==="record";
+    const exp=document.getElementById("termExportOfficial");
+    const print=document.getElementById("termPrint");
+    if(exp) exp.style.display=isRecord?"":"none";
+    if(print) print.textContent=isRecord?"Open Official ECR for Printing":"Print this view";
+  }
   document.querySelectorAll(".viewbtn").forEach(b=>{
     b.addEventListener("click", ()=>{
       TERM_VIEW_MODE[termKey] = b.dataset.mode;
       document.querySelectorAll(".viewbtn").forEach(x=>x.classList.toggle("active", x===b));
-      draw();
+      draw(); updateTermActions();
     });
   });
   document.getElementById("termImportCsv").addEventListener("click", ()=>document.getElementById("termScoresCsvFile").click());
@@ -1773,8 +1853,12 @@ function renderTerm(main, cls, termKey, termLabel){
     reader.onerror=()=>alert("Could not read that CSV file.");
     reader.readAsText(file);
   });
-  document.getElementById("termPrint").addEventListener("click", ()=>printCurrentView());
-  draw();
+  document.getElementById("termExportOfficial").addEventListener("click", ()=>exportOfficialEcr(cls,termKey,"save"));
+  document.getElementById("termPrint").addEventListener("click", ()=>{
+    if(TERM_VIEW_MODE[termKey]==="record") exportOfficialEcr(cls,termKey,"open");
+    else printCurrentView();
+  });
+  draw(); updateTermActions();
 }
 
 /* =========================================================================

@@ -6,5 +6,6 @@ contextBridge.exposeInMainWorld('eclassAPI', {
   exportBackup: (text) => ipcRenderer.invoke('backup:export', text),
   importBackup: () => ipcRenderer.invoke('backup:import'),
   getDataLocation: () => ipcRenderer.invoke('data:location'),
-  printCurrent: () => ipcRenderer.invoke('print:current')
+  printCurrent: () => ipcRenderer.invoke('print:current'),
+  exportOfficialEcr: (payload, mode) => ipcRenderer.invoke('ecr:export-official', payload, mode)
 });

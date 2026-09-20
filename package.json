@@ -1,6 +1,6 @@
 {
   "name": "e-class-record-app-gs-sf9",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "Offline E-Class Record App with Grading Sheets and SF9",
   "main": "main.js",
   "author": "",
@@ -26,7 +26,8 @@
       "main.js",
       "preload.js",
       "app/**/*",
-      "assets/**/*"
+      "assets/**/*",
+      "templates/**/*"
     ],
     "win": {
       "target": [
@@ -47,5 +48,8 @@
       "shortcutName": "E-Class Record App with GS and SF9",
       "deleteAppDataOnUninstall": false
     }
+  },
+  "dependencies": {
+    "adm-zip": "0.5.16"
   }
 }
