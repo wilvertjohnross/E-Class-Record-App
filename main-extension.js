@@ -229,7 +229,10 @@ function sf2CenterSummaryHeaderValueAreas(xml) {
   // two-row blocks beside the Summary subheader. In the generated copy only,
   // formalize those already-blank areas as merged cells so Excel centers the
   // dynamic values both horizontally and vertically without changing captions.
-  const wanted = ['AB64:AB65', 'AC64:AD65', 'AG64:AG65'];
+  // Give the Month label enough room without an internal separator: the label
+  // spans AB:AC, while the actual month occupies AD. The overall official block
+  // width and its outer borders stay unchanged.
+  const wanted = ['AB64:AC65', 'AD64:AD65', 'AG64:AG65'];
   const existing = new Set();
   const block = xml.match(/<mergeCells\b([^>]*)>([\s\S]*?)<\/mergeCells>/);
   if (!block) throw new Error('The official SF2 merged-cell table was not found.');
@@ -272,15 +275,34 @@ function sf2FixSummaryHeaderStyles(zip, worksheetXml) {
     }
     xfs.push(full);
   }
+  // Dynamic Month and No. of Days values should read as a matched pair.
+  // Add one dedicated 14 pt bold Arial Narrow font to the generated copy only.
+  const fontsSection = styles.match(/<fonts\b([^>]*)>([\s\S]*?)<\/fonts>/);
+  if (!fontsSection) throw new Error('The official SF2 font table is invalid.');
+  const fontCountMatch = fontsSection[1].match(/\bcount="(\d+)"/);
+  const oldFontCount = fontCountMatch ? Number(fontCountMatch[1]) : (fontsSection[2].match(/<font\b/g) || []).length;
+  const valueFontId = oldFontCount;
+  const valueFont = '<font><b/><sz val="14"/><color theme="1"/><name val="Arial Narrow"/><family val="2"/></font>';
+  const fontAttrs = /\bcount="\d+"/.test(fontsSection[1])
+    ? fontsSection[1].replace(/\bcount="\d+"/, `count="${oldFontCount + 1}"`)
+    : `${fontsSection[1]} count="${oldFontCount + 1}"`;
+  styles = styles.replace(fontsSection[0], `<fonts${fontAttrs}>${fontsSection[2]}${valueFont}</fonts>`);
+
   const desired = new Map([
-    [styleFor('AB64'), '<alignment horizontal="center" vertical="center" shrinkToFit="1"/>'],
-    [styleFor('AC64'), '<alignment horizontal="center" vertical="center"/>'],
-    [styleFor('AE64'), '<alignment horizontal="center" vertical="center" wrapText="1"/>'],
-    [styleFor('AG64'), '<alignment horizontal="center" vertical="center"/>']
+    [styleFor('AB64'), { alignment:'<alignment horizontal="center" vertical="center"/>', fontId:null }],
+    [styleFor('AD64'), { alignment:'<alignment horizontal="center" vertical="center"/>', fontId:valueFontId }],
+    [styleFor('AE64'), { alignment:'<alignment horizontal="center" vertical="center" wrapText="1"/>', fontId:null }],
+    [styleFor('AG64'), { alignment:'<alignment horizontal="center" vertical="center"/>', fontId:valueFontId }]
   ]);
-  for (const [idx, alignment] of desired) {
+  for (const [idx, opts] of desired) {
+    const alignment = opts.alignment;
     let xf = xfs[idx];
     if (!xf) throw new Error('The official SF2 summary-header style index is invalid.');
+    if (Number.isInteger(opts.fontId)) {
+      if (/\bfontId="\d+"/.test(xf)) xf = xf.replace(/\bfontId="\d+"/, `fontId="${opts.fontId}"`);
+      else xf = xf.replace(/^<xf\b/, `<xf fontId="${opts.fontId}"`);
+      if (!/\bapplyFont="1"/.test(xf)) xf = xf.replace(/^<xf\b/, '<xf applyFont="1"');
+    }
     if (/<alignment\b[^>]*\/>/.test(xf)) xf = xf.replace(/<alignment\b[^>]*\/>/, alignment);
     else if (/<alignment\b[^>]*>[\s\S]*?<\/alignment>/.test(xf)) xf = xf.replace(/<alignment\b[^>]*>[\s\S]*?<\/alignment>/, alignment);
     else if (/<\/xf>$/.test(xf)) xf = xf.replace(/<\/xf>$/, `${alignment}</xf>`);
@@ -557,7 +579,7 @@ function buildOfficialSf2Buffer(payload, ctx) {
     C8: meta.schoolName || '',
     X8: meta.gradeLevel || '',
     AC8: meta.section || '',
-    AC64: payload.monthName || payload.monthLabel || '',
+    AD64: payload.monthName || payload.monthLabel || '',
     AG64: Number(payload.summary.schoolDays || payload.days.length || 0)
   };
   for (const [ref, value] of Object.entries(headerValues)) xml = setWorksheetCell(xml, ref, value, typeof value === 'number' ? 'number' : 'string');
@@ -1393,7 +1415,7 @@ function sf2TemplateFingerprint(ctx) {
 function sf2PreviewSignature(payload, ctx) {
   const crypto = require('crypto');
   return crypto.createHash('sha256')
-    .update('sf2-preview-v1.1.6\n')
+    .update('sf2-preview-v1.1.7\n')
     .update(sf2TemplateFingerprint(ctx))
     .update('\n')
     .update(stableStringify(payload))
