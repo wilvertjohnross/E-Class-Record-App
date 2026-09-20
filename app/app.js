@@ -871,11 +871,10 @@ function renderSubjectTeacherHome(main,cls){
   }
   main.innerHTML=`
     <div class="card">
-      <div class="hub-title-row"><div><h2>Subject Teacher Controls</h2><div class="sub">Independent grading workspace for non-adviser teaching classes. These rosters do not populate Adviser official forms.</div></div><div class="hub-context"><strong>${esc(cls.meta.className||"Current Class")}</strong><br>${esc(cls.meta.gradeLevel||"")} ${esc(cls.meta.section||"")}</div></div>
+      <div class="hub-title-row"><div><h2>Class Overview</h2><div class="sub">Manage this teaching class, its learner roster, and its independent grading workspace.</div></div><div class="hub-context"><strong>${esc(cls.meta.className||"Current Class")}</strong><br>${esc(cls.meta.gradeLevel||"")} ${esc(cls.meta.section||"")}</div></div>
       <div class="control-hub">
-        <div class="control-card"><div><div class="module-code">CLASS</div><h3>Classes & Roster</h3><p>Create the teaching class and maintain its learner roster manually or through CSV import.</p></div><div class="card-actions"><button class="primary" data-go-tab="setup">Open Classes</button><span class="status-chip">${cls.students.length} learners</span></div></div>
-        <div class="control-card"><div><div class="module-code">CR</div><h3>Class Record</h3><p>Encode raw scores and manage Term 1, Term 2, Term 3, and Final Grades for <strong>${esc(classRecordSubjectLabel(cls))}</strong>.</p></div><div class="card-actions"><button class="primary" data-go-tab="term1">Open Class Record</button></div></div>
-        <div class="control-card"><div><div class="module-code">SUMMARY</div><h3>Summary of Grades</h3><p>View the term and final grades produced by this specific Subject Teacher class record.</p></div><div class="card-actions"><button class="primary" data-go-tab="summary">Open Summary</button></div></div>
+        <div class="control-card"><div><div class="module-code">CLASS</div><h3>Class Setup</h3><p>Set the class name, subject, grade level, section, teacher, school details, and grading configuration.</p></div><div class="card-actions"><button class="primary" data-go-tab="setup">Open Class Setup</button></div></div>
+        <div class="control-card"><div><div class="module-code">ROSTER</div><h3>Learner Roster</h3><p>Add, paste, or import learners for this class. This roster remains independent from Adviser records.</p></div><div class="card-actions"><button class="primary" data-go-tab="setup">Manage Roster</button><span class="status-chip">${cls.students.length} learners</span></div></div>
       </div>
       <div class="class-management no-print"><strong>Class management</strong><button class="small ghost-alt" data-click-id="btnNewClass">+ New Class</button><button class="small ghost-alt" data-click-id="btnDupClass">Duplicate Class</button><button class="small danger" data-click-id="btnDelClass">Delete Class</button></div>
     </div>`;

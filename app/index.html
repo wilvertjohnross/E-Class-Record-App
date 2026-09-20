@@ -788,6 +788,8 @@
   main{grid-column:2;grid-row:1;position:relative;width:100%;max-width:none;margin:0;padding:32px clamp(22px,4vw,58px);}main::before{content:"";position:fixed;right:-110px;top:65px;width:430px;height:430px;border-radius:50%;background:radial-gradient(circle,rgba(10,127,134,.09) 0 2px,transparent 3px 100%);background-size:18px 18px;opacity:.55;pointer-events:none;z-index:-1;}.card,.control-card,.workflow-nav{border-color:var(--border);border-radius:13px;box-shadow:0 8px 24px var(--shadow);}button{border-radius:8px;background:var(--accent-fill);color:var(--on-accent);}header.appbar button.ghost{color:#d9eeee;border-color:rgba(255,255,255,.24);}select,input[type=text],input[type=number]{border-radius:8px;border-color:var(--border);}footer.status{grid-column:2;grid-row:2;margin:0;padding:12px clamp(22px,4vw,58px);background:rgba(255,255,255,.62);border-top:1px solid var(--border);}
   @media (max-width:800px){body{display:block;}header.appbar{position:static;padding:14px;box-shadow:none;}.class-picker{grid-template-columns:repeat(3,minmax(0,1fr));}.class-picker #btnTheme{grid-column:auto;}nav.tabs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));}nav.tabs button.tab{text-align:center;}main{padding:20px 14px;}footer.status{padding:12px 14px;}}@media print{body{display:block;background:#fff;}main{padding:0;}main::before{display:none;}}
   .nav-disclosure{margin:0;}.nav-disclosure summary{display:flex;align-items:center;justify-content:space-between;list-style:none;padding:9px 12px;border-radius:9px;color:#d1e3e4;cursor:pointer;font-size:13px;font-weight:700;}.nav-disclosure summary::-webkit-details-marker{display:none;}.nav-disclosure summary::after{content:"›";font-size:18px;line-height:12px;transition:transform .15s ease;}.nav-disclosure[open] summary{background:rgba(255,255,255,.08);color:#fff;}.nav-disclosure[open] summary::after{transform:rotate(90deg);}.nav-submenu{display:flex;flex-direction:column;gap:2px;margin:3px 0 5px 11px;padding-left:7px;border-left:1px solid rgba(169,222,221,.28);}
+  /* Compact single-column Class Setup. The roster follows as its own working card. */
+  .class-setup-split{grid-template-columns:minmax(0,760px);gap:16px;}.class-setup-card{padding:18px;}.class-setup-card .grid3,.class-setup-card .grid2{grid-template-columns:1fr;gap:0;}.class-setup-card .field{margin-bottom:9px;}.class-setup-card .sub{margin-bottom:12px;}.class-setup-card .import-summary{margin:10px 0;padding:9px 11px;}.class-roster-card{position:static;max-height:none;min-height:0;}
 </style>
 </head>
 <body>
@@ -807,7 +809,7 @@
   </div>
 <nav class="tabs role-tabs no-print" id="tabs">
   <div class="nav-group">Teaching</div>
-  <button class="tab" data-tab="subjecthome">Teaching Overview</button>
+  <button class="tab" data-tab="subjecthome">Class Overview</button>
   <button class="tab" data-tab="setup">Classes &amp; Roster</button>
   <details class="nav-disclosure"><summary>Grading</summary><div class="nav-submenu">
     <button class="tab" data-tab="term1">Class Record — Term 1</button>
