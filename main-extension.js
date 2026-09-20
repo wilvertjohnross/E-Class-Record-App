@@ -418,8 +418,8 @@ function buildOfficialEcrBuffer(payload, ctx) {
 
   // The signature structure/line is fixed in the clean official template.
   // Setup supplies only the Subject Teacher name/title values.
-  xml = setWorksheetCell(xml, 'C119', meta.preparedByName || meta.teacher || '', 'string');
-  xml = setWorksheetCell(xml, 'C120', meta.preparedByTitle || 'Subject Teacher', 'string');
+  xml = setWorksheetCell(xml, 'C119', meta.teacher || '', 'string');
+  xml = setWorksheetCell(xml, 'C120', 'Subject Teacher', 'string');
 
   // Compact the official preview/print copy by hiding only unused learner rows.
   // Hidden rows retain their original cells/formulas/formatting, so the official
@@ -891,8 +891,8 @@ function makeEcrExcelRenderPlan(payload) {
     F7: meta.schoolName || '', Z7: meta.schoolYear || '',
     B10: termWords, J10: meta.gradeLevel || '', Q10: meta.teacher || '',
     AA10: meta.subject || '', J11: meta.section || '',
-    B119: 'Prepared by:', C119: meta.preparedByName || meta.teacher || '',
-    C120: meta.preparedByTitle || 'Subject Teacher'
+    B119: 'Prepared by:', C119: meta.teacher || '',
+    C120: 'Subject Teacher'
   };
   const hps = {
     'F15:M15': [

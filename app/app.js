@@ -440,7 +440,7 @@ function renderSetup(main, cls){
 
     <div class="card">
       <h2>Official Form Signatories</h2>
-      <div class="sub">These entries are linked to the official ECR and Grading Sheet templates. The templates themselves stay fixed; only the signatory names/titles are filled. If Prepared by — Name is blank, the Subject Teacher above is used automatically.</div>
+      <div class="sub">The official ECR always uses the Subject Teacher entered above as its signatory, with the fixed title “Subject Teacher.” The signatory entries below remain available for the Grading Sheet and other official forms. The templates themselves stay fixed; the app only fills the required names and titles.</div>
       <div class="grid2">
         <div class="field"><label>Prepared by — Name</label><input type="text" id="f_preparedByName" value="${esc(m.preparedByName||"")}" placeholder="Defaults to Subject Teacher"></div>
         <div class="field"><label>Prepared by — Title</label><input type="text" id="f_preparedByTitle" value="${esc(m.preparedByTitle||"Subject Teacher")}" placeholder="e.g. Subject Teacher"></div>
