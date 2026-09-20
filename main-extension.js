@@ -1,6 +1,6 @@
 'use strict';
 
-// v1.0.14 runtime extension
+// v1.0.15 runtime extension
 // Official ECR preview pipeline:
 // official template -> direct XLSX fill -> persistent hidden Excel renderer -> cached PDF -> in-app popup.
 // Excel is pre-warmed once in the background and reused. Preview PDFs are content-addressed,
@@ -97,6 +97,234 @@ function compactUnusedLearnerRows(xml, payload) {
   // Never hide the official Female section divider/header row.
   xml = setWorksheetRowHidden(xml, 68, false);
   return xml;
+}
+
+
+function ensureMergedRange(xml, ref) {
+  if (new RegExp(`<mergeCell\\s+ref="${regexEscape(ref)}"\\s*/>`).test(xml)) return xml;
+  const re = /<mergeCells count="(\d+)">([\s\S]*?)<\/mergeCells>/;
+  const hit = xml.match(re);
+  if (hit) {
+    const count = Number(hit[1] || 0);
+    return xml.replace(hit[0], `<mergeCells count="${count + 1}">${hit[2]}<mergeCell ref="${ref}"/></mergeCells>`);
+  }
+  return xml.replace(/<pageMargins\b/, `<mergeCells count="1"><mergeCell ref="${ref}"/></mergeCells><pageMargins`);
+}
+
+function addEcrSignatureStyles(zip) {
+  const entry = zip.getEntry('xl/styles.xml');
+  if (!entry) throw new Error('The official ECR style table was not found.');
+  let styles = entry.getData().toString('utf8');
+  const borders = styles.match(/<borders count="(\d+)">([\s\S]*?)<\/borders>/);
+  const xfs = styles.match(/<cellXfs count="(\d+)">([\s\S]*?)<\/cellXfs>/);
+  if (!borders || !xfs) throw new Error('The official ECR styles could not be extended for the Subject Teacher signatory.');
+  const borderId = Number(borders[1]);
+  const borderXml = '<border><left/><right/><top/><bottom style="thin"><color rgb="FF000000"/></bottom><diagonal/></border>';
+  styles = styles.replace(borders[0], `<borders count="${borderId + 1}">${borders[2]}${borderXml}</borders>`);
+
+  const firstStyle = Number(xfs[1]);
+  const nameStyle = firstStyle;
+  const titleStyle = firstStyle + 1;
+  const nameXf = `<xf numFmtId="0" fontId="3" fillId="0" borderId="${borderId}" xfId="0" applyFont="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>`;
+  const titleXf = '<xf numFmtId="0" fontId="3" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>';
+  styles = styles.replace(xfs[0], `<cellXfs count="${firstStyle + 2}">${xfs[2]}${nameXf}${titleXf}</cellXfs>`);
+  zip.updateFile('xl/styles.xml', Buffer.from(styles, 'utf8'));
+  return { nameStyle, titleStyle };
+}
+
+function setWorksheetCellStyle(xml, ref, styleId) {
+  const r = regexEscape(ref);
+  const re = new RegExp(`<c\\b([^>]*\\br="${r}"[^>]*)`);
+  const hit = xml.match(re);
+  if (!hit) throw new Error(`Template cell ${ref} was not found while formatting a signatory.`);
+  let attrs = hit[1].replace(/\s+s="[^"]*"/g, '');
+  attrs += ` s="${styleId}"`;
+  return xml.replace(hit[0], `<c${attrs}`);
+}
+
+function addEcrSubjectTeacherSignatory(buffer, payload, ctx) {
+  const AdmZip = resolveAdmZip();
+  const zip = new AdmZip(buffer);
+  const sheetEntry = zip.getEntry('xl/worksheets/sheet1.xml');
+  if (!sheetEntry) throw new Error('The official ECR worksheet was not found while adding the Subject Teacher signatory.');
+  let xml = sheetEntry.getData().toString('utf8');
+  const styles = addEcrSignatureStyles(zip);
+  const meta = payload.meta || {};
+  const preparedName = meta.preparedByName || meta.teacher || '';
+  const preparedTitle = meta.preparedByTitle || 'Subject Teacher';
+
+  xml = ensureMergedRange(xml, 'C119:H119');
+  xml = ensureMergedRange(xml, 'C120:H120');
+  xml = setWorksheetCell(xml, 'B119', 'Prepared by:', 'string');
+  xml = setWorksheetCell(xml, 'C119', preparedName, 'string');
+  xml = setWorksheetCellStyle(xml, 'C119', styles.nameStyle);
+  xml = setWorksheetCell(xml, 'C120', preparedTitle, 'string');
+  xml = setWorksheetCellStyle(xml, 'C120', styles.titleStyle);
+  zip.updateFile('xl/worksheets/sheet1.xml', Buffer.from(xml, 'utf8'));
+  return zip.toBuffer();
+}
+
+function stripWorkbookExternalLinks(zip) {
+  const wbEntry = zip.getEntry('xl/workbook.xml');
+  if (wbEntry) {
+    let wbXml = wbEntry.getData().toString('utf8');
+    wbXml = wbXml.replace(/<externalReferences>[\s\S]*?<\/externalReferences>/g, '');
+    zip.updateFile('xl/workbook.xml', Buffer.from(wbXml, 'utf8'));
+  }
+  const relEntry = zip.getEntry('xl/_rels/workbook.xml.rels');
+  if (relEntry) {
+    let relXml = relEntry.getData().toString('utf8');
+    relXml = relXml.replace(/<Relationship\b[^>]*Type="[^"]*\/externalLink"[^>]*\/>/g, '');
+    relXml = relXml.replace(/<Relationship\b[^>]*Type="[^"]*\/calcChain"[^>]*\/>/g, '');
+    zip.updateFile('xl/_rels/workbook.xml.rels', Buffer.from(relXml, 'utf8'));
+  }
+  const ctEntry = zip.getEntry('[Content_Types].xml');
+  if (ctEntry) {
+    let ctXml = ctEntry.getData().toString('utf8');
+    ctXml = ctXml.replace(/<Override\b[^>]*PartName="\/xl\/externalLinks\/[^"]+"[^>]*\/>/g, '');
+    ctXml = ctXml.replace(/<Override\b[^>]*PartName="\/xl\/calcChain.xml"[^>]*\/>/g, '');
+    zip.updateFile('[Content_Types].xml', Buffer.from(ctXml, 'utf8'));
+  }
+  for (const entry of zip.getEntries()) {
+    if (entry.entryName.startsWith('xl/externalLinks/')) zip.deleteFile(entry.entryName);
+  }
+  zip.deleteFile('xl/calcChain.xml');
+}
+
+function replacePngMediaFromDataUri(zip, entryName, dataUri) {
+  const m = String(dataUri || '').match(/^data:image\/png;base64,(.+)$/i);
+  if (!m) return;
+  try {
+    const buf = Buffer.from(m[1], 'base64');
+    if (buf.length > 100) zip.updateFile(entryName, buf);
+  } catch {}
+}
+
+function divisionHeading(value) {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  return /^division\s+of\s+/i.test(text) ? text.toUpperCase() : `DIVISION OF ${text.toUpperCase()}`;
+}
+
+function compactUnusedGsLearnerRows(xml, payload) {
+  // Official GS: Male = 16-65, Female header = 66, Female = 67-116.
+  const maleCount = payload.students.filter(s => s.sex === 'M').length;
+  const femaleCount = payload.students.filter(s => s.sex === 'F').length;
+  for (let row = 16; row <= 65; row++) xml = setWorksheetRowHidden(xml, row, !(row < 16 + maleCount));
+  for (let row = 67; row <= 116; row++) xml = setWorksheetRowHidden(xml, row, !(row < 67 + femaleCount));
+  xml = setWorksheetRowHidden(xml, 66, false);
+  return xml;
+}
+
+function buildOfficialGsBuffer(payload, ctx) {
+  validatePayload(payload);
+  const { fs, resolveResource } = ctx;
+  const AdmZip = resolveAdmZip();
+  const officialTemplate = resolveResource('templates/GS official Template.xlsx');
+  if (!fs.existsSync(officialTemplate)) throw new Error('The bundled Official Grading Sheet template is missing.');
+
+  const zip = new AdmZip(fs.readFileSync(officialTemplate));
+  const entry = zip.getEntry('xl/worksheets/sheet1.xml');
+  if (!entry) throw new Error('The official Grading Sheet worksheet was not found in the template.');
+  let xml = entry.getData().toString('utf8');
+  const meta = payload.meta || {};
+  const ww = payload.categories.WW || {};
+  const pt = payload.categories.PT || {};
+  const ex = payload.categories.EXAM || {};
+  const termNo = termNumber(payload.termKey);
+  const termWords = ['FIRST TERM', 'SECOND TERM', 'THIRD TERM'][termNo - 1];
+
+  // Only official data-bearing cells are changed. Static headings/labels,
+  // merged ranges, sizing, formatting, logos/positions, and page setup remain.
+  const headerValues = {
+    A2: meta.region || '',
+    A3: divisionHeading(meta.division),
+    A4: meta.schoolName || '',
+    A5: meta.schoolId ? `SCHOOL ID: ${meta.schoolId}` : 'SCHOOL ID:',
+    A6: meta.schoolYear ? `School Year ${meta.schoolYear}` : 'School Year',
+    E8: meta.section || '',
+    S8: meta.adviser || '',
+    AC8: meta.subject || '',
+    B10: termWords
+  };
+  for (const [ref, value] of Object.entries(headerValues)) xml = setWorksheetCell(xml, ref, value, 'string');
+
+  const hpsMap = {};
+  ['F','G','H','I','J'].forEach((c,i)=>hpsMap[`${c}13`] = Number(ww.components[i].hps || 0));
+  hpsMap.K13 = ww.components.reduce((a,c)=>a+Number(c.hps||0),0);
+  hpsMap.L13 = 100; hpsMap.M13 = Number(ww.weight || 0);
+  ['N','O','P'].forEach((c,i)=>hpsMap[`${c}13`] = Number(pt.components[i].hps || 0));
+  hpsMap.Q13 = pt.components.reduce((a,c)=>a+Number(c.hps||0),0);
+  hpsMap.R13 = 100; hpsMap.S13 = Number(pt.weight || 0);
+  ['T','U','V'].forEach((c,i)=>hpsMap[`${c}13`] = Number(ex.components[i].hps || 0));
+  ['W','X','Y'].forEach((c,i)=>hpsMap[`${c}13`] = Number(ex.components[i].subWeight || 0));
+  hpsMap.Z13 = 100; hpsMap.AA13 = Number(ex.weight || 0);
+  for (const [ref, value] of Object.entries(hpsMap)) xml = setWorksheetCell(xml, ref, value, 'number');
+
+  const valueCols = ['C','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z','AA','AB','AC','AD'];
+  const rows = [...Array.from({length:50},(_,i)=>16+i), ...Array.from({length:50},(_,i)=>67+i)];
+  for (const row of rows) for (const col of valueCols) xml = setWorksheetCell(xml, `${col}${row}`, '', 'string');
+
+  function writeStudent(row, s) {
+    xml = setWorksheetCell(xml, `C${row}`, s.name || '', 'string');
+    const wwScores = (s.WW && s.WW.scores) || [];
+    const ptScores = (s.PT && s.PT.scores) || [];
+    const exScores = (s.EXAM && s.EXAM.scores) || [];
+    ['F','G','H','I','J'].forEach((c,i)=>{ xml = setWorksheetCell(xml, `${c}${row}`, wwScores[i], 'number'); });
+    xml = setWorksheetCell(xml, `K${row}`, s.WW ? s.WW.total : '', 'number');
+    xml = setWorksheetCell(xml, `L${row}`, s.WW ? s.WW.ps : '', 'number');
+    xml = setWorksheetCell(xml, `M${row}`, s.WW ? s.WW.ws : '', 'number');
+    ['N','O','P'].forEach((c,i)=>{ xml = setWorksheetCell(xml, `${c}${row}`, ptScores[i], 'number'); });
+    xml = setWorksheetCell(xml, `Q${row}`, s.PT ? s.PT.total : '', 'number');
+    xml = setWorksheetCell(xml, `R${row}`, s.PT ? s.PT.ps : '', 'number');
+    xml = setWorksheetCell(xml, `S${row}`, s.PT ? s.PT.ws : '', 'number');
+    ['T','U','V'].forEach((c,i)=>{ xml = setWorksheetCell(xml, `${c}${row}`, exScores[i], 'number'); });
+    ['W','X','Y'].forEach((c,i)=>{ xml = setWorksheetCell(xml, `${c}${row}`, s.EXAM && s.EXAM.componentPs ? s.EXAM.componentPs[i] : '', 'number'); });
+    xml = setWorksheetCell(xml, `Z${row}`, s.EXAM ? s.EXAM.ps : '', 'number');
+    xml = setWorksheetCell(xml, `AA${row}`, s.EXAM ? s.EXAM.ws : '', 'number');
+    xml = setWorksheetCell(xml, `AB${row}`, s.initial, 'number');
+    xml = setWorksheetCell(xml, `AC${row}`, s.term, 'number');
+    xml = setWorksheetCell(xml, `AD${row}`, s.descriptor || '', 'string');
+  }
+
+  payload.students.filter(s=>s.sex==='M').forEach((s,i)=>writeStudent(16+i,s));
+  payload.students.filter(s=>s.sex==='F').forEach((s,i)=>writeStudent(67+i,s));
+
+  const preparedName = meta.preparedByName || meta.teacher || '';
+  const preparedTitle = meta.preparedByTitle || 'Subject Teacher';
+  xml = setWorksheetCell(xml, 'C120', preparedName, 'string');
+  xml = setWorksheetCell(xml, 'C121', preparedTitle, 'string');
+  xml = setWorksheetCell(xml, 'M120', meta.checkedByName || '', 'string');
+  xml = setWorksheetCell(xml, 'M121', meta.checkedByTitle || '', 'string');
+  xml = setWorksheetCell(xml, 'Z120', meta.approvedByName || '', 'string');
+  xml = setWorksheetCell(xml, 'Z121', meta.approvedByTitle || '', 'string');
+
+  xml = compactUnusedGsLearnerRows(xml, payload);
+  zip.updateFile('xl/worksheets/sheet1.xml', Buffer.from(xml, 'utf8'));
+
+  // The uploaded GS template uses its first image as the school logo and its
+  // second image as the fixed DepEd seal. Replace only the school logo image.
+  replacePngMediaFromDataUri(zip, 'xl/media/image1.png', payload.schoolLogoDataUri);
+
+  const wbEntry = zip.getEntry('xl/workbook.xml');
+  if (wbEntry) {
+    let wbXml = wbEntry.getData().toString('utf8');
+    wbXml = wbXml.replace(/GS TERM 1/g, `GS TERM ${termNo}`);
+    zip.updateFile('xl/workbook.xml', Buffer.from(wbXml, 'utf8'));
+  }
+  const appPropsEntry = zip.getEntry('docProps/app.xml');
+  if (appPropsEntry) {
+    let appXml = appPropsEntry.getData().toString('utf8');
+    appXml = appXml.replace(/GS TERM 1/g, `GS TERM ${termNo}`);
+    zip.updateFile('docProps/app.xml', Buffer.from(appXml, 'utf8'));
+  }
+  stripWorkbookExternalLinks(zip);
+  return zip.toBuffer();
+}
+
+function buildOfficialDocumentBuffer(kind, payload, ctx) {
+  if (kind === 'gs') return buildOfficialGsBuffer(payload, ctx);
+  return addEcrSubjectTeacherSignatory(buildOfficialEcrBuffer(payload, ctx), payload, ctx);
 }
 
 function validatePayload(payload) {
@@ -501,7 +729,7 @@ class PersistentExcelRenderer {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
-        reject(new Error('Microsoft Excel took too long to render the official ECR preview.'));
+        reject(new Error('Microsoft Excel took too long to render the official form preview.'));
       }, timeoutMs);
       this.pending.set(id, { resolve, reject, timer });
       try {
@@ -567,10 +795,34 @@ function templateFingerprint(ctx) {
   return hash;
 }
 
+
+let gsTemplateFingerprintCache = null;
+function gsTemplateFingerprint(ctx) {
+  const { fs, resolveResource } = ctx;
+  const templatePath = resolveResource('templates/GS official Template.xlsx');
+  const stat = fs.statSync(templatePath);
+  const key = `${templatePath}|${stat.size}|${stat.mtimeMs}`;
+  if (gsTemplateFingerprintCache && gsTemplateFingerprintCache.key === key) return gsTemplateFingerprintCache.hash;
+  const crypto = require('crypto');
+  const hash = crypto.createHash('sha256').update(fs.readFileSync(templatePath)).digest('hex');
+  gsTemplateFingerprintCache = { key, hash };
+  return hash;
+}
+
+function gsPreviewSignature(payload, ctx) {
+  const crypto = require('crypto');
+  return crypto.createHash('sha256')
+    .update('gs-preview-v1.0.15-official-template-setup-signatories-compact\n')
+    .update(gsTemplateFingerprint(ctx))
+    .update('\n')
+    .update(stableStringify(payload))
+    .digest('hex');
+}
+
 function previewSignature(payload, ctx) {
   const crypto = require('crypto');
   return crypto.createHash('sha256')
-    .update('ecr-preview-v1.0.14-compact-learner-rows\n')
+    .update('ecr-preview-v1.0.15-subject-teacher-signatory\n')
     .update(templateFingerprint(ctx))
     .update('\n')
     .update(stableStringify(payload))
@@ -692,7 +944,7 @@ async function createOfficialPopupPreview(payload, context) {
     return { ok: true, preview: true, inAppPopup: true, cached: true, signature, xlsxPath, pdfPath };
   }
 
-  const buffer = buildOfficialEcrBuffer(payload, ctx);
+  const buffer = buildOfficialDocumentBuffer('ecr', payload, ctx);
   fs.writeFileSync(xlsxPath, buffer);
 
   let renderError = null;
@@ -746,6 +998,120 @@ async function createOfficialPopupPreview(payload, context) {
   return { ok: true, preview: true, inAppPopup: true, cached: false, signature, xlsxPath, pdfPath };
 }
 
+function openGsPdfPopup(pdfPath, xlsxPath, payload, ctx) {
+  const { BrowserWindow, Menu, shell, getMainWindow } = ctx;
+  if (!BrowserWindow) throw new Error('The in-app preview window service is unavailable.');
+  const { pathToFileURL } = require('url');
+  const parent = typeof getMainWindow === 'function' ? getMainWindow() : null;
+  const termNo = termNumber(payload.termKey);
+  const className = payload.meta && payload.meta.className ? payload.meta.className : 'Grading Sheet';
+
+  const win = new BrowserWindow({
+    width: 1280, height: 900, minWidth: 900, minHeight: 650,
+    parent: parent && !parent.isDestroyed() ? parent : undefined,
+    modal: false,
+    title: `Official Grading Sheet Print Preview — ${className} — Term ${termNo}`,
+    backgroundColor: '#525659', show: false, autoHideMenuBar: false,
+    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, plugins: true }
+  });
+  previewWindows.add(win);
+  const doPrint = () => {
+    if (win.isDestroyed()) return;
+    win.webContents.print({ silent: false, printBackground: true, color: true, margins: { marginType: 'default' } });
+  };
+  if (Menu) {
+    const menu = Menu.buildFromTemplate([
+      { label: 'File', submenu: [
+        { label: 'Print...', accelerator: 'CmdOrCtrl+P', click: doPrint },
+        { label: 'Open Official Grading Sheet in Excel', click: () => shell.openPath(xlsxPath) },
+        { type: 'separator' },
+        { label: 'Close Preview', accelerator: 'Esc', click: () => { if (!win.isDestroyed()) win.close(); } }
+      ]},
+      { label: 'View', submenu: [
+        { role: 'zoomIn' }, { role: 'zoomOut' }, { role: 'resetZoom' },
+        { type: 'separator' }, { role: 'togglefullscreen' }
+      ]}
+    ]);
+    win.setMenu(menu);
+  }
+  win.webContents.on('did-fail-load', (_event, code, desc) => {
+    if (code === -3) return;
+    console.error('Official GS popup preview failed to load:', code, desc);
+  });
+  win.once('ready-to-show', () => win.show());
+  win.on('closed', () => previewWindows.delete(win));
+  win.loadURL(pathToFileURL(pdfPath).href);
+  return win;
+}
+
+async function createOfficialGsPopupPreview(payload, context) {
+  const ctx = { ...(startupContext || {}), ...(context || {}) };
+  validatePayload(payload);
+  if (process.platform !== 'win32') return { ok: false, previewUnavailable: true, error: 'Official Grading Sheet preview requires Windows and desktop Microsoft Excel.' };
+  const { fs, path, dataPaths } = ctx;
+  const root = dataPaths().root;
+  const previewDir = path.join(root, 'Official GS Preview Cache');
+  fs.mkdirSync(previewDir, { recursive: true });
+
+  const termNo = termNumber(payload.termKey);
+  const classPart = cleanFileName(payload.meta.className || `${payload.meta.gradeLevel || ''} ${payload.meta.section || ''}`);
+  const signature = gsPreviewSignature(payload, ctx);
+  const shortSig = signature.slice(0, 20);
+  const base = `${classPart} - Term ${termNo} - GS - ${shortSig}`;
+  const xlsxPath = path.join(previewDir, `${base}.xlsx`);
+  const pdfPath = path.join(previewDir, `${base}.pdf`);
+
+  if (isUsablePreviewFile(fs, xlsxPath) && isUsablePreviewFile(fs, pdfPath)) {
+    openGsPdfPopup(pdfPath, xlsxPath, payload, ctx);
+    return { ok: true, preview: true, inAppPopup: true, cached: true, signature, xlsxPath, pdfPath };
+  }
+
+  fs.writeFileSync(xlsxPath, buildOfficialDocumentBuffer('gs', payload, ctx));
+  let renderError = null;
+  try {
+    if (!excelEngine) excelEngine = new PersistentExcelRenderer(ctx);
+    await excelEngine.render(xlsxPath, pdfPath);
+  } catch (err) {
+    renderError = err;
+    const fallback = await fallbackOneShotRender(xlsxPath, pdfPath, ctx);
+    if (!fallback.ok) return { ok: false, previewUnavailable: true, openedFallback: false, xlsxPath, pdfPath, error: fallback.error || (renderError && renderError.message) || 'Microsoft Excel did not create the official Grading Sheet PDF preview.' };
+  }
+  if (!isUsablePreviewFile(fs, pdfPath)) return { ok: false, previewUnavailable: true, openedFallback: false, xlsxPath, pdfPath, error: 'Microsoft Excel completed without producing a usable official Grading Sheet PDF preview.' };
+  openGsPdfPopup(pdfPath, xlsxPath, payload, ctx);
+
+  try {
+    const cutoff = Date.now() - 14 * 24 * 60 * 60 * 1000;
+    for (const name of fs.readdirSync(previewDir)) {
+      const p = path.join(previewDir, name);
+      if (p === xlsxPath || p === pdfPath) continue;
+      try { const st = fs.statSync(p); if (st.isFile() && st.mtimeMs < cutoff) fs.unlinkSync(p); } catch {}
+    }
+  } catch {}
+  return { ok: true, preview: true, inAppPopup: true, cached: false, signature, xlsxPath, pdfPath };
+}
+
+async function saveOfficialDocument(kind, payload, context) {
+  const ctx = { ...(startupContext || {}), ...(context || {}) };
+  validatePayload(payload);
+  const { app, dialog, fs, path, getMainWindow } = ctx;
+  if (!dialog || typeof dialog.showSaveDialog !== 'function') throw new Error('The Windows Save dialog is unavailable.');
+  const termNo = termNumber(payload.termKey);
+  const classPart = cleanFileName(payload.meta.className || `${payload.meta.gradeLevel || ''} ${payload.meta.section || ''}`);
+  const label = kind === 'gs' ? 'Official GS' : 'Official ECR';
+  const defaultName = `${classPart} - Term ${termNo} - ${label}.xlsx`;
+  const parent = typeof getMainWindow === 'function' ? getMainWindow() : undefined;
+  const result = await dialog.showSaveDialog(parent, {
+    title: kind === 'gs' ? 'Save Official Grading Sheet' : 'Save Official Class Record',
+    defaultPath: path.join(app.getPath('documents'), defaultName),
+    filters: [{ name: 'Excel Workbook', extensions: ['xlsx'] }]
+  });
+  if (result.canceled || !result.filePath) return { ok: false, cancelled: true };
+  const buffer = buildOfficialDocumentBuffer(kind, payload, ctx);
+  fs.writeFileSync(result.filePath, buffer);
+  return { ok: true, path: result.filePath, xlsxPath: result.filePath };
+}
+
+
 module.exports = {
   async register(context) {
     startupContext = context;
@@ -757,8 +1123,8 @@ module.exports = {
       setTimeout(() => {
         if (!excelEngine) return;
         excelEngine.start()
-          .then(() => console.log('Official ECR Excel preview engine is warm.'))
-          .catch(err => console.warn('Official ECR Excel preview pre-warm failed:', err.message));
+          .then(() => console.log('Official form Excel preview engine is warm.'))
+          .catch(err => console.warn('Official form Excel preview pre-warm failed:', err.message));
       }, 700);
     }
 
@@ -773,10 +1139,15 @@ module.exports = {
     if (action === 'ecr:official-pdf-preview' || action === 'ecr:official-popup-preview') {
       return createOfficialPopupPreview(payload, context);
     }
-    if (action === 'ecr:preview-engine-status') {
+    if (action === 'ecr:official-save') return saveOfficialDocument('ecr', payload, context);
+    if (action === 'gs:official-pdf-preview' || action === 'gs:official-popup-preview') {
+      return createOfficialGsPopupPreview(payload, context);
+    }
+    if (action === 'gs:official-save') return saveOfficialDocument('gs', payload, context);
+    if (action === 'ecr:preview-engine-status' || action === 'official:preview-engine-status') {
       return { ok: true, warm: !!(excelEngine && excelEngine.ready) };
     }
-    return { ok: false, unsupported: true, error: `Runtime action is not available in v1.0.14: ${action}` };
+    return { ok: false, unsupported: true, error: `Runtime action is not available in v1.0.15: ${action}` };
   }
 };
 

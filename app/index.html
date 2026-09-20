@@ -552,6 +552,7 @@ function newClass(name){
       schoolName:"Ilocos Sur National High School", schoolAddress:"",
       schoolYear:"2026-2027",
       schoolHead:"", subject:"Science", gradeLevel:"10", section:"", teacher:"", adviser:"",
+      preparedByName:"", preparedByTitle:"Subject Teacher",
       checkedByName:"Eloisa B. Aquino", checkedByTitle:"Head Teacher VI, Science Department",
       approvedByName:"Rolly A. Raceles", approvedByTitle:"Asst. Principal II"
     },
@@ -810,9 +811,11 @@ function renderSetup(main, cls){
     </div>
 
     <div class="card">
-      <h2>Grading Sheet Sign-off</h2>
-      <div class="sub">Printed at the bottom of the Grading Sheet: "Prepared by" is always the Subject Teacher above. Fill in who checks and approves it at your school.</div>
+      <h2>Official Form Signatories</h2>
+      <div class="sub">These entries are linked to the official ECR and Grading Sheet templates. The templates themselves stay fixed; only the signatory names/titles are filled. If Prepared by — Name is blank, the Subject Teacher above is used automatically.</div>
       <div class="grid2">
+        <div class="field"><label>Prepared by — Name</label><input type="text" id="f_preparedByName" value="${esc(m.preparedByName||"")}" placeholder="Defaults to Subject Teacher"></div>
+        <div class="field"><label>Prepared by — Title</label><input type="text" id="f_preparedByTitle" value="${esc(m.preparedByTitle||"Subject Teacher")}" placeholder="e.g. Subject Teacher"></div>
         <div class="field"><label>Checked by — Name</label><input type="text" id="f_checkedByName" value="${esc(m.checkedByName||"")}"></div>
         <div class="field"><label>Checked by — Title</label><input type="text" id="f_checkedByTitle" value="${esc(m.checkedByTitle||"")}" placeholder="e.g. Head Teacher VI, Science Department"></div>
         <div class="field"><label>Approved by — Name</label><input type="text" id="f_approvedByName" value="${esc(m.approvedByName||"")}"></div>
@@ -827,7 +830,7 @@ function renderSetup(main, cls){
       ${["WW","PT","EXAM"].map(k=>renderCategoryEditor(cls,k)).join("")}
     </div>
   `;
-  ["className","subject","gradeLevel","section","teacher","adviser","schoolHead","region","division","schoolId","schoolName","schoolYear","schoolAddress","checkedByName","checkedByTitle","approvedByName","approvedByTitle"].forEach(f=>{
+  ["className","subject","gradeLevel","section","teacher","adviser","schoolHead","region","division","schoolId","schoolName","schoolYear","schoolAddress","preparedByName","preparedByTitle","checkedByName","checkedByTitle","approvedByName","approvedByTitle"].forEach(f=>{
     document.getElementById("f_"+f).addEventListener("change", e=>{
       m[f] = e.target.value; saveState(); renderClassPicker();
     });
@@ -2007,6 +2010,7 @@ function officialEcrPayload(cls, termKey){
   return {
     classId:cls.id||"",
     termKey,
+    schoolLogoDataUri:schoolLogoDataUri(),
     meta:{...cls.meta},
     categories:{
       WW:{weight:Number(ww.weight||0),components:ww.components.map(c=>({name:c.name,hps:Number(c.hps||0),subWeight:Number(c.subWeight||0)}))},
@@ -2018,42 +2022,63 @@ function officialEcrPayload(cls, termKey){
 }
 
 async function exportOfficialEcr(cls,termKey,mode="save"){
-  if(!window.eclassAPI || typeof window.eclassAPI.exportOfficialEcr!=="function"){
-    alert("Official ECR export is available in the installed desktop app."); return;
-  }
   try{
     const payload=officialEcrPayload(cls,termKey);
 
-    // v1.0.10+: Electron/Chromium cannot provide a dependable Excel print
-    // preview.  For the official ECR we instead ask the runtime extension to
-    // fill the ACTUAL official workbook, let desktop Excel render that sheet
-    // to PDF using the workbook's own print area/page setup, then open the PDF.
-    // This is a true visual preview of the official template and does not use
-    // Chromium's unsupported print-preview route.
-    if(mode==="preview" && window.eclassAPI && typeof window.eclassAPI.runtimeInvoke==="function"){
-      const result=await window.eclassAPI.runtimeInvoke("ecr:official-pdf-preview",payload);
-      if(result && result.ok) return;
-      if(result && result.previewUnavailable){
-        await showInfoDialog("Official ECR Preview Unavailable",`${result.error||"Microsoft Excel could not render the official ECR preview."}\n\n${result.openedFallback?"The filled official workbook was opened instead.":"The filled official workbook is available here:"}\n${result.xlsxPath||result.path||""}`);
+    // v1.0.15+: both preview and download go through the runtime template engine
+    // so the Subject Teacher signatory and all current Setup values are present
+    // in the actual official workbook, not only in the on-screen HTML view.
+    if(window.eclassAPI && typeof window.eclassAPI.runtimeInvoke==="function"){
+      const action=mode==="preview" ? "ecr:official-pdf-preview" : "ecr:official-save";
+      const result=await window.eclassAPI.runtimeInvoke(action,payload);
+      if(result && result.ok){
+        if(mode==="save") await showInfoDialog("Official ECR Saved",`The official Class Record template was filled and saved successfully.\n\n${result.path||result.xlsxPath||""}`);
         return;
       }
-      alert("Could not create the Official ECR preview: "+(result&&result.error?result.error:"Unknown error"));
-      return;
+      if(result && result.cancelled) return;
+      if(result && result.previewUnavailable){
+        await showInfoDialog("Official ECR Preview Unavailable",`${result.error||"Microsoft Excel could not render the official ECR preview."}\n\nThe filled official workbook is available here:\n${result.xlsxPath||result.path||""}`);
+        return;
+      }
+      if(result && !result.unsupported){
+        alert("Could not create the Official ECR: "+(result.error||"Unknown error"));
+        return;
+      }
     }
 
-    const result=await window.eclassAPI.exportOfficialEcr(payload,mode);
-    if(result && !result.ok && result.previewUnavailable){
-      await showInfoDialog("Print Preview Unavailable",`Microsoft Excel Print Preview could not be started.\n\n${result.error||""}\n\nThe filled Official ECR was ${result.openedFallback?"opened normally in your spreadsheet application":"saved here"}:\n${result.path||""}`);
-      return;
+    // Compatibility fallback for the v1.0.9 bootstrap if the downloaded
+    // runtime extension could not be loaded.
+    if(!window.eclassAPI || typeof window.eclassAPI.exportOfficialEcr!=="function"){
+      alert("Official ECR export is available in the installed desktop app."); return;
     }
+    const result=await window.eclassAPI.exportOfficialEcr(payload,mode);
     if(!result || (!result.ok && !result.cancelled)){
       alert("Could not create the Official ECR: "+(result&&result.error?result.error:"Unknown error"));
       return;
     }
-    if(result && result.ok && mode==="save"){
-      await showInfoDialog("Official ECR Saved",`The required Class Record template was filled and saved successfully.\n\n${result.path||""}`);
-    }
+    if(result && result.ok && mode==="save") await showInfoDialog("Official ECR Saved",`The official Class Record template was filled and saved successfully.\n\n${result.path||""}`);
   }catch(err){ alert("Could not create the Official ECR: "+(err&&err.message?err.message:String(err))); }
+}
+
+async function exportOfficialGs(cls,termKey,mode="preview"){
+  if(!window.eclassAPI || typeof window.eclassAPI.runtimeInvoke!=="function"){
+    alert("Official Grading Sheet output is available in the installed desktop app."); return;
+  }
+  try{
+    const payload=officialEcrPayload(cls,termKey);
+    const action=mode==="save" ? "gs:official-save" : "gs:official-pdf-preview";
+    const result=await window.eclassAPI.runtimeInvoke(action,payload);
+    if(result && result.ok){
+      if(mode==="save") await showInfoDialog("Official Grading Sheet Saved",`The official Grading Sheet template was filled and saved successfully.\n\n${result.path||result.xlsxPath||""}`);
+      return;
+    }
+    if(result && result.cancelled) return;
+    if(result && result.previewUnavailable){
+      await showInfoDialog("Official Grading Sheet Preview Unavailable",`${result.error||"Microsoft Excel could not render the official Grading Sheet preview."}\n\nThe filled official workbook is available here:\n${result.xlsxPath||result.path||""}`);
+      return;
+    }
+    alert("Could not create the Official Grading Sheet: "+(result&&result.error?result.error:"Unknown error"));
+  }catch(err){ alert("Could not create the Official Grading Sheet: "+(err&&err.message?err.message:String(err))); }
 }
 
 function renderTerm(main, cls, termKey, termLabel){
@@ -2075,7 +2100,7 @@ function renderTerm(main, cls, termKey, termLabel){
   main.innerHTML = `
     <div class="card no-print">
       <h2>${termLabel}</h2>
-      <div class="sub">Class Record is where you enter raw scores. Official ECR Print Preview renders the required Excel template to PDF using its original print layout.</div>
+      <div class="sub">Class Record is where you enter raw scores. Class Record and Grading Sheet previews are rendered from their required official Excel templates, using the Setup information and signatories.</div>
       <div class="toolbar">
         <div class="cr-viewtoggle">
           <button class="small viewbtn ${mode==="record"?"active":""}" data-mode="record">Class Record</button>
@@ -2143,7 +2168,7 @@ function renderTerm(main, cls, termKey, termLabel){
         <div class="cr-navybar"></div>
         <div class="scroll-x">${gsMasterTableHtml(cls, termKey)}</div>
         <div class="gs-signoff">
-          <div><div class="lbl">Prepared by:</div><div class="who">${esc(m.teacher)||"&nbsp;"}</div><div class="title">Subject Teacher</div></div>
+          <div><div class="lbl">Prepared by:</div><div class="who">${esc(m.preparedByName||m.teacher)||"&nbsp;"}</div><div class="title">${esc(m.preparedByTitle||"Subject Teacher")||"&nbsp;"}</div></div>
           <div><div class="lbl">Checked by:</div><div class="who">${esc(m.checkedByName)||"&nbsp;"}</div><div class="title">${esc(m.checkedByTitle)||"&nbsp;"}</div></div>
           <div><div class="lbl">Approved:</div><div class="who">${esc(m.approvedByName)||"&nbsp;"}</div><div class="title">${esc(m.approvedByTitle)||"&nbsp;"}</div></div>
         </div>
@@ -2155,8 +2180,11 @@ function renderTerm(main, cls, termKey, termLabel){
     const isRecord=TERM_VIEW_MODE[termKey]==="record";
     const exp=document.getElementById("termExportOfficial");
     const print=document.getElementById("termPrint");
-    if(exp) exp.style.display=isRecord?"":"none";
-    if(print) print.textContent=isRecord?"Official ECR Print Preview":"Print this view";
+    if(exp){
+      exp.style.display="";
+      exp.textContent=isRecord?"Download Official ECR (.xlsx)":"Download Official GS (.xlsx)";
+    }
+    if(print) print.textContent=isRecord?"Official ECR Print Preview":"Official GS Print Preview";
   }
   document.querySelectorAll(".viewbtn").forEach(b=>{
     b.addEventListener("click", ()=>{
@@ -2166,10 +2194,13 @@ function renderTerm(main, cls, termKey, termLabel){
     });
   });
   document.getElementById("termImportOfficial").addEventListener("click", ()=>importOfficialEcrIntoClass(cls,termKey));
-  document.getElementById("termExportOfficial").addEventListener("click", ()=>exportOfficialEcr(cls,termKey,"save"));
+  document.getElementById("termExportOfficial").addEventListener("click", ()=>{
+    if(TERM_VIEW_MODE[termKey]==="record") exportOfficialEcr(cls,termKey,"save");
+    else exportOfficialGs(cls,termKey,"save");
+  });
   document.getElementById("termPrint").addEventListener("click", ()=>{
     if(TERM_VIEW_MODE[termKey]==="record") exportOfficialEcr(cls,termKey,"preview");
-    else printCurrentView();
+    else exportOfficialGs(cls,termKey,"preview");
   });
   draw(); updateTermActions();
 }
