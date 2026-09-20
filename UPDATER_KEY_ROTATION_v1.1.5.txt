@@ -1,0 +1,13 @@
+E-Class Record App v1.1.5 — Local Updater Trust-Key Rotation
+
+Trusted key ID: ecr-dev-2026-09-12
+
+Why this full installer is required:
+The private key corresponding to the prior updater trust root is unavailable. A full installer is therefore used once to install a new trusted public key.
+
+Private key handling:
+1. Save the separately supplied ECR_UPDATE_SIGNING_PRIVATE_KEY.pem to a secure local folder, recommended: C:\secure\ECR_UPDATE_SIGNING_PRIVATE_KEY.pem
+2. Do NOT copy the private key into the app source folder, installer, Downloads folder, or any .ecrupdate package.
+3. Set ECLASS_UPDATE_SIGNING_KEY to that file when creating future .ecrupdate packages.
+
+The installer/source contains only the matching public key.

@@ -1,3 +1,11 @@
+E-Class Record App with GS and SF9 — v1.1.5
+
+FIXED
+- Corrected the generated SF2 Month / No. of Days of Classes / Summary header alignment while preserving the official wording and master template.
+- Released as a full bootstrap installer because the previous local-update signing private key is unavailable.
+- Rotated the signed local updater trust key to ecr-dev-2026-09-12 so v1.1.6+ test iterations can return to short .ecrupdate delivery.
+- No grading, attendance, SF9 calculation, roster-compaction, backup-schema, or official-template content changes.
+
 v1.1.4 — SF2 Diagonal Compliance Marks + Signature Centering
 - Late Comer/Tardy now shades the upper triangular half formed by the official dashed diagonal.
 - Cutting Classes now shades the lower triangular half formed by the official dashed diagonal.

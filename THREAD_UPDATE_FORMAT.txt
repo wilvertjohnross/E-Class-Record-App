@@ -1,9 +1,9 @@
 E-CLASS RECORD APP — SIGNED DEVELOPMENT UPDATE FORMAT
-Bootstrap feature/security baseline: v1.1.0
+Bootstrap feature/security baseline: v1.1.5
 
 PURPOSE
 Ordinary runtime/UI/template iterations can still be delivered as *.ecrupdate files,
-but v1.1.0+ accepts only packages signed by the trusted Ed25519 development key.
+but v1.1.5+ accepts only packages signed by the current trusted Ed25519 development key.
 The private key is kept outside the application and is never distributed with builds.
 
 PACKAGE FORMAT
@@ -20,10 +20,10 @@ manifest.json includes:
   appId: ph.edu.eclassrecord.gs.sf9
   productName: E-Class Record App with GS and SF9
   version: semantic version newer than the effective version
-  minBootstrapVersion: 1.1.0 or newer
+  minBootstrapVersion: 1.1.5 or newer
   files: exact SHA-256 map for every payload file
   signature.algorithm: ed25519
-  signature.keyId: ecr-dev-2026-02
+  signature.keyId: ecr-dev-2026-09-12
   signature.value: Base64 Ed25519 signature over the canonical manifest fields
 
 VALIDATION
@@ -35,7 +35,7 @@ are re-hashed and the signed manifest is reverified before activation/loading.
 CREATE A SIGNED UPDATE
 Keep the private key outside the project folder. On Windows:
   set ECLASS_UPDATE_SIGNING_KEY=C:\secure\ECR_UPDATE_SIGNING_PRIVATE_KEY.pem
-  node tools\make-thread-update.js 1.0.21 path\to\payload update.ecrupdate
+  node tools\make-thread-update.js 1.1.6 path\to\payload update.ecrupdate
 
 IMPORTANT
 - Future update payloads should be self-contained snapshots of all runtime files they need.

@@ -1,0 +1,17 @@
+E-Class Record App with GS and SF9 — v1.1.5
+Release type: Full installer/bootstrap patch
+Iteration: 1 of 10 short-development iterations after v1.1.4
+
+Changes:
+- SF2 generated-copy summary header alignment/readability fix.
+- Local .ecrupdate trust-key rotation to ecr-dev-2026-09-12.
+- Future signed runtime updates require bootstrap v1.1.5 or newer.
+- The private signing key is NOT bundled in this source package.
+
+Compatibility:
+- Existing local JSON/app data remain in the same userData location.
+- Installer configuration keeps deleteAppDataOnUninstall=false.
+- Existing v1.1.x class/SF1/SF2/ECR/GS/SF9 data remain compatible.
+
+Audit note:
+- No five-pass release audit performed for this iteration, per current development instruction.

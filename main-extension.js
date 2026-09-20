@@ -223,6 +223,57 @@ function setWorksheetCellStyle(xml, ref, styleIndex) {
   return xml.replace(m[0], `<c${attrs}`);
 }
 
+
+function sf2FixSummaryHeaderStyles(zip, worksheetXml) {
+  // Generated-copy-only alignment cleanup for the Month / Days / Summary block.
+  // Keep every official caption and border in place; only make the existing cells readable.
+  const styleFor = ref => {
+    const m = worksheetXml.match(new RegExp(`<c\\b([^>]*\\br="${regexEscape(ref)}"[^>]*)`));
+    const n = m ? Number((m[1].match(/\bs="(\d+)"/) || [])[1]) : NaN;
+    if (!Number.isInteger(n) || n < 0) throw new Error(`The official SF2 summary-header style for ${ref} was not found.`);
+    return n;
+  };
+  const stylesEntry = zip.getEntry('xl/styles.xml');
+  if (!stylesEntry) throw new Error('The official SF2 styles table was not found.');
+  let styles = stylesEntry.getData().toString('utf8');
+  const section = styles.match(/<cellXfs\b([^>]*)>([\s\S]*?)<\/cellXfs>/);
+  if (!section) throw new Error('The official SF2 cell-style table is invalid.');
+  const xfs = [];
+  const xfStart = /<xf\b[^>]*(?:\/>|>)/g;
+  let xfMatch;
+  while ((xfMatch = xfStart.exec(section[2]))) {
+    let full = xfMatch[0];
+    if (!/\/>$/.test(full)) {
+      const end = section[2].indexOf('</xf>', xfStart.lastIndex);
+      if (end < 0) throw new Error('The official SF2 cell-style table contains an incomplete style.');
+      full = section[2].slice(xfMatch.index, end + 5);
+      xfStart.lastIndex = end + 5;
+    }
+    xfs.push(full);
+  }
+  const desired = new Map([
+    [styleFor('AB64'), '<alignment horizontal="center" vertical="center" shrinkToFit="1"/>'],
+    [styleFor('AC64'), '<alignment horizontal="centerContinuous" vertical="center"/>'],
+    [styleFor('AE64'), '<alignment horizontal="center" vertical="center" wrapText="1"/>'],
+    [styleFor('AG64'), '<alignment horizontal="center" vertical="center"/>']
+  ]);
+  for (const [idx, alignment] of desired) {
+    let xf = xfs[idx];
+    if (!xf) throw new Error('The official SF2 summary-header style index is invalid.');
+    if (/<alignment\b[^>]*\/>/.test(xf)) xf = xf.replace(/<alignment\b[^>]*\/>/, alignment);
+    else if (/<alignment\b[^>]*>[\s\S]*?<\/alignment>/.test(xf)) xf = xf.replace(/<alignment\b[^>]*>[\s\S]*?<\/alignment>/, alignment);
+    else if (/<\/xf>$/.test(xf)) xf = xf.replace(/<\/xf>$/, `${alignment}</xf>`);
+    else if (/\/>$/.test(xf)) xf = xf.replace(/\/>$/, `>${alignment}</xf>`);
+    else throw new Error('The official SF2 summary-header style could not be adjusted.');
+    if (!/\bapplyAlignment="1"/.test(xf)) {
+      if (/^<xf\b/.test(xf)) xf = xf.replace(/^<xf\b/, '<xf applyAlignment="1"');
+    }
+    xfs[idx] = xf;
+  }
+  styles = styles.replace(section[0], `<cellXfs${section[1]}>${xfs.join('')}</cellXfs>`);
+  zip.updateFile('xl/styles.xml', Buffer.from(styles, 'utf8'));
+}
+
 function sf2EnsureSignatureCenterStyle(zip, worksheetXml) {
   // Build a generated-copy-only style based on the existing adviser/principal signature-line
   // style. Center-across-selection keeps the official line geometry intact while centering the
@@ -339,6 +390,8 @@ function buildOfficialGsBuffer(payload, ctx) {
 
   // Only official data-bearing cells are changed. Static headings/labels,
   // merged ranges, sizing, formatting, logos/positions, and page setup remain.
+  sf2FixSummaryHeaderStyles(zip, xml);
+
   const headerValues = {
     A2: meta.region || '',
     A3: divisionHeading(meta.division),
@@ -1314,7 +1367,7 @@ function sf2TemplateFingerprint(ctx) {
 function sf2PreviewSignature(payload, ctx) {
   const crypto = require('crypto');
   return crypto.createHash('sha256')
-    .update('sf2-preview-v1.1.4\n')
+    .update('sf2-preview-v1.1.5\n')
     .update(sf2TemplateFingerprint(ctx))
     .update('\n')
     .update(stableStringify(payload))

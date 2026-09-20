@@ -1,3 +1,10 @@
+VERSION 1.1.5 — SF2 SUMMARY HEADER / UPDATER TRUST-KEY ROTATION
+- Fixes alignment/readability of the generated SF2 Month / No. of Days of Classes / Summary block without changing the official captions or master template.
+- Full installer/bootstrap release because the prior development updater private key is unavailable.
+- Rotates the local .ecrupdate Ed25519 trust key to ecr-dev-2026-09-12.
+- Future .ecrupdate packages for this bootstrap require the new private key stored outside the app/source tree.
+- Existing local JSON data, SF1/SF2 data, ECR/GS/SF9 behavior, compact SF2 roster rows, and grading/attendance calculations remain compatible.
+
 E-Class Record App with GS and SF9
 Version 1.1.4
 
@@ -107,11 +114,11 @@ with the project development signing key. The installed app contains ONLY the pu
 The private signing key must never be copied into the app source tree, installer, school
 computer deployment folder, or a distributed .ecrupdate file.
 
-Future runtime updates created with tools\make-thread-update.js require:
+Future runtime updates created with tools\make-thread-update.js require (v1.1.5 trust root):
   set ECLASS_UPDATE_SIGNING_KEY=C:\secure\ECR_UPDATE_SIGNING_PRIVATE_KEY.pem
   node tools\make-thread-update.js <version> <payload-folder> <output.ecrupdate>
 
-Unsigned old development updates are intentionally rejected by v1.0.20.
+Unsigned updates and packages signed only by the retired pre-v1.1.5 development key are intentionally rejected by v1.1.5.
 
 WINDOWS BUILD
 1. Keep your existing Documents data folder; do not delete it.
