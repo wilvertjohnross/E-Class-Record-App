@@ -2022,6 +2022,24 @@ async function exportOfficialEcr(cls,termKey,mode="save"){
   }
   try{
     const payload=officialEcrPayload(cls,termKey);
+
+    // v1.0.10+: Electron/Chromium cannot provide a dependable Excel print
+    // preview.  For the official ECR we instead ask the runtime extension to
+    // fill the ACTUAL official workbook, let desktop Excel render that sheet
+    // to PDF using the workbook's own print area/page setup, then open the PDF.
+    // This is a true visual preview of the official template and does not use
+    // Chromium's unsupported print-preview route.
+    if(mode==="preview" && window.eclassAPI && typeof window.eclassAPI.runtimeInvoke==="function"){
+      const result=await window.eclassAPI.runtimeInvoke("ecr:official-pdf-preview",payload);
+      if(result && result.ok) return;
+      if(result && result.previewUnavailable){
+        await showInfoDialog("Official ECR Preview Unavailable",`${result.error||"Microsoft Excel could not render the official ECR preview."}\n\n${result.openedFallback?"The filled official workbook was opened instead.":"The filled official workbook is available here:"}\n${result.xlsxPath||result.path||""}`);
+        return;
+      }
+      alert("Could not create the Official ECR preview: "+(result&&result.error?result.error:"Unknown error"));
+      return;
+    }
+
     const result=await window.eclassAPI.exportOfficialEcr(payload,mode);
     if(result && !result.ok && result.previewUnavailable){
       await showInfoDialog("Print Preview Unavailable",`Microsoft Excel Print Preview could not be started.\n\n${result.error||""}\n\nThe filled Official ECR was ${result.openedFallback?"opened normally in your spreadsheet application":"saved here"}:\n${result.path||""}`);
@@ -2056,7 +2074,7 @@ function renderTerm(main, cls, termKey, termLabel){
   main.innerHTML = `
     <div class="card no-print">
       <h2>${termLabel}</h2>
-      <div class="sub">Class Record is where you enter raw scores. Grading Sheet is the clean, printable summary — computed columns only — for signing and filing.</div>
+      <div class="sub">Class Record is where you enter raw scores. Official ECR Print Preview renders the required Excel template to PDF using its original print layout.</div>
       <div class="toolbar">
         <div class="cr-viewtoggle">
           <button class="small viewbtn ${mode==="record"?"active":""}" data-mode="record">Class Record</button>
