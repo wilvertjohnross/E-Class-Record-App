@@ -1,6 +1,6 @@
 'use strict';
 
-// v1.0.17 runtime extension
+// v1.0.18 runtime extension
 // Official ECR preview pipeline:
 // official template -> direct XLSX fill -> persistent hidden Excel renderer -> cached PDF -> in-app popup.
 // Excel is pre-warmed once in the background and reused. Preview PDFs are content-addressed,
@@ -569,6 +569,85 @@ try {
         Send-EcrMessage @{ type='response'; id=$id; ok=$true; pong=$true }
         continue
       }
+      if ($cmd -eq 'renderEcrTemplate') {
+        $workbook = $null
+        $sheet = $null
+        try {
+          $template = [string]$req.templatePath
+          $xlsx = [string]$req.xlsxPath
+          $pdf = [string]$req.pdfPath
+          $plan = $req.plan
+          if (-not (Test-Path -LiteralPath $template)) { throw ('Official ECR template was not found: ' + $template) }
+          if (Test-Path -LiteralPath $xlsx) { Remove-Item -LiteralPath $xlsx -Force -ErrorAction SilentlyContinue }
+          if (Test-Path -LiteralPath $pdf) { Remove-Item -LiteralPath $pdf -Force -ErrorAction SilentlyContinue }
+          $workbook = $excel.Workbooks.Open($template)
+          $sheet = $workbook.Worksheets.Item(1)
+
+          function Set-MergeSafeCell($sheetObj, [string]$address, $value) {
+            $r = $sheetObj.Range($address)
+            $t = $r
+            if ($r.MergeCells) { $t = $r.MergeArea.Cells.Item(1,1) }
+            if ($null -eq $value) { $t.ClearContents() }
+            else { $t.Value2 = $value }
+            if ($t -ne $r) { try { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($t) } catch {} }
+            try { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($r) } catch {}
+          }
+          function Set-RowValues($sheetObj, [string]$address, $values) {
+            $vals = @($values)
+            $arr = New-Object 'object[,]' 1,$vals.Count
+            for ($i=0; $i -lt $vals.Count; $i++) {
+              $v = $vals[$i]
+              if ($null -eq $v) { $arr[0,$i] = $null }
+              elseif ($v -is [System.ValueType]) { $arr[0,$i] = $v }
+              else { $arr[0,$i] = [string]$v }
+            }
+            $rg = $sheetObj.Range($address)
+            $rg.Value2 = $arr
+            try { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($rg) } catch {}
+          }
+
+          foreach ($prop in $plan.headers.PSObject.Properties) { Set-MergeSafeCell $sheet ([string]$prop.Name) $prop.Value }
+          foreach ($prop in $plan.hps.PSObject.Properties) { Set-RowValues $sheet ([string]$prop.Name) $prop.Value }
+          foreach ($rp in @($plan.rows)) {
+            $row = [int]$rp.row
+            Set-MergeSafeCell $sheet ('C' + $row) $rp.name
+            Set-RowValues $sheet ('F' + $row + ':M' + $row) $rp.ww
+            Set-RowValues $sheet ('N' + $row + ':S' + $row) $rp.pt
+            Set-RowValues $sheet ('T' + $row + ':AD' + $row) $rp.ex
+          }
+
+          $maleCount = [int]$plan.maleCount
+          $femaleCount = [int]$plan.femaleCount
+          $maleHideStart = 18 + $maleCount
+          if ($maleHideStart -le 67) { $sheet.Rows.Item(($maleHideStart.ToString() + ":67")).Hidden = $true }
+          $femaleHideStart = 69 + $femaleCount
+          if ($femaleHideStart -le 118) { $sheet.Rows.Item(($femaleHideStart.ToString() + ":118")).Hidden = $true }
+          $sheet.Rows.Item('68:68').Hidden = $false
+
+          try {
+            $links = @($workbook.LinkSources(1))
+            foreach ($lnk in $links) { if ($lnk) { $workbook.BreakLink([string]$lnk, 1) } }
+          } catch {}
+          $workbook.SaveAs($xlsx, 51)
+          [void]$sheet.ExportAsFixedFormat(0, $pdf)
+          $workbook.Close($false)
+          [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($sheet)
+          [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($workbook)
+          $sheet = $null
+          $workbook = $null
+          Send-EcrMessage @{ type='response'; id=$id; ok=$true; pdfPath=$pdf; xlsxPath=$xlsx }
+        }
+        catch {
+          $msg = $_.Exception.Message
+          try { if ($workbook -ne $null) { $workbook.Close($false) } } catch {}
+          if ($sheet -ne $null) { try { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($sheet) } catch {} }
+          if ($workbook -ne $null) { try { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($workbook) } catch {} }
+          $sheet = $null
+          $workbook = $null
+          Send-EcrMessage @{ type='response'; id=$id; ok=$false; error=$msg }
+        }
+        continue
+      }
       if ($cmd -eq 'render') {
         $workbook = $null
         $sheet = $null
@@ -760,6 +839,10 @@ class PersistentExcelRenderer {
     });
   }
 
+  async renderEcrTemplate(templatePath, xlsxPath, pdfPath, plan) {
+    return await this.request('renderEcrTemplate', { templatePath, xlsxPath, pdfPath, plan });
+  }
+
   async render(xlsxPath, pdfPath) {
     try {
       return await this.request('render', { xlsxPath, pdfPath });
@@ -792,6 +875,72 @@ class PersistentExcelRenderer {
       setTimeout(() => { try { fs.unlinkSync(this.scriptPath); } catch {} }, 3000).unref?.();
     }
   }
+}
+
+
+function makeEcrExcelRenderPlan(payload) {
+  const meta = payload.meta || {};
+  const ww = payload.categories.WW || {};
+  const pt = payload.categories.PT || {};
+  const ex = payload.categories.EXAM || {};
+  const termNo = termNumber(payload.termKey);
+  const termWords = ['FIRST TERM', 'SECOND TERM', 'THIRD TERM'][termNo - 1];
+  const headers = {
+    B2: `CLASS RECORD - TERM ${termNo}`,
+    F5: meta.region || '', R5: meta.division || '', Z5: meta.schoolId || '',
+    F7: meta.schoolName || '', Z7: meta.schoolYear || '',
+    B10: termWords, J10: meta.gradeLevel || '', Q10: meta.teacher || '',
+    AA10: meta.subject || '', J11: meta.section || '',
+    B119: 'Prepared by:', C119: meta.preparedByName || meta.teacher || '',
+    C120: meta.preparedByTitle || 'Subject Teacher'
+  };
+  const hps = {
+    'F15:M15': [
+      ...ww.components.map(c=>Number(c.hps||0)),
+      ww.components.reduce((a,c)=>a+Number(c.hps||0),0), 100, Number(ww.weight||0)
+    ],
+    'N15:S15': [
+      ...pt.components.map(c=>Number(c.hps||0)),
+      pt.components.reduce((a,c)=>a+Number(c.hps||0),0), 100, Number(pt.weight||0)
+    ],
+    'T15:AD15': [
+      ...ex.components.map(c=>Number(c.hps||0)),
+      ...ex.components.map(c=>Number(c.subWeight||0)),
+      100, Number(ex.weight||0), '', '', ''
+    ]
+  };
+  function rowPlan(row, st) {
+    return {
+      row,
+      name: st.name || '',
+      ww: [
+        ...((st.WW && st.WW.scores) || []),
+        st.WW ? st.WW.total : '', st.WW ? st.WW.ps : '', st.WW ? st.WW.ws : ''
+      ],
+      pt: [
+        ...((st.PT && st.PT.scores) || []),
+        st.PT ? st.PT.total : '', st.PT ? st.PT.ps : '', st.PT ? st.PT.ws : ''
+      ],
+      ex: [
+        ...((st.EXAM && st.EXAM.scores) || []),
+        ...((st.EXAM && st.EXAM.componentPs) || []),
+        st.EXAM ? st.EXAM.ps : '', st.EXAM ? st.EXAM.ws : '',
+        st.initial, st.term, st.descriptor || ''
+      ]
+    };
+  }
+  const male = payload.students.filter(s=>s.sex==='M');
+  const female = payload.students.filter(s=>s.sex==='F');
+  return {
+    headers,
+    hps,
+    maleCount: male.length,
+    femaleCount: female.length,
+    rows: [
+      ...male.map((st,i)=>rowPlan(18+i,st)),
+      ...female.map((st,i)=>rowPlan(69+i,st))
+    ]
+  };
 }
 
 function stableStringify(value) {
@@ -840,7 +989,7 @@ function gsPreviewSignature(payload, ctx) {
 function previewSignature(payload, ctx) {
   const crypto = require('crypto');
   return crypto.createHash('sha256')
-    .update('ecr-preview-v1.0.17-com-open-safe-template-style\n')
+    .update('ecr-preview-v1.0.18-template-first-com-fill\n')
     .update(templateFingerprint(ctx))
     .update('\n')
     .update(stableStringify(payload))
@@ -962,31 +1111,21 @@ async function createOfficialPopupPreview(payload, context) {
     return { ok: true, preview: true, inAppPopup: true, cached: true, signature, xlsxPath, pdfPath };
   }
 
-  const buffer = buildOfficialDocumentBuffer('ecr', payload, ctx);
-  fs.writeFileSync(xlsxPath, buffer);
-
-  let renderError = null;
+  const templatePath = ctx.resolveResource('templates/ECR official Template.xlsx');
+  const plan = makeEcrExcelRenderPlan(payload);
   try {
     if (!excelEngine) excelEngine = new PersistentExcelRenderer(ctx);
-    await excelEngine.render(xlsxPath, pdfPath);
+    await excelEngine.start();
+    await excelEngine.renderEcrTemplate(templatePath, xlsxPath, pdfPath, plan);
   } catch (err) {
-    renderError = err;
-    // Stop the failed hidden worker before starting a fresh one-shot Excel COM instance.
-    // This avoids two automation instances competing for Workbooks.Open.
-    try { if (excelEngine) excelEngine.stop(); } catch {}
-    excelEngine = null;
-    await new Promise(r => setTimeout(r, 350));
-    const fallback = await fallbackOneShotRender(xlsxPath, pdfPath, ctx);
-    if (!fallback.ok) {
-      return {
-        ok: false,
-        previewUnavailable: true,
-        openedFallback: false,
-        xlsxPath,
-        pdfPath,
-        error: fallback.error || (renderError && renderError.message) || 'Microsoft Excel did not create the official ECR PDF preview.'
-      };
-    }
+    return {
+      ok: false,
+      previewUnavailable: true,
+      openedFallback: false,
+      xlsxPath,
+      pdfPath,
+      error: (err && err.message) || 'Microsoft Excel could not render the official ECR template.'
+    };
   }
 
   if (!isUsablePreviewFile(fs, pdfPath)) {
@@ -1219,7 +1358,7 @@ module.exports = {
     if (action === 'ecr:preview-engine-status' || action === 'official:preview-engine-status') {
       return { ok: true, warm: !!(excelEngine && excelEngine.ready) };
     }
-    return { ok: false, unsupported: true, error: `Runtime action is not available in v1.0.17: ${action}` };
+    return { ok: false, unsupported: true, error: `Runtime action is not available in v1.0.18: ${action}` };
   }
 };
 
