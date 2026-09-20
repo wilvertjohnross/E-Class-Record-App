@@ -1,3 +1,13 @@
+VERSION 1.1.3 — SF2 DEPED-COMPLIANT MARKINGS / COMPACT PRINT ROWS
+- Restored the original SF2 official template used in v1.1.0/v1.1.1 (SHA-256 2fe5668f6fd86ce7cb7a1cc2f76ac2e6e35bc20d3b80d779ce459000c0c9d4ba).
+- Restored the four-state attendance workflow: blank = Present, full-cell X = Absent, upper-half shaded = Late Comer/Tardy, lower-half shaded = Cutting Classes.
+- Click cycle: Present -> Absent -> Late/Tardy -> Cutting Classes -> Present. Keyboard: P/Space, X/A, L/T, C.
+- The working grid now draws the mark geometrically across the whole attendance box instead of relying on text glyphs.
+- Official SF2 output keeps attendance cells text-free and overlays edge-to-edge diagonal lines for Absent and exact half-cell shading for Late/Tardy and Cutting Classes.
+- Unused Male/Female learner rows are hidden only in each generated SF2 copy so preview/print height follows the current SF1/current roster while all official total, summary, legend, signature, formatting, and print settings remain intact.
+- Existing v1.1.0/v1.1.1/v1.1.2 SF2 data remains readable. Literal T values normalize to the existing internal L tardy code; legacy C values remain Cutting Classes.
+- Grading/transmutation, ECR, GS, SF9 calculations, JSON persistence, updater security, and official ECR/GS templates are unchanged.
+
 VERSION 1.1.2 — SIMPLIFIED SF2 X / T ATTENDANCE MARKING
 - Replaced the bundled SF2 template with the newly uploaded workbook without editing its static content or layout.
 - Changed the SF2 click cycle to Present (blank) → Absent (X) → Tardy (T) → Present.

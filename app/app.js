@@ -176,16 +176,14 @@ function ensureStudentExtras(cls, sid){
    SF2 DAILY ATTENDANCE — APP-OWNED DATA MODEL
    ========================================================================= */
 const SF2_MONTH_NAMES=["January","February","March","April","May","June","July","August","September","October","November","December"];
-const SF2_DAY_CODES={P:"",A:"X",L:"T"};
-const SF2_DAY_TITLES={P:"Present",A:"Absent",L:"Tardy"};
+const SF2_DAY_CODES={P:"",A:"",L:"",C:""};
+const SF2_DAY_TITLES={P:"Present",A:"Absent",L:"Late Comer / Tardy",C:"Cutting Classes"};
 function sf2NormalizeMark(value){
   const v=String(value||"P").toUpperCase();
-  if(v==="A") return "A";
-  // Keep the existing v1.1.x JSON schema stable: L is retained internally
-  // as the stored tardy code, but the UI and official SF2 display it as T.
-  // Legacy Cutting Classes (C) records were already counted as tardy, so
-  // they are presented as Tardy after upgrade without losing attendance data.
-  if(v==="T"||v==="L"||v==="C") return "L";
+  if(v==="A"||v==="L"||v==="C") return v;
+  // v1.1.2 used T as the visible tardy shortcut while retaining L internally.
+  // Accept T on import/backup so the compliance-marking restoration is backward compatible.
+  if(v==="T") return "L";
   return "P";
 }
 
@@ -260,13 +258,13 @@ function sf2SetMark(month,sid,date,status){
   status=sf2NormalizeMark(status);
   if(status==="P") delete month.marks[sid][date]; else month.marks[sid][date]=status;
 }
-function sf2NextMark(status){ return ({P:"A",A:"L",L:"P"})[sf2NormalizeMark(status)]||"P"; }
+function sf2NextMark(status){ return ({P:"A",A:"L",L:"C",C:"P"})[sf2NormalizeMark(status)]||"P"; }
 function sf2StudentStats(month,sid){
   const days=[...(month.schoolDays||[])].sort(); let absent=0,tardy=0,present=0,run=0,maxRun=0;
   for(const date of days){
     const st=sf2Mark(month,sid,date);
     if(st==="A"){ absent++; run++; maxRun=Math.max(maxRun,run); }
-    else { present++; run=0; if(st==="L") tardy++; }
+    else { present++; run=0; if(st==="L"||st==="C") tardy++; }
   }
   return {classDays:days.length,present,absent,tardy,maxConsecutiveAbsences:maxRun};
 }
@@ -1005,7 +1003,7 @@ function sf2SummaryInput(month,key,sex){
   const v=month.summary && month.summary[key] ? month.summary[key][sex] : "";
   return v===undefined||v===null?"":String(v);
 }
-function sf2MarkClass(status){ return status==="A"?"absent":status==="L"?"tardy":"present"; }
+function sf2MarkClass(status){ return status==="A"?"absent":status==="L"?"late":status==="C"?"cutting":"present"; }
 function refreshSf2CalculatedView(cls,monthKey){
   const month=ensureSf2Month(cls,monthKey), days=[...(month.schoolDays||[])].sort();
   cls.students.forEach(st=>{
@@ -1043,7 +1041,7 @@ function renderSf2(main,cls){
   const dayMap=new Map(calendar.map(d=>[d.date,d]));
   const dateHeaders=schoolDays.map(d=>{const x=dayMap.get(d);return `<th class="sf2-date-head"><span>${x?x.day:""}</span><small>${x?x.short:""}</small></th>`;}).join("");
   function markCells(st){
-    return schoolDays.map(date=>{const status=sf2Mark(month,st.id,date);return `<td class="sf2-att-cell"><button type="button" class="sf2-mark ${sf2MarkClass(status)}" data-sid="${esc(st.id)}" data-date="${esc(date)}" data-status="${status}" title="${esc(SF2_DAY_TITLES[status])}">${SF2_DAY_CODES[status]}</button></td>`;}).join("");
+    return schoolDays.map(date=>{const status=sf2Mark(month,st.id,date);return `<td class="sf2-att-cell"><button type="button" class="sf2-mark ${sf2MarkClass(status)}" data-sid="${esc(st.id)}" data-date="${esc(date)}" data-status="${status}" title="${esc(SF2_DAY_TITLES[status])}" aria-label="${esc(SF2_DAY_TITLES[status])}">${SF2_DAY_CODES[status]}</button></td>`;}).join("");
   }
   function learnerRows(list){
     return list.map(st=>{const x=sf2StudentStats(month,st.id);return `<tr data-sf2-row="${esc(st.id)}"><td class="sf2-name sticky-learner">${esc(st.name||"")}</td>${markCells(st)}<td class="sf2-total" data-sf2-absent="${esc(st.id)}">${x.absent}</td><td class="sf2-total" data-sf2-tardy="${esc(st.id)}">${x.tardy}</td><td class="sf2-remarks"><input type="text" data-sf2-remark="${esc(st.id)}" value="${esc(month.remarks[st.id]||"")}" placeholder="Remarks / school / reason"></td></tr>`;}).join("");
@@ -1076,7 +1074,7 @@ function renderSf2(main,cls){
         <button id="sf2Preview" class="primary">Preview Official SF2</button>
         <button id="sf2Save" class="ghost-alt">Save Official SF2 (.xlsx)</button>
       </div>
-      <div class="hint"><strong>Attendance:</strong> blank = Present · <strong>X</strong> = Absent · <strong>T</strong> = Tardy. One whole-day mark is used per learner per school day; there is no AM/PM split. Click once for Absent, click again for Tardy, and click a third time to return to Present. Keyboard shortcuts: P, X/A, T. SF2 attendance automatically feeds the corresponding SF9 month.</div>
+      <div class="hint"><strong>Attendance:</strong> blank = Present · <strong>full-cell X</strong> = Absent · <strong>upper half shaded</strong> = Late Comer / Tardy · <strong>lower half shaded</strong> = Cutting Classes. Click a learner cell to cycle Present → Absent → Tardy → Cutting Classes → Present. Keyboard shortcuts: P, X/A, L/T, C. SF2 attendance automatically feeds the corresponding SF9 month.</div>
       <div class="sf2-schoolday-header"><strong>School days for ${esc(info.label)}</strong><span><strong id="sf2ClassDays">${schoolDays.length}</strong> selected (official template supports up to 25)</span></div>
       <div class="sf2-calendar">${calendarButtons}</div>
     </div>
@@ -1111,11 +1109,11 @@ function renderSf2(main,cls){
     syncSf2MonthToSf9(cls,key);saveState();render();
   }));
   const applyMark=(btn,status)=>{
-    const sid=btn.dataset.sid,date=btn.dataset.date;sf2SetMark(month,sid,date,status);btn.dataset.status=status;btn.textContent=SF2_DAY_CODES[status];btn.className=`sf2-mark ${sf2MarkClass(status)}`;btn.title=SF2_DAY_TITLES[status];syncSf2MonthToSf9(cls,key);saveState();refreshSf2CalculatedView(cls,key);
+    const sid=btn.dataset.sid,date=btn.dataset.date;sf2SetMark(month,sid,date,status);btn.dataset.status=status;btn.textContent=SF2_DAY_CODES[status];btn.className=`sf2-mark ${sf2MarkClass(status)}`;btn.title=SF2_DAY_TITLES[status];btn.setAttribute("aria-label",SF2_DAY_TITLES[status]);syncSf2MonthToSf9(cls,key);saveState();refreshSf2CalculatedView(cls,key);
   };
   document.querySelectorAll(".sf2-mark").forEach(btn=>{
     btn.addEventListener("click",()=>applyMark(btn,sf2NextMark(btn.dataset.status)));
-    btn.addEventListener("keydown",e=>{let st=null;const k=e.key.toLowerCase();if(k==="p"||k===" ")st="P";else if(k==="x"||k==="a")st="A";else if(k==="t")st="L";if(st){e.preventDefault();applyMark(btn,st);}});
+    btn.addEventListener("keydown",e=>{let st=null;const k=e.key.toLowerCase();if(k==="p"||k===" ")st="P";else if(k==="x"||k==="a")st="A";else if(k==="l"||k==="t")st="L";else if(k==="c")st="C";if(st){e.preventDefault();applyMark(btn,st);}});
   });
   document.querySelectorAll("[data-sf2-remark]").forEach(inp=>inp.addEventListener("change",()=>{month.remarks[inp.dataset.sf2Remark]=inp.value;saveState();}));
   document.querySelectorAll("[data-sf2-summary-input]").forEach(inp=>inp.addEventListener("change",()=>{

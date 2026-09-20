@@ -101,6 +101,98 @@ function compactUnusedLearnerRows(xml, payload) {
 }
 
 
+function compactUnusedSf2LearnerRows(xml, payload) {
+  // Keep the official fixed-row template untouched on disk; only generated copies hide
+  // unused learner rows so print/preview height follows the current SF1/current roster.
+  const maleCount = payload.students.filter(s => s.sex === 'M').length;
+  const femaleCount = payload.students.filter(s => s.sex === 'F').length;
+  for (let row = 14; row <= 34; row++) xml = setWorksheetRowHidden(xml, row, row >= 14 + maleCount);
+  for (let row = 36; row <= 60; row++) xml = setWorksheetRowHidden(xml, row, row >= 36 + femaleCount);
+  xml = setWorksheetRowHidden(xml, 35, false);
+  xml = setWorksheetRowHidden(xml, 61, false);
+  xml = setWorksheetRowHidden(xml, 62, false);
+  return xml;
+}
+
+function sf2WorksheetGeometry(xml) {
+  const fmt = xml.match(/<sheetFormatPr\b([^>]*)\/?\s*>/);
+  const fmtAttrs = fmt ? fmt[1] : '';
+  const defaultRowPt = Number((fmtAttrs.match(/\bdefaultRowHeight="([^"]+)"/) || [])[1] || 15);
+  const defaultColWidth = Number((fmtAttrs.match(/\bdefaultColWidth="([^"]+)"/) || [])[1] || 8.43);
+  const colWidths = new Array(36).fill(defaultColWidth);
+  const colsMatch = xml.match(/<cols>([\s\S]*?)<\/cols>/);
+  if (colsMatch) {
+    const re = /<col\b([^>]*)\/?\s*>/g; let m;
+    while ((m = re.exec(colsMatch[1]))) {
+      const a = m[1];
+      const min = Number((a.match(/\bmin="(\d+)"/) || [])[1] || 0);
+      const max = Number((a.match(/\bmax="(\d+)"/) || [])[1] || 0);
+      const width = Number((a.match(/\bwidth="([^"]+)"/) || [])[1] || defaultColWidth);
+      if (!min || !max || !Number.isFinite(width)) continue;
+      for (let c = Math.max(1,min); c <= Math.min(36,max); c++) colWidths[c-1] = width;
+    }
+  }
+  const rowHeights = new Array(100).fill(defaultRowPt);
+  const rowHidden = new Array(100).fill(false);
+  const rr = /<row\b([^>]*\br="(\d+)"[^>]*)>/g; let rm;
+  while ((rm = rr.exec(xml))) {
+    const attrs = rm[1], r = Number(rm[2]);
+    if (!r || r > rowHeights.length) continue;
+    const ht = Number((attrs.match(/\bht="([^"]+)"/) || [])[1] || defaultRowPt);
+    if (Number.isFinite(ht)) rowHeights[r-1] = ht;
+    rowHidden[r-1] = /\bhidden="(?:1|true)"/.test(attrs);
+  }
+  const colPx = colWidths.map(w => Math.max(1, Math.floor(((256*w + Math.floor(128/7))/256)*7)));
+  const colEmu = colPx.map(px => px * 9525);
+  const rawRowEmu = rowHeights.map(pt => Math.max(1, Math.round(pt * 12700)));
+  const rowEmu = rawRowEmu.map((h,i) => rowHidden[i] ? 0 : h);
+  return { colEmu, rowEmu, rawRowEmu };
+}
+
+function sf2AppendComplianceMarks(zip, worksheetXml, marks) {
+  if (!marks.length) return;
+  const entry = zip.getEntry('xl/drawings/drawing1.xml');
+  if (!entry) throw new Error('The official SF2 drawing layer was not found.');
+  let drawing = entry.getData().toString('utf8');
+  if (!/<xdr:wsDr\b/.test(drawing)) throw new Error('The official SF2 drawing layer is invalid.');
+  let nextId = 1;
+  drawing.replace(/<xdr:cNvPr\b[^>]*\bid="(\d+)"/g, (_m,id) => { nextId = Math.max(nextId, Number(id)+1); return _m; });
+  const g = sf2WorksheetGeometry(worksheetXml);
+  const prefix = arr => { const out=[0]; for(const v of arr) out.push(out[out.length-1]+v); return out; };
+  const xPos = prefix(g.colEmu), yPos = prefix(g.rowEmu);
+  const colToIndex = ref => columnIndexFromRef(ref);
+  const rowFromRef = ref => Number((String(ref).match(/(\d+)$/)||[])[1]||0);
+  const anchor = (col,row,fromRowOff,toRow,toRowOff) =>
+    `<xdr:from><xdr:col>${col}</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>${row}</xdr:row><xdr:rowOff>${fromRowOff}</xdr:rowOff></xdr:from>`+
+    `<xdr:to><xdr:col>${col+1}</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>${toRow}</xdr:row><xdr:rowOff>${toRowOff}</xdr:rowOff></xdr:to>`;
+  const rectShape = (id,name,x,y,w,h) =>
+    `<xdr:sp macro="" textlink=""><xdr:nvSpPr><xdr:cNvPr id="${id}" name="${xmlEscape(name)}"/><xdr:cNvSpPr/></xdr:nvSpPr>`+
+    `<xdr:spPr><a:xfrm><a:off x="${x}" y="${y}"/><a:ext cx="${w}" cy="${h}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:solidFill><a:srgbClr val="000000"/></a:solidFill><a:ln><a:noFill/></a:ln></xdr:spPr></xdr:sp>`;
+  const lineShape = (id,name,x,y,w,h,flipV) =>
+    `<xdr:sp macro="" textlink=""><xdr:nvSpPr><xdr:cNvPr id="${id}" name="${xmlEscape(name)}"/><xdr:cNvSpPr/></xdr:nvSpPr>`+
+    `<xdr:spPr><a:xfrm${flipV?' flipV="1"':''}><a:off x="${x}" y="${y}"/><a:ext cx="${w}" cy="${h}"/></a:xfrm><a:prstGeom prst="line"><a:avLst/></a:prstGeom><a:noFill/><a:ln w="12700"><a:solidFill><a:srgbClr val="000000"/></a:solidFill><a:prstDash val="solid"/></a:ln></xdr:spPr></xdr:sp>`;
+  const additions=[];
+  for (const item of marks) {
+    const ref=String(item.ref||''), mark=String(item.mark||'P').toUpperCase();
+    const col=colToIndex(ref), r1=rowFromRef(ref), row=r1-1;
+    if (col < 0 || r1 < 1 || !['A','L','C'].includes(mark)) continue;
+    const fullH = g.rawRowEmu[row] || 278765, half = Math.max(1, Math.round(fullH/2));
+    const x = xPos[col] || 0, y = yPos[row] || 0, w = g.colEmu[col] || 300000;
+    if (mark === 'A') {
+      const a1=anchor(col,row,0,row+1,0), id1=nextId++, id2=nextId++;
+      additions.push(`<xdr:twoCellAnchor editAs="twoCell">${a1}${lineShape(id1,`SF2 Absent ${ref} /`,x,y,w,fullH,false)}<xdr:clientData/></xdr:twoCellAnchor>`);
+      additions.push(`<xdr:twoCellAnchor editAs="twoCell">${a1}${lineShape(id2,`SF2 Absent ${ref} opposite`,x,y,w,fullH,true)}<xdr:clientData/></xdr:twoCellAnchor>`);
+    } else if (mark === 'L') {
+      additions.push(`<xdr:twoCellAnchor editAs="twoCell">${anchor(col,row,0,row,half)}${rectShape(nextId++,`SF2 Late Comer ${ref}`,x,y,w,half)}<xdr:clientData/></xdr:twoCellAnchor>`);
+    } else if (mark === 'C') {
+      additions.push(`<xdr:twoCellAnchor editAs="twoCell">${anchor(col,row,half,row+1,0)}${rectShape(nextId++,`SF2 Cutting Classes ${ref}`,x,y+half,w,Math.max(1,fullH-half))}<xdr:clientData/></xdr:twoCellAnchor>`);
+    }
+  }
+  drawing = drawing.replace('</xdr:wsDr>', additions.join('') + '</xdr:wsDr>');
+  zip.updateFile('xl/drawings/drawing1.xml', Buffer.from(drawing,'utf8'));
+}
+
+
 function stripWorkbookExternalLinks(zip) {
   const wbEntry = zip.getEntry('xl/workbook.xml');
   if (wbEntry) {
@@ -276,7 +368,7 @@ function validateSf2Payload(payload) {
   for (const st of payload.students) {
     if (!st || typeof st !== 'object' || String(st.name || '').length > 500 || String(st.remarks || '').length > 2000) throw new Error('SF2 contains an invalid learner record.');
     if (!Array.isArray(st.marks) || st.marks.length !== payload.days.length) throw new Error(`SF2 attendance is incomplete for ${st.name || 'a learner'}.`);
-    for (const mark of st.marks) if (!['P','A','L'].includes(String(mark || 'P'))) throw new Error('SF2 contains an unsupported attendance code.');
+    for (const mark of st.marks) if (!['P','A','L','C'].includes(String(mark || 'P'))) throw new Error('SF2 contains an unsupported attendance code.');
   }
   for (const [key, value] of Object.entries(payload.meta)) {
     if (value !== null && value !== undefined && typeof value !== 'string' && typeof value !== 'number' && !(key === 'sf2Enabled' && typeof value === 'boolean')) throw new Error(`Invalid SF2 metadata field: ${key}.`);
@@ -338,13 +430,16 @@ function buildOfficialSf2Buffer(payload, ctx) {
     xml = setWorksheetCell(xml, `AE${row}`, '', 'string');
   }
 
+  const visualMarks = [];
   function writeStudent(row, st, number) {
     xml = setWorksheetCell(xml, `A${row}`, number, 'number');
     xml = setWorksheetCell(xml, `B${row}`, st.name || '', 'string');
     dayCols.forEach((col,i)=>{
-      const mark = String((st.marks || [])[i] || 'P');
-      const symbol = mark === 'A' ? 'X' : mark === 'L' ? 'T' : '';
-      xml = setWorksheetCell(xml, `${col}${row}`, symbol, 'string');
+      const mark = String((st.marks || [])[i] || 'P').toUpperCase();
+      // Attendance markings are drawn over the untouched official cells: edge-to-edge X for
+      // Absent, upper-half shade for Late Comer/Tardy, lower-half shade for Cutting Classes.
+      xml = setWorksheetCell(xml, `${col}${row}`, '', 'string');
+      if (mark !== 'P') visualMarks.push({ref:`${col}${row}`,mark});
     });
     xml = setWorksheetCell(xml, `AC${row}`, Number(st.absent || 0), 'number');
     xml = setWorksheetCell(xml, `AD${row}`, Number(st.tardy || 0), 'number');
@@ -394,6 +489,10 @@ function buildOfficialSf2Buffer(payload, ctx) {
   if (payload.adviser) xml = setWorksheetCell(xml, 'AD88', payload.adviser, 'string');
   if (payload.schoolHead) xml = setWorksheetCell(xml, 'AD92', payload.schoolHead, 'string');
 
+  // Collapse unused official learner rows only in the generated copy, then add compliant
+  // attendance marks on the drawing layer. The bundled official template is not rewritten.
+  xml = compactUnusedSf2LearnerRows(xml, payload);
+  sf2AppendComplianceMarks(zip, xml, visualMarks);
   zip.updateFile('xl/worksheets/sheet1.xml', Buffer.from(xml, 'utf8'));
   stripWorkbookExternalLinks(zip);
   cleanBrokenDefinedNames(zip);
@@ -1135,7 +1234,7 @@ function sf2TemplateFingerprint(ctx) {
 function sf2PreviewSignature(payload, ctx) {
   const crypto = require('crypto');
   return crypto.createHash('sha256')
-    .update('sf2-preview-v1.1.2\n')
+    .update('sf2-preview-v1.1.3\n')
     .update(sf2TemplateFingerprint(ctx))
     .update('\n')
     .update(stableStringify(payload))

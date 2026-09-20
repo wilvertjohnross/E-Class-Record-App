@@ -1,5 +1,18 @@
 E-Class Record App with GS and SF9
-Version 1.1.2
+Version 1.1.3
+
+
+
+VERSION 1.1.3 — SF2 DEPED-COMPLIANT MARKINGS / COMPACT PRINT ROWS
+- Restores the original SF2 official template from the v1.1.0/v1.1.1 integration line.
+- Attendance working view follows the template legend: blank Present; full-box X Absent; upper half shaded Late Comer/Tardy; lower half shaded Cutting Classes.
+- Click cycle: Present -> Absent -> Late/Tardy -> Cutting Classes -> Present.
+- Keyboard shortcuts: P/Space, X/A, L/T, C.
+- Official output uses drawing-layer marks so the X reaches the box corners and half-cell shading covers the correct half of the official cell.
+- Generated SF2 files hide unused learner rows according to the current SF1/current roster. The bundled official template remains unchanged; only generated copies are compacted for preview/printing.
+- Fixed capacity remains 21 Male rows, 25 Female rows, and 25 school-day columns; overflow still produces a non-blocking warning.
+- Existing v1.1.0/v1.1.1/v1.1.2 data and v1.0.27-era backups remain compatible.
+- No grading, transmutation, ECR, GS, SF9, IPC-security, updater-signature, or local-persistence changes.
 
 
 

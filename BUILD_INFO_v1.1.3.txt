@@ -1,0 +1,22 @@
+E-Class Record App with GS and SF9 — v1.1.3
+
+Release: SF2 DepEd-Compliant Markings / Compact Print Rows
+Base: v1.1.2
+
+Scope
+- Restores the original SF2 official template used in v1.1.0/v1.1.1.
+- Restores Present / Absent / Late-Tardy / Cutting Classes attendance states.
+- Working view: full-cell X, upper-half shade, lower-half shade.
+- Official output: drawing-layer edge-to-edge X and exact half-cell shading.
+- Generated SF2 copies hide unused Male/Female learner rows so printed height follows the current SF1/current roster.
+
+Compatibility
+- v1.1.0/v1.1.1/v1.1.2 SF2 data remains readable.
+- v1.0.27-era data remains compatible.
+- ECR, GS, SF9 grading/transmutation, persistence, IPC, updater security, and official ECR/GS templates are unchanged.
+
+Bundled SF2 template SHA-256
+2fe5668f6fd86ce7cb7a1cc2f76ac2e6e35bc20d3b80d779ce459000c0c9d4ba
+
+Windows build
+Extract the complete source package and run BUILD_WINDOWS.bat.
