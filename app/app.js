@@ -3025,7 +3025,7 @@ function reportCardHtml(cls, s){
   const electiveAreas = activeElectiveAreas(cls);
   function gradeCell(_sid, _area, term, result){
     const val=result[term];
-    return `<td class="rc-computed">${fmt(val)===""?"—":val}</td>`;
+    return `<td class="rc-computed">${fmt(val)===""?"":val}</td>`;
   }
   const areaRows = primaryAreas.map(area=>{
     const r = rowResults[area.key];
@@ -3035,17 +3035,17 @@ function reportCardHtml(cls, s){
       ${gradeCell(s.id, area, "t1", r)}
       ${gradeCell(s.id, area, "t2", r)}
       ${gradeCell(s.id, area, "t3", r)}
-      <td class="rc-computed">${r.final===null?"—":r.final}</td>
+      <td class="rc-computed">${r.final===null?"":r.final}</td>
       <td>${remark}</td>
     </tr>`;
   }).join("");
   const mapehRemark = mapehRow.final===null ? "" : (mapehRow.final>=75 ? "Passed" : "Failed");
   const mapehRowHtml = `<tr class="locked">
       <td class="left">MAPEH</td>
-      <td class="rc-computed">${mapehRow.t1===null?"—":mapehRow.t1}</td>
-      <td class="rc-computed">${mapehRow.t2===null?"—":mapehRow.t2}</td>
-      <td class="rc-computed">${mapehRow.t3===null?"—":mapehRow.t3}</td>
-      <td class="rc-computed">${mapehRow.final===null?"—":mapehRow.final}</td>
+      <td class="rc-computed">${mapehRow.t1===null?"":mapehRow.t1}</td>
+      <td class="rc-computed">${mapehRow.t2===null?"":mapehRow.t2}</td>
+      <td class="rc-computed">${mapehRow.t3===null?"":mapehRow.t3}</td>
+      <td class="rc-computed">${mapehRow.final===null?"":mapehRow.final}</td>
       <td>${mapehRemark}</td>
     </tr>`;
   const musRow = rowResults.MUS, peRow = rowResults.PE;
@@ -3057,7 +3057,7 @@ function reportCardHtml(cls, s){
       ${gradeCell(s.id, {key}, "t1", r)}
       ${gradeCell(s.id, {key}, "t2", r)}
       ${gradeCell(s.id, {key}, "t3", r)}
-      <td>${r.final===null?"—":r.final}</td>
+      <td>${r.final===null?"":r.final}</td>
       <td></td>
     </tr>`).join("");
   const electiveRowHtml = electiveAreas.map(area=>{
@@ -3068,7 +3068,7 @@ function reportCardHtml(cls, s){
       ${gradeCell(s.id,area,"t1",r)}
       ${gradeCell(s.id,area,"t2",r)}
       ${gradeCell(s.id,area,"t3",r)}
-      <td class="rc-computed">${r.final===null?"—":r.final}</td>
+      <td class="rc-computed">${r.final===null?"":r.final}</td>
       <td>${remark}</td>
     </tr>`;
   }).join("");
@@ -3132,7 +3132,7 @@ function reportCardHtml(cls, s){
           ${mapehRowHtml}
           ${subRowHtml}
           ${electiveRowHtml}
-          <tr class="gen-avg"><td class="left" colspan="4">General Average</td><td>${genAvg===null?"—":genAvg}</td><td>${genRemark}</td></tr>
+          <tr class="gen-avg"><td class="left" colspan="4">General Average</td><td>${genAvg===null?"":genAvg}</td><td>${genRemark}</td></tr>
         </tbody>
       </table>
 
