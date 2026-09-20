@@ -1,6 +1,6 @@
 'use strict';
 
-// v1.0.16 runtime extension
+// v1.0.17 runtime extension
 // Official ECR preview pipeline:
 // official template -> direct XLSX fill -> persistent hidden Excel renderer -> cached PDF -> in-app popup.
 // Excel is pre-warmed once in the background and reused. Preview PDFs are content-addressed,
@@ -148,20 +148,21 @@ function addEcrSubjectTeacherSignatory(buffer, payload, ctx) {
   const sheetEntry = zip.getEntry('xl/worksheets/sheet1.xml');
   if (!sheetEntry) throw new Error('The official ECR worksheet was not found while adding the Subject Teacher signatory.');
   let xml = sheetEntry.getData().toString('utf8');
-  const styles = addEcrSignatureStyles(zip);
   const meta = payload.meta || {};
   const preparedName = meta.preparedByName || meta.teacher || '';
   const preparedTitle = meta.preparedByTitle || 'Subject Teacher';
 
   // The official template already merges C119:E119 and C120:E120.
-  // Never create wider overlapping merges here: Excel rejects overlapping merged ranges.
+  // Keep the master workbook's style table untouched. Reuse existing template styles:
+  // style 59 = centered/bold with a thin bottom signature line; style 85 = plain text.
+  // This avoids extending styles.xml, which some desktop Excel builds reject during COM open.
   xml = ensureMergedRange(xml, 'C119:E119');
   xml = ensureMergedRange(xml, 'C120:E120');
   xml = setWorksheetCell(xml, 'B119', 'Prepared by:', 'string');
   xml = setWorksheetCell(xml, 'C119', preparedName, 'string');
-  xml = setWorksheetCellStyle(xml, 'C119', styles.nameStyle);
+  xml = setWorksheetCellStyle(xml, 'C119', 59);
   xml = setWorksheetCell(xml, 'C120', preparedTitle, 'string');
-  xml = setWorksheetCellStyle(xml, 'C120', styles.titleStyle);
+  xml = setWorksheetCellStyle(xml, 'C120', 85);
   zip.updateFile('xl/worksheets/sheet1.xml', Buffer.from(xml, 'utf8'));
   return zip.toBuffer();
 }
@@ -498,12 +499,14 @@ try {
   $excel.Visible = $false
   $excel.DisplayAlerts = $false
   try { $excel.AskToUpdateLinks = $false } catch {}
+  try { $excel.EnableEvents = $false } catch {}
+  try { $excel.AutomationSecurity = 3 } catch {}
 
   if (-not (Test-Path -LiteralPath $xlsx)) { throw ('Generated official workbook was not found: ' + $xlsx) }
   if ((Get-Item -LiteralPath $xlsx).Length -lt 1024) { throw 'Generated official workbook is incomplete.' }
   $openError = $null
   for ($attempt = 1; $attempt -le 3 -and $workbook -eq $null; $attempt++) {
-    try { $workbook = $excel.Workbooks.Open($xlsx, 0, $true, 5, '', '', $true) }
+    try { $workbook = $excel.Workbooks.Open($xlsx) }
     catch { $openError = $_.Exception; Start-Sleep -Milliseconds (250 * $attempt) }
   }
   if ($workbook -eq $null) { if ($openError) { throw $openError }; throw 'Microsoft Excel could not open the generated official workbook.' }
@@ -549,9 +552,9 @@ try {
   $excel.Visible = $false
   $excel.DisplayAlerts = $false
   try { $excel.AskToUpdateLinks = $false } catch {}
-  try { $excel.ScreenUpdating = $false } catch {}
   try { $excel.EnableEvents = $false } catch {}
   try { $excel.AutomationSecurity = 3 } catch {}
+  try { $excel.ScreenUpdating = $false } catch {}
   Send-EcrMessage @{ type='ready'; ok=$true }
 
   while (($line = [Console]::In.ReadLine()) -ne $null) {
@@ -576,7 +579,7 @@ try {
           if (-not (Test-Path -LiteralPath $xlsx)) { throw ('Generated official workbook was not found: ' + $xlsx) }
           $openError = $null
           for ($attempt = 1; $attempt -le 3 -and $workbook -eq $null; $attempt++) {
-            try { $workbook = $excel.Workbooks.Open($xlsx, 0, $true, 5, '', '', $true) }
+            try { $workbook = $excel.Workbooks.Open($xlsx) }
             catch { $openError = $_.Exception; Start-Sleep -Milliseconds (200 * $attempt) }
           }
           if ($workbook -eq $null) { if ($openError) { throw $openError }; throw 'Microsoft Excel could not open the generated official workbook.' }
@@ -837,7 +840,7 @@ function gsPreviewSignature(payload, ctx) {
 function previewSignature(payload, ctx) {
   const crypto = require('crypto');
   return crypto.createHash('sha256')
-    .update('ecr-preview-v1.0.16-safe-signatory-no-overlap\n')
+    .update('ecr-preview-v1.0.17-com-open-safe-template-style\n')
     .update(templateFingerprint(ctx))
     .update('\n')
     .update(stableStringify(payload))
@@ -1216,7 +1219,7 @@ module.exports = {
     if (action === 'ecr:preview-engine-status' || action === 'official:preview-engine-status') {
       return { ok: true, warm: !!(excelEngine && excelEngine.ready) };
     }
-    return { ok: false, unsupported: true, error: `Runtime action is not available in v1.0.16: ${action}` };
+    return { ok: false, unsupported: true, error: `Runtime action is not available in v1.0.17: ${action}` };
   }
 };
 
