@@ -997,7 +997,7 @@ function termStudentRow(cls, termKey, s){
     const catScores = scoreMap[k] || {};
     const itemCells = cat.components.map(c=>{
       const val = catScores[c.id]!==undefined ? catScores[c.id] : "";
-      return `<td><input type="number" min="0" max="${Number(c.hps)||0}" step="0.5" class="score-input" data-cat="${k}" data-comp="${esc(c.id)}" value="${esc(val)}"></td>`;
+      return `<td><input type="text" inputmode="decimal" autocomplete="off" spellcheck="false" class="score-input" data-cat="${k}" data-comp="${esc(c.id)}" data-hps="${Number(c.hps)||0}" value="${esc(val)}" aria-label="Raw score for ${esc(c.id)}"></td>`;
     }).join("");
     return itemCells + categoryComputedCells(cat, catScores, result.parts[k]);
   }).join("");
@@ -1870,10 +1870,12 @@ function renderTerm(main, cls, termKey, termLabel){
         if(!scoreMap[catKey]) scoreMap[catKey]={};
         const comp=cls.categories[catKey] && cls.categories[catKey].components.find(c=>c.id===compId);
         const previous=scoreMap[catKey][compId];
-        if(e.target.value!==""){
-          const n=Number(e.target.value),h=Number(comp && comp.hps);
+        const raw=String(e.target.value??"").trim();
+        if(raw!==""){
+          const numericText=/^(?:\d+(?:\.\d*)?|\.\d+)$/.test(raw);
+          const n=numericText?Number(raw):NaN,h=Number(comp && comp.hps);
           if(!Number.isFinite(n)||n<0||!Number.isFinite(h)||h<=0||n>h){
-            alert(`Invalid raw score. Enter a value from 0 to ${Number.isFinite(h)&&h>0?h:"the HPS"}.`);
+            alert(`Invalid raw score. Type a numeric value from 0 to ${Number.isFinite(h)&&h>0?h:"the HPS"}.`);
             e.target.value=previous===undefined||previous===null?"":previous;
             return;
           }
