@@ -1,6 +1,6 @@
 'use strict';
 
-// v1.0.18 runtime extension
+// v1.0.19 runtime extension
 // Official ECR preview pipeline:
 // official template -> direct XLSX fill -> persistent hidden Excel renderer -> cached PDF -> in-app popup.
 // Excel is pre-warmed once in the background and reused. Preview PDFs are content-addressed,
@@ -327,7 +327,7 @@ function buildOfficialGsBuffer(payload, ctx) {
 
 function buildOfficialDocumentBuffer(kind, payload, ctx) {
   if (kind === 'gs') return buildOfficialGsBuffer(payload, ctx);
-  return addEcrSubjectTeacherSignatory(buildOfficialEcrBuffer(payload, ctx), payload, ctx);
+  return buildOfficialEcrBuffer(payload, ctx);
 }
 
 function validatePayload(payload) {
@@ -425,12 +425,21 @@ function buildOfficialEcrBuffer(payload, ctx) {
   payload.students.filter(s=>s.sex==='M').forEach((s,i)=>writeStudent(18+i,s));
   payload.students.filter(s=>s.sex==='F').forEach((s,i)=>writeStudent(69+i,s));
 
+  // The signature structure/line is fixed in the clean official template.
+  // Setup supplies only the Subject Teacher name/title values.
+  xml = setWorksheetCell(xml, 'C119', meta.preparedByName || meta.teacher || '', 'string');
+  xml = setWorksheetCell(xml, 'C120', meta.preparedByTitle || 'Subject Teacher', 'string');
+
   // Compact the official preview/print copy by hiding only unused learner rows.
   // Hidden rows retain their original cells/formulas/formatting, so the official
   // template itself is not structurally rewritten.
   xml = compactUnusedLearnerRows(xml, payload);
 
   zip.updateFile('xl/worksheets/sheet1.xml', Buffer.from(xml, 'utf8'));
+
+  // Keep the official template fixed but replace its school-logo image with
+  // the global logo selected in Setup, just as the official GS does.
+  replacePngMediaFromDataUri(zip, 'xl/media/image1.png', payload.schoolLogoDataUri);
 
   const wbEntry = zip.getEntry('xl/workbook.xml');
   if (wbEntry) {
@@ -989,7 +998,7 @@ function gsPreviewSignature(payload, ctx) {
 function previewSignature(payload, ctx) {
   const crypto = require('crypto');
   return crypto.createHash('sha256')
-    .update('ecr-preview-v1.0.18-template-first-com-fill\n')
+    .update('ecr-preview-v1.0.19-clean-slate-direct-fill\n')
     .update(templateFingerprint(ctx))
     .update('\n')
     .update(stableStringify(payload))
@@ -1111,21 +1120,30 @@ async function createOfficialPopupPreview(payload, context) {
     return { ok: true, preview: true, inAppPopup: true, cached: true, signature, xlsxPath, pdfPath };
   }
 
-  const templatePath = ctx.resolveResource('templates/ECR official Template.xlsx');
-  const plan = makeEcrExcelRenderPlan(payload);
+  // v1.0.19 uses the same stable pipeline as the working Grading Sheet:
+  // clean formula-free official template -> direct app values -> Excel PDF render.
+  // Excel no longer writes cells, evaluates formulas, follows links, or breaks links.
+  fs.writeFileSync(xlsxPath, buildOfficialDocumentBuffer('ecr', payload, ctx));
+  let renderError = null;
   try {
     if (!excelEngine) excelEngine = new PersistentExcelRenderer(ctx);
-    await excelEngine.start();
-    await excelEngine.renderEcrTemplate(templatePath, xlsxPath, pdfPath, plan);
+    await excelEngine.render(xlsxPath, pdfPath);
   } catch (err) {
-    return {
-      ok: false,
-      previewUnavailable: true,
-      openedFallback: false,
-      xlsxPath,
-      pdfPath,
-      error: (err && err.message) || 'Microsoft Excel could not render the official ECR template.'
-    };
+    renderError = err;
+    try { if (excelEngine) excelEngine.stop(); } catch {}
+    excelEngine = null;
+    await new Promise(r => setTimeout(r, 350));
+    const fallback = await fallbackOneShotRender(xlsxPath, pdfPath, ctx);
+    if (!fallback.ok) {
+      return {
+        ok: false,
+        previewUnavailable: true,
+        openedFallback: false,
+        xlsxPath,
+        pdfPath,
+        error: fallback.error || (renderError && renderError.message) || 'Microsoft Excel did not create the official ECR PDF preview.'
+      };
+    }
   }
 
   if (!isUsablePreviewFile(fs, pdfPath)) {
@@ -1358,7 +1376,7 @@ module.exports = {
     if (action === 'ecr:preview-engine-status' || action === 'official:preview-engine-status') {
       return { ok: true, warm: !!(excelEngine && excelEngine.ready) };
     }
-    return { ok: false, unsupported: true, error: `Runtime action is not available in v1.0.18: ${action}` };
+    return { ok: false, unsupported: true, error: `Runtime action is not available in v1.0.19: ${action}` };
   }
 };
 
