@@ -72,3 +72,7 @@ Generated official ECR files opened for printing are stored under:
 Documents\E-Class Record App with GS and SF9\Official ECR Exports\
 
 Upgrading or uninstalling the program does not delete the gradebook data folder.
+
+
+VERSION 1.0.6 - OFFICIAL ECR PRINT PREVIEW
+In Class Record view, click "Official ECR Print Preview". On Windows computers with desktop Microsoft Excel installed, the app creates a filled copy of the bundled official ECR workbook and opens Excel directly in Print Preview. This avoids Electron/Chromium's unsupported browser print-preview page while preserving the official template's print settings. If desktop Excel is unavailable, the app opens the generated workbook normally instead.

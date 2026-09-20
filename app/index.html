@@ -1717,6 +1717,10 @@ async function exportOfficialEcr(cls,termKey,mode="save"){
   try{
     const payload=officialEcrPayload(cls,termKey);
     const result=await window.eclassAPI.exportOfficialEcr(payload,mode);
+    if(result && !result.ok && result.previewUnavailable){
+      await showInfoDialog("Print Preview Unavailable",`Microsoft Excel Print Preview could not be started.\n\n${result.error||""}\n\nThe filled Official ECR was ${result.openedFallback?"opened normally in your spreadsheet application":"saved here"}:\n${result.path||""}`);
+      return;
+    }
     if(!result || (!result.ok && !result.cancelled)){
       alert("Could not create the Official ECR: "+(result&&result.error?result.error:"Unknown error"));
       return;
@@ -1821,7 +1825,7 @@ function renderTerm(main, cls, termKey, termLabel){
     const exp=document.getElementById("termExportOfficial");
     const print=document.getElementById("termPrint");
     if(exp) exp.style.display=isRecord?"":"none";
-    if(print) print.textContent=isRecord?"Open Official ECR for Printing":"Print this view";
+    if(print) print.textContent=isRecord?"Official ECR Print Preview":"Print this view";
   }
   document.querySelectorAll(".viewbtn").forEach(b=>{
     b.addEventListener("click", ()=>{
@@ -1855,7 +1859,7 @@ function renderTerm(main, cls, termKey, termLabel){
   });
   document.getElementById("termExportOfficial").addEventListener("click", ()=>exportOfficialEcr(cls,termKey,"save"));
   document.getElementById("termPrint").addEventListener("click", ()=>{
-    if(TERM_VIEW_MODE[termKey]==="record") exportOfficialEcr(cls,termKey,"open");
+    if(TERM_VIEW_MODE[termKey]==="record") exportOfficialEcr(cls,termKey,"preview");
     else printCurrentView();
   });
   draw(); updateTermActions();

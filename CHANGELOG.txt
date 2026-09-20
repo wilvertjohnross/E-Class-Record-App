@@ -1,3 +1,9 @@
+v1.0.6
+- Added Official ECR Print Preview using desktop Microsoft Excel on Windows.
+- The Class Record print action now generates the filled official template and opens Excel directly in Print Preview.
+- This preserves the official workbook print area, scaling, margins, logos and page setup.
+- If Excel Print Preview is unavailable, the filled workbook opens normally as a fallback.
+
 E-Class Record App with GS and SF9 — v1.0.5
 
 NEW

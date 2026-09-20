@@ -1,6 +1,7 @@
 const { app, BrowserWindow, dialog, ipcMain, Menu, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const { execFile, spawn } = require('child_process');
 const AdmZip = require('adm-zip');
 
 const PRODUCT_NAME = 'E-Class Record App with GS and SF9';
@@ -376,18 +377,117 @@ function buildOfficialEcrBuffer(payload) {
   return zip.toBuffer();
 }
 
+function quotePowerShellLiteral(value) {
+  return "'" + String(value).replace(/'/g, "''") + "'";
+}
+
+function canUseExcelPrintPreview() {
+  return new Promise((resolve) => {
+    if (process.platform !== 'win32') {
+      resolve({ ok: false, error: 'Official ECR Print Preview requires Windows and desktop Microsoft Excel.' });
+      return;
+    }
+    const checkScript = [
+      "$ErrorActionPreference='Stop'",
+      '$excel=$null',
+      'try {',
+      '  $excel=New-Object -ComObject Excel.Application',
+      '  $excel.Quit()',
+      '  [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($excel)',
+      '  exit 0',
+      '} catch {',
+      '  if ($excel -ne $null) { try { $excel.Quit() } catch {} }',
+      '  Write-Error $_.Exception.Message',
+      '  exit 1',
+      '}'
+    ].join('; ');
+    execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', checkScript],
+      { windowsHide: true, timeout: 15000 },
+      (err, _stdout, stderr) => {
+        if (err) resolve({ ok: false, error: (stderr || '').trim() || 'Microsoft Excel could not be started.' });
+        else resolve({ ok: true });
+      });
+  });
+}
+
+async function openExcelPrintPreview(filePath) {
+  const availability = await canUseExcelPrintPreview();
+  if (!availability.ok) return availability;
+
+  const scriptPath = path.join(app.getPath('temp'), `eclass-ecr-preview-${Date.now()}.ps1`);
+  const psFile = quotePowerShellLiteral(filePath);
+  const psScript = [
+    "$ErrorActionPreference = 'Stop'",
+    '$excel = $null',
+    '$workbook = $null',
+    '$sheet = $null',
+    'try {',
+    '  $excel = New-Object -ComObject Excel.Application',
+    '  $excel.Visible = $true',
+    '  $excel.DisplayAlerts = $false',
+    `  $workbook = $excel.Workbooks.Open(${psFile}, 0, $true)`,
+    '  $sheet = $workbook.Worksheets.Item(1)',
+    '  $sheet.Activate()',
+    '  $excel.DisplayAlerts = $true',
+    '  $sheet.PrintPreview()',
+    '}',
+    'catch {',
+    '  Add-Type -AssemblyName PresentationFramework -ErrorAction SilentlyContinue',
+    '  try { [System.Windows.MessageBox]::Show("Could not open the Official ECR Print Preview.\n\n" + $_.Exception.Message, "E-Class Record App") | Out-Null } catch {}',
+    '}',
+    'finally {',
+    '  if ($workbook -ne $null) { try { $workbook.Close($false) } catch {} }',
+    '  if ($excel -ne $null) { try { $excel.Quit() } catch {} }',
+    '  if ($sheet -ne $null) { try { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($sheet) } catch {} }',
+    '  if ($workbook -ne $null) { try { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($workbook) } catch {} }',
+    '  if ($excel -ne $null) { try { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($excel) } catch {} }',
+    '  [GC]::Collect()',
+    '  [GC]::WaitForPendingFinalizers()',
+    '  try { Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue } catch {}',
+    '}'
+  ].join('\r\n');
+  fs.writeFileSync(scriptPath, psScript, 'utf8');
+
+  try {
+    const child = spawn('powershell.exe', ['-NoProfile', '-STA', '-ExecutionPolicy', 'Bypass', '-File', scriptPath], {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: false
+    });
+    child.unref();
+    return { ok: true, path: filePath, preview: true };
+  } catch (err) {
+    try { fs.unlinkSync(scriptPath); } catch {}
+    return { ok: false, error: err.message };
+  }
+}
+
 async function saveOfficialEcr(payload, mode = 'save') {
   const buffer = buildOfficialEcrBuffer(payload);
   const termNo = officialTermNumber(payload.termKey);
   const classPart = cleanFileName(payload.meta.className || `${payload.meta.gradeLevel || ''} ${payload.meta.section || ''}`);
   const filename = `${classPart} - Term ${termNo} - Official ECR.xlsx`;
 
-  if (mode === 'open') {
+  if (mode === 'preview' || mode === 'open') {
     const p = ensureDataFolders();
     const exportDir = path.join(p.root, 'Official ECR Exports');
     fs.mkdirSync(exportDir, { recursive: true });
     const filePath = path.join(exportDir, filename);
     fs.writeFileSync(filePath, buffer);
+
+    if (mode === 'preview') {
+      const previewResult = await openExcelPrintPreview(filePath);
+      if (previewResult.ok) return previewResult;
+      const openError = await shell.openPath(filePath);
+      return {
+        ok: false,
+        previewUnavailable: true,
+        openedFallback: !openError,
+        path: filePath,
+        error: previewResult.error || openError || 'Microsoft Excel Print Preview is unavailable.'
+      };
+    }
+
     const error = await shell.openPath(filePath);
     if (error) return { ok: false, error };
     return { ok: true, path: filePath, opened: true };
