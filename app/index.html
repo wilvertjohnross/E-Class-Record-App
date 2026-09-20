@@ -7,17 +7,43 @@
 <title>E-Class Record App with GS and SF9</title>
 <style>
   :root{
-    --paper: #F1E9D6;
-    --paper-deep: #E7DBBE;
-    --ink: #1F2A3C;
-    --ink-soft: #4A5568;
-    --manila: #C9A876;
-    --manila-deep: #B08D53;
-    --red-pen: #9E3A2C;
-    --green-chalk: #33513E;
-    --border: #A8977A;
-    --white: #FBF8F0;
-    --shadow: rgba(31,42,60,0.18);
+    /* Semantic theme tokens — the working UI is controlled from here.
+       Legacy aliases below keep the existing form CSS stable while allowing
+       light/dark themes to share one centrally managed palette. */
+    --background:#F1E9D6;
+    --surface:#FBF8F0;
+    --surface-raised:#FFFFFF;
+    --surface-subtle:#E7DBBE;
+    --surface-muted:#EFE6CC;
+    --text-primary:#1F2A3C;
+    --text-secondary:#4A5568;
+    --text-disabled:#6D7480;
+    --border:rgba(79,65,45,.42);
+    --border-strong:rgba(79,65,45,.62);
+    --accent:#33513E;
+    --accent-fill:#33513E;
+    --accent-hover:#274232;
+    --success:#2E5B3E;
+    --warning:#9E5E2C;
+    --error:#9E3A2C;
+    --error-fill:#8A3328;
+    --info:#356A8A;
+    --on-accent:#FBF8F0;
+    --focus-ring:rgba(51,81,62,.24);
+    --overlay:rgba(31,42,60,.52);
+    --shadow:rgba(31,42,60,.18);
+    --shadow-raised:rgba(31,42,60,.22);
+
+    /* Existing visual-language aliases. */
+    --paper:var(--background);
+    --paper-deep:var(--surface-subtle);
+    --ink:var(--text-primary);
+    --ink-soft:var(--text-secondary);
+    --manila:#C9A876;
+    --manila-deep:#B08D53;
+    --red-pen:var(--error);
+    --green-chalk:var(--accent);
+    --white:var(--surface);
     --serif: Georgia, 'Iowan Old Style', 'Palatino Linotype', Palatino, serif;
     --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
   }
@@ -430,42 +456,148 @@
   #restoreWindowBtn.visible{display:block;}
   #restoreWindowBtn:hover{transform:translateX(-50%) translateY(-1px);}
 
-  /* Dark mode changes only the working UI. Official-template exports remain unchanged. */
+  /* ===== Dark theme: semantic, WCAG-AA-oriented working UI =====
+     Official Excel templates and print output are intentionally unaffected. */
   html[data-theme="dark"]{
     color-scheme:dark;
-    --paper:#151A21;
-    --paper-deep:#202731;
-    --ink:#E7EDF4;
-    --ink-soft:#AAB4C0;
-    --manila:#B79A69;
-    --manila-deep:#9A7E50;
-    --red-pen:#E07A6D;
-    --green-chalk:#76B58C;
-    --border:#465362;
-    --white:#1B222B;
-    --shadow:rgba(0,0,0,.42);
+    --background:#1A1D22;
+    --surface:#20242B;
+    --surface-raised:#272C34;
+    --surface-subtle:#2C323B;
+    --surface-muted:#313844;
+    --text-primary:#E8EAED;
+    --text-secondary:#B7BEC8;
+    --text-disabled:#9AA3AE;
+    --border:rgba(255,255,255,.12);
+    --border-strong:rgba(255,255,255,.20);
+    --accent:#84B594;
+    --accent-fill:#3F7958;
+    --accent-hover:#447657;
+    --success:#84B594;
+    --warning:#D4A55D;
+    --error:#E38B83;
+    --error-fill:#7D433F;
+    --info:#7EA6D8;
+    --on-accent:#F1F3F5;
+    --focus-ring:rgba(132,181,148,.30);
+    --overlay:rgba(7,10,14,.72);
+    --shadow:rgba(0,0,0,.10);
+    --shadow-raised:rgba(0,0,0,.14);
+
+    /* legacy palette aliases mapped deliberately rather than inverted */
+    --paper:var(--background);
+    --paper-deep:var(--surface-subtle);
+    --ink:var(--text-primary);
+    --ink-soft:var(--text-secondary);
+    --manila:#6C583A;
+    --manila-deep:#5E4D34;
+    --red-pen:var(--error);
+    --green-chalk:var(--accent);
+    --white:var(--surface);
   }
-  html[data-theme="dark"] .school-logo-preview{background:#fff;}
-  html[data-theme="dark"] table.data td.computed,
-  html[data-theme="dark"] table.data td.grade-final,
-  html[data-theme="dark"] table.cr-table td.computed,
-  html[data-theme="dark"] table.cr-table td.grade-final,
-  html[data-theme="dark"] .import-summary{background:#242D38;}
-  html[data-theme="dark"] table.cr-table thead tr.cr-hps td,
-  html[data-theme="dark"] table.cr-table thead tr.cr-hps th{background:#29323D;}
-  html[data-theme="dark"] table.cr-master thead tr.cr-sub th{background:#2D3A48;color:var(--ink);}
-  html[data-theme="dark"] table.cr-master td.meta-value,
-  html[data-theme="dark"] table.gs-inforow td.val{background:#202731;color:var(--green-chalk);}
+
+  /* Surfaces/elevation — closer layers are subtly lighter, not shadow-heavy. */
+  html[data-theme="dark"] body{background:var(--background);color:var(--text-primary);}
+  html[data-theme="dark"] header.appbar{background:#171A1F;color:var(--text-primary);border-bottom-color:#9B514B;}
+  html[data-theme="dark"] nav.tabs{background:#1E2228;border-bottom-color:var(--border);}
+  html[data-theme="dark"] nav.tabs button.tab{background:#1E2228;color:var(--text-secondary);}
+  html[data-theme="dark"] nav.tabs button.tab:hover{background:var(--surface-subtle);color:var(--text-primary);}
+  html[data-theme="dark"] nav.tabs button.tab.active{background:var(--surface);color:var(--error);border-bottom-color:var(--error);}
+  html[data-theme="dark"] .card{background:var(--surface);border-color:var(--border);box-shadow:none;}
+  html[data-theme="dark"] .rc-sheet,
+  html[data-theme="dark"] .cr-page,
+  html[data-theme="dark"] .gs-page{background:var(--surface-raised);border-color:var(--border-strong);}
+  html[data-theme="dark"] .app-modal{background:var(--surface-raised);border-color:var(--border-strong);border-top-color:var(--error);box-shadow:none;}
+  html[data-theme="dark"] .app-modal-backdrop{background:var(--overlay);}
+  html[data-theme="dark"] .import-summary{background:var(--surface-subtle);}
+
+  /* Inputs and focus states. */
   html[data-theme="dark"] .app-modal input,
   html[data-theme="dark"] .app-modal textarea,
   html[data-theme="dark"] select,
   html[data-theme="dark"] input[type=text],
-  html[data-theme="dark"] input[type=number]{background:#11161C;color:var(--ink);}
-  html[data-theme="dark"] .rc-sheet,
-  html[data-theme="dark"] .cr-page,
-  html[data-theme="dark"] .gs-page{background:#1B222B;}
+  html[data-theme="dark"] input[type=number],
+  html[data-theme="dark"] textarea{background:#171B21;color:var(--text-primary);border-color:var(--border-strong);}
+  html[data-theme="dark"] input::placeholder,
+  html[data-theme="dark"] textarea::placeholder{color:var(--text-disabled);opacity:1;}
+  html[data-theme="dark"] input:focus,
+  html[data-theme="dark"] select:focus,
+  html[data-theme="dark"] textarea:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 2px var(--focus-ring);}
+  html[data-theme="dark"] input:disabled,
+  html[data-theme="dark"] select:disabled,
+  html[data-theme="dark"] textarea:disabled{background:#252A31;color:var(--text-disabled);border-color:var(--border);opacity:1;}
+
+  /* Buttons retain light-mode hierarchy without luminous/inverted fills. */
+  html[data-theme="dark"] button{background:var(--manila);color:var(--text-primary);border-color:var(--border);box-shadow:none;}
+  html[data-theme="dark"] button:hover{box-shadow:none;filter:none;background:#77613F;}
+  html[data-theme="dark"] button.primary,
+  html[data-theme="dark"] .cr-viewtoggle button.active,
+  html[data-theme="dark"] #restoreWindowBtn,
+  html[data-theme="dark"] .weight-badge{background:var(--accent-fill);color:var(--on-accent);border-color:var(--border-strong);}
+  html[data-theme="dark"] button.primary:hover{background:var(--accent-hover);filter:none;}
+  html[data-theme="dark"] button.danger,
+  html[data-theme="dark"] .weight-badge.warn{background:var(--error-fill);color:var(--on-accent);}
+  html[data-theme="dark"] button.danger:hover{background:#884A45;}
+  html[data-theme="dark"] button.ghost{background:transparent;color:var(--text-primary);border-color:var(--border-strong);}
+  html[data-theme="dark"] button.ghost:hover{background:rgba(255,255,255,.07);}
+  html[data-theme="dark"] button:disabled{background:#252A31;color:var(--text-disabled);border-color:var(--border);opacity:1;filter:none;}
+
+  /* Tables and sticky regions use shade changes for hierarchy. */
+  html[data-theme="dark"] table.data th{background:#373029;color:var(--text-primary);border-color:var(--border-strong);}
+  html[data-theme="dark"] table.data th,
+  html[data-theme="dark"] table.data td,
+  html[data-theme="dark"] table.cr-table th,
+  html[data-theme="dark"] table.cr-table td,
   html[data-theme="dark"] table.rc-grades th,
-  html[data-theme="dark"] table.rc-att th{background:#29323D;}
+  html[data-theme="dark"] table.rc-grades td,
+  html[data-theme="dark"] table.rc-att th,
+  html[data-theme="dark"] table.rc-att td{border-color:var(--border-strong);}
+  html[data-theme="dark"] table.data td.computed,
+  html[data-theme="dark"] table.data td.grade-final,
+  html[data-theme="dark"] table.cr-table td.computed,
+  html[data-theme="dark"] table.cr-table td.grade-final{background:var(--surface-muted);}
+  html[data-theme="dark"] table.data td.computed,
+  html[data-theme="dark"] table.cr-table td.computed{color:var(--success);}
+  html[data-theme="dark"] table.data td.grade-final,
+  html[data-theme="dark"] table.cr-table td.grade-final,
+  html[data-theme="dark"] table.rc-grades td.rc-computed{color:var(--error);}
+  html[data-theme="dark"] table.cr-table thead tr.cr-band th,
+  html[data-theme="dark"] table.cr-table tr.group-row td,
+  html[data-theme="dark"] table.data tr.group-row td,
+  html[data-theme="dark"] table.cr-master tr.names-row-navy td{background:#171A1F;color:var(--text-primary);border-color:var(--border-strong);}
+  html[data-theme="dark"] table.cr-table thead tr.cr-sub th{background:#373029;color:var(--text-primary);}
+  html[data-theme="dark"] table.cr-table thead tr.cr-hps td,
+  html[data-theme="dark"] table.cr-table thead tr.cr-hps th{background:var(--surface-subtle);color:var(--text-secondary);}
+  html[data-theme="dark"] table.cr-master thead tr.cr-sub th{background:#303A45;color:var(--text-primary);}
+  html[data-theme="dark"] table.cr-master thead tr.cr-hps td,
+  html[data-theme="dark"] table.cr-master td.firstterm-cell,
+  html[data-theme="dark"] table.cr-master td.meta-label,
+  html[data-theme="dark"] table.cr-master tr.names-row td,
+  html[data-theme="dark"] table.cr-master th.firstterm-cell-th{background:var(--surface-raised);}
+  html[data-theme="dark"] table.cr-master td.meta-value,
+  html[data-theme="dark"] table.gs-inforow td.val{background:var(--surface-subtle);color:var(--accent);}
+  html[data-theme="dark"] table.rc-grades th,
+  html[data-theme="dark"] table.rc-att th{background:var(--surface-subtle);color:var(--text-primary);}
+  html[data-theme="dark"] table.cr-table td.blank-cell{background:repeating-linear-gradient(45deg,#22272E,#22272E 4px,#2A3038 4px,#2A3038 5px);}
+  html[data-theme="dark"] table.cr-table input.score-input.score-input-error{outline-color:var(--error);background:#3A2425;color:var(--text-primary);}
+
+  /* Frozen learner identity reads as a raised table surface. */
+  html[data-theme="dark"] table.cr-table tbody tr[data-sid] > td.sticky-learner{background:var(--surface-raised);box-shadow:2px 0 0 var(--border-strong);}
+  html[data-theme="dark"] table.cr-table tbody tr[data-sid]:hover > td.sticky-learner{background:var(--surface-subtle);}
+
+  /* Status/grade accents: slightly desaturated to avoid vibration on dark gray. */
+  html[data-theme="dark"] .desc-band{color:var(--on-accent);}
+  html[data-theme="dark"] .band-Advancing{background:#345E44;}
+  html[data-theme="dark"] .band-Benchmarking{background:#426D52;}
+  html[data-theme="dark"] .band-Connecting{background:#6A5A35;}
+  html[data-theme="dark"] .band-Developing{background:#765426;}
+  html[data-theme="dark"] .band-Emerging{background:#703E3A;}
+  html[data-theme="dark"] .score-entry-notice{background:var(--surface-raised);color:var(--text-primary);border-color:var(--border-strong);border-left-color:var(--error);box-shadow:none;}
+
+  /* Subtle separators instead of bright edges or heavy shadows. */
+  html[data-theme="dark"] .school-logo-preview{background:#F5F3ED;border-color:var(--border-strong);box-shadow:none;}
+  html[data-theme="dark"] #restoreWindowBtn{box-shadow:none;}
+  html[data-theme="dark"] footer.status{color:var(--text-secondary);}
 
   @media print{
     #restoreWindowBtn{display:none !important;}
