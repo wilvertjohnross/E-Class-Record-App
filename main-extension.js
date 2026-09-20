@@ -225,14 +225,12 @@ function setWorksheetCellStyle(xml, ref, styleIndex) {
 
 
 function sf2CenterSummaryHeaderValueAreas(xml) {
-  // The official SF2 visually treats Month, its value, and the class-day count as
-  // two-row blocks beside the Summary subheader. In the generated copy only,
-  // formalize those already-blank areas as merged cells so Excel centers the
-  // dynamic values both horizontally and vertically without changing captions.
-  // Give the Month label enough room without an internal separator: the label
-  // spans AB:AC, while the actual month occupies AD. The overall official block
-  // width and its outer borders stay unchanged.
-  const wanted = ['AB64:AC65', 'AD64:AD65', 'AG64:AG65'];
+  // Generated-copy-only geometry for the Month and class-day values. Keep the
+  // official captions and outer block dimensions, but give the actual month a
+  // wider field so a 14 pt month name can be genuinely centered instead of
+  // overflowing a single narrow column. There is intentionally no separator
+  // between the Month caption and its value.
+  const wanted = ['AB64:AB65', 'AC64:AD65', 'AG64:AG65'];
   const existing = new Set();
   const block = xml.match(/<mergeCells\b([^>]*)>([\s\S]*?)<\/mergeCells>/);
   if (!block) throw new Error('The official SF2 merged-cell table was not found.');
@@ -288,9 +286,17 @@ function sf2FixSummaryHeaderStyles(zip, worksheetXml) {
     : `${fontsSection[1]} count="${oldFontCount + 1}"`;
   styles = styles.replace(fontsSection[0], `<fonts${fontAttrs}>${fontsSection[2]}${valueFont}</fonts>`);
 
+  const borderIdFor = ref => {
+    const idx = styleFor(ref), xf = xfs[idx] || '';
+    const n = Number((xf.match(/\bborderId="(\d+)"/) || [])[1]);
+    if (!Number.isInteger(n) || n < 0) throw new Error(`The official SF2 summary-header border for ${ref} was not found.`);
+    return n;
+  };
   const desired = new Map([
-    [styleFor('AB64'), { alignment:'<alignment horizontal="center" vertical="center"/>', fontId:null }],
-    [styleFor('AD64'), { alignment:'<alignment horizontal="center" vertical="center"/>', fontId:valueFontId }],
+    // Keep Month: readable in its compact caption cell while leaving the right
+    // edge open. The month itself starts in AC and spans AC:AD.
+    [styleFor('AB64'), { alignment:'<alignment horizontal="left" vertical="center" shrinkToFit="1"/>', fontId:null }],
+    [styleFor('AC64'), { alignment:'<alignment horizontal="center" vertical="center"/>', fontId:valueFontId, borderId:borderIdFor('AF64') }],
     [styleFor('AE64'), { alignment:'<alignment horizontal="center" vertical="center" wrapText="1"/>', fontId:null }],
     [styleFor('AG64'), { alignment:'<alignment horizontal="center" vertical="center"/>', fontId:valueFontId }]
   ]);
@@ -302,6 +308,11 @@ function sf2FixSummaryHeaderStyles(zip, worksheetXml) {
       if (/\bfontId="\d+"/.test(xf)) xf = xf.replace(/\bfontId="\d+"/, `fontId="${opts.fontId}"`);
       else xf = xf.replace(/^<xf\b/, `<xf fontId="${opts.fontId}"`);
       if (!/\bapplyFont="1"/.test(xf)) xf = xf.replace(/^<xf\b/, '<xf applyFont="1"');
+    }
+    if (Number.isInteger(opts.borderId)) {
+      if (/\bborderId="\d+"/.test(xf)) xf = xf.replace(/\bborderId="\d+"/, `borderId="${opts.borderId}"`);
+      else xf = xf.replace(/^<xf\b/, `<xf borderId="${opts.borderId}"`);
+      if (!/\bapplyBorder="1"/.test(xf)) xf = xf.replace(/^<xf\b/, '<xf applyBorder="1"');
     }
     if (/<alignment\b[^>]*\/>/.test(xf)) xf = xf.replace(/<alignment\b[^>]*\/>/, alignment);
     else if (/<alignment\b[^>]*>[\s\S]*?<\/alignment>/.test(xf)) xf = xf.replace(/<alignment\b[^>]*>[\s\S]*?<\/alignment>/, alignment);
@@ -315,6 +326,63 @@ function sf2FixSummaryHeaderStyles(zip, worksheetXml) {
   }
   styles = styles.replace(section[0], `<cellXfs${section[1]}>${xfs.join('')}</cellXfs>`);
   zip.updateFile('xl/styles.xml', Buffer.from(styles, 'utf8'));
+}
+
+function sf2CenterNumericOutputCells(zip, worksheetXml, refs) {
+  // Center only generated numeric output cells. Clone each cell's existing style
+  // so borders, fonts, fills and number formats remain official-template based.
+  const stylesEntry = zip.getEntry('xl/styles.xml');
+  if (!stylesEntry) throw new Error('The official SF2 styles table was not found.');
+  let styles = stylesEntry.getData().toString('utf8');
+  const section = styles.match(/<cellXfs\b([^>]*)>([\s\S]*?)<\/cellXfs>/);
+  if (!section) throw new Error('The official SF2 cell-style table is invalid.');
+  const xfs = [];
+  const xfStart = /<xf\b[^>]*(?:\/>|>)/g;
+  let xfMatch;
+  while ((xfMatch = xfStart.exec(section[2]))) {
+    let full = xfMatch[0];
+    if (!/\/>$/.test(full)) {
+      const end = section[2].indexOf('</xf>', xfStart.lastIndex);
+      if (end < 0) throw new Error('The official SF2 cell-style table contains an incomplete style.');
+      full = section[2].slice(xfMatch.index, end + 5);
+      xfStart.lastIndex = end + 5;
+    }
+    xfs.push(full);
+  }
+  const centeredByBase = new Map();
+  const centeredStyle = baseIdx => {
+    if (centeredByBase.has(baseIdx)) return centeredByBase.get(baseIdx);
+    let xf = xfs[baseIdx];
+    if (!xf) throw new Error('The official SF2 numeric-cell style index is invalid.');
+    const alignment = '<alignment horizontal="center" vertical="center"/>';
+    if (/<alignment\b[^>]*\/>/.test(xf)) xf = xf.replace(/<alignment\b[^>]*\/>/, alignment);
+    else if (/<alignment\b[^>]*>[\s\S]*?<\/alignment>/.test(xf)) xf = xf.replace(/<alignment\b[^>]*>[\s\S]*?<\/alignment>/, alignment);
+    else if (/<\/xf>$/.test(xf)) xf = xf.replace(/<\/xf>$/, `${alignment}</xf>`);
+    else if (/\/>$/.test(xf)) xf = xf.replace(/\/>$/, `>${alignment}</xf>`);
+    else throw new Error('The official SF2 numeric-cell style could not be centered.');
+    if (!/\bapplyAlignment="1"/.test(xf)) xf = xf.replace(/^<xf\b/, '<xf applyAlignment="1"');
+    const idx = xfs.length;
+    xfs.push(xf);
+    centeredByBase.set(baseIdx, idx);
+    return idx;
+  };
+  const seen = new Set();
+  for (const ref of refs || []) {
+    if (!ref || seen.has(ref)) continue;
+    seen.add(ref);
+    const m = worksheetXml.match(new RegExp(`<c\\b([^>]*\\br="${regexEscape(ref)}"[^>]*)`));
+    if (!m) continue;
+    const base = Number((m[1].match(/\bs="(\d+)"/) || [])[1]);
+    if (!Number.isInteger(base) || base < 0) continue;
+    worksheetXml = setWorksheetCellStyle(worksheetXml, ref, centeredStyle(base));
+  }
+  const count = xfs.length;
+  const attrs = /\bcount="\d+"/.test(section[1])
+    ? section[1].replace(/\bcount="\d+"/, `count="${count}"`)
+    : `${section[1]} count="${count}"`;
+  styles = styles.replace(section[0], `<cellXfs${attrs}>${xfs.join('')}</cellXfs>`);
+  zip.updateFile('xl/styles.xml', Buffer.from(styles, 'utf8'));
+  return worksheetXml;
 }
 
 function sf2EnsureSignatureCenterStyle(zip, worksheetXml) {
@@ -579,7 +647,7 @@ function buildOfficialSf2Buffer(payload, ctx) {
     C8: meta.schoolName || '',
     X8: meta.gradeLevel || '',
     AC8: meta.section || '',
-    AD64: payload.monthName || payload.monthLabel || '',
+    AC64: payload.monthName || payload.monthLabel || '',
     AG64: Number(payload.summary.schoolDays || payload.days.length || 0)
   };
   for (const [ref, value] of Object.entries(headerValues)) xml = setWorksheetCell(xml, ref, value, typeof value === 'number' ? 'number' : 'string');
@@ -659,6 +727,19 @@ function buildOfficialSf2Buffer(payload, ctx) {
     xml = setWorksheetCell(xml, `AI${row}`, num(obj ? obj.F : 0), 'number');
     xml = setWorksheetCell(xml, `AJ${row}`, num(obj ? obj.T : 0), 'number');
   }
+
+  // Center the generated numeric entries inside their printed boxes. This covers
+  // calendar date numbers, learner sequence/absence/tardy values, daily totals,
+  // and the M/F/TOTAL monthly summary values without changing official borders.
+  const centeredNumericRefs = ['AG64'];
+  for (const col of dayCols) centeredNumericRefs.push(`${col}11`);
+  for (const row of [...maleRows, ...femaleRows]) centeredNumericRefs.push(`A${row}`, `AC${row}`, `AD${row}`);
+  for (const row of [35,61,62]) {
+    for (const col of dayCols) centeredNumericRefs.push(`${col}${row}`);
+    centeredNumericRefs.push(`AC${row}`, `AD${row}`);
+  }
+  for (const [row] of summaryRows) centeredNumericRefs.push(`AH${row}`, `AI${row}`, `AJ${row}`);
+  xml = sf2CenterNumericOutputCells(zip, xml, centeredNumericRefs);
 
   // Put printed names on the existing signature lines; the template's labels remain untouched.
   // Center-across-selection is applied only to the generated copy so the bundled official
@@ -1415,7 +1496,7 @@ function sf2TemplateFingerprint(ctx) {
 function sf2PreviewSignature(payload, ctx) {
   const crypto = require('crypto');
   return crypto.createHash('sha256')
-    .update('sf2-preview-v1.1.7\n')
+    .update('sf2-preview-v1.1.8\n')
     .update(sf2TemplateFingerprint(ctx))
     .update('\n')
     .update(stableStringify(payload))
