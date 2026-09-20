@@ -914,28 +914,33 @@ function categoryRawTotal(comps, scoreMap){
 /* The Total/PS/WS (or WS-Summative-Test/PS/WS) cells for one category — shared by
    the Class Record row (which prepends raw item cells) and the Grading
    Sheet row (which shows only these computed columns). */
+function formatTwoDecimals(value){
+  if(value===null || value===undefined || value==="") return "—";
+  const n=Number(value);
+  return Number.isFinite(n) ? n.toFixed(2) : "—";
+}
 function categoryComputedCells(cat, catScores, p){
   if(cat.mode==="simple"){
     const total = categoryRawTotal(cat.components, catScores);
-    return `<td class="computed">${total===null?"—":total}</td><td class="computed">${p.ps===null?"—":p.ps}</td><td class="computed">${p.ws===null?"—":p.ws}</td>`;
+    return `<td class="computed">${total===null?"—":total}</td><td class="computed">${formatTwoDecimals(p.ps)}</td><td class="computed">${formatTwoDecimals(p.ws)}</td>`;
   }
   const subCells = cat.components.map(c=>{
     const w = componentWeighted(cat, c, catScores[c.id]);
-    return `<td class="computed">${w===null?"—":w}</td>`;
+    return `<td class="computed">${formatTwoDecimals(w)}</td>`;
   }).join("");
-  return subCells + `<td class="computed">${p.ps===null?"—":p.ps}</td><td class="computed">${p.ws===null?"—":p.ws}</td>`;
+  return subCells + `<td class="computed">${formatTwoDecimals(p.ps)}</td><td class="computed">${formatTwoDecimals(p.ws)}</td>`;
 }
 /* Grading Sheet variant: simple-mode categories show only PS/WS (no Total
    column), matching the official Grading Sheet printout exactly. */
 function categoryComputedCellsGS(cat, catScores, p){
   if(cat.mode==="simple"){
-    return `<td class="computed">${p.ps===null?"—":p.ps}</td><td class="computed">${p.ws===null?"—":p.ws}</td>`;
+    return `<td class="computed">${formatTwoDecimals(p.ps)}</td><td class="computed">${formatTwoDecimals(p.ws)}</td>`;
   }
   const subCells = cat.components.map(c=>{
     const w = componentWeighted(cat, c, catScores[c.id]);
-    return `<td class="computed">${w===null?"—":w}</td>`;
+    return `<td class="computed">${formatTwoDecimals(w)}</td>`;
   }).join("");
-  return subCells + `<td class="computed">${p.ps===null?"—":p.ps}</td><td class="computed">${p.ws===null?"—":p.ws}</td>`;
+  return subCells + `<td class="computed">${formatTwoDecimals(p.ps)}</td><td class="computed">${formatTwoDecimals(p.ws)}</td>`;
 }
 
 /* Builds the <thead> (band row + sub-header row + Highest Possible Score row)
