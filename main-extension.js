@@ -1,6 +1,6 @@
 'use strict';
 
-// v1.0.10 runtime patch: dependable Official ECR print preview.
+// v1.0.11 runtime patch: merged-cell-safe Official ECR print preview.
 // It fills a fresh copy of the supplied official Excel template through
 // Microsoft Excel COM automation, exports that exact sheet to PDF using the
 // template's own print area/page setup, and opens the PDF in Windows' default
@@ -91,13 +91,38 @@ try {
   } catch {}
 
   function Set-Cell([string]$Ref, $Value) {
-    $r = $sheet.Range($Ref)
-    if ($null -eq $Value -or [string]::IsNullOrWhiteSpace([string]$Value)) {
-      [void]$r.ClearContents()
-    } else {
-      $r.Value2 = $Value
+    $r = $null
+    $merge = $null
+    $anchor = $null
+    try {
+      $r = $sheet.Range($Ref)
+      $isMerged = $false
+      try { $isMerged = [bool]$r.MergeCells } catch {}
+
+      if ($isMerged) {
+        # Excel COM rejects ClearContents/assignment when only part of a merged
+        # area is targeted. Work with the complete MergeArea and write through
+        # its top-left anchor cell instead.
+        $merge = $r.MergeArea
+        if ($null -eq $Value -or [string]::IsNullOrWhiteSpace([string]$Value)) {
+          [void]$merge.ClearContents()
+        } else {
+          $anchor = $merge.Cells.Item(1, 1)
+          $anchor.Value2 = $Value
+        }
+      } else {
+        if ($null -eq $Value -or [string]::IsNullOrWhiteSpace([string]$Value)) {
+          [void]$r.ClearContents()
+        } else {
+          $r.Value2 = $Value
+        }
+      }
     }
-    try { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($r) } catch {}
+    finally {
+      if ($anchor -ne $null) { try { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($anchor) } catch {} }
+      if ($merge -ne $null) { try { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($merge) } catch {} }
+      if ($r -ne $null) { try { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($r) } catch {} }
+    }
   }
 
   $termNo = 1
@@ -158,11 +183,13 @@ try {
   # Remove old external formulas/cached learner values from all official
   # learner rows before inserting this class' values.
   foreach ($r in 18..67) {
-    [void]$sheet.Range("C$r").ClearContents()
+    # C:E is merged in each official learner-name row, so clear it through the
+    # merge-aware helper rather than clearing C alone.
+    Set-Cell ("C$r") $null
     [void]$sheet.Range("F$r:AD$r").ClearContents()
   }
   foreach ($r in 69..118) {
-    [void]$sheet.Range("C$r").ClearContents()
+    Set-Cell ("C$r") $null
     [void]$sheet.Range("F$r:AD$r").ClearContents()
   }
 
@@ -316,6 +343,6 @@ module.exports = {
     if (action === 'ecr:official-pdf-preview') {
       return createOfficialPdfPreview(payload, ctx);
     }
-    return { ok: false, unsupported: true, error: `Runtime action is not available in v1.0.10: ${action}` };
+    return { ok: false, unsupported: true, error: `Runtime action is not available in v1.0.11: ${action}` };
   }
 };
