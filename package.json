@@ -1,7 +1,7 @@
 {
   "name": "e-class-record-app-gs-sf9",
-  "version": "1.0.20",
-  "description": "Offline-first E-Class Record App with Grading Sheets, SF9, official SF1/ECR import, signed local development updates, and stability/data-integrity hardening",
+  "version": "1.0.25",
+  "description": "Offline-first E-Class Record App with Grading Sheets, SF9, direct raw-score entry recovery, official SF1/ECR import, signed local development updates, and stability/data-integrity hardening",
   "main": "main.js",
   "author": "",
   "license": "UNLICENSED",

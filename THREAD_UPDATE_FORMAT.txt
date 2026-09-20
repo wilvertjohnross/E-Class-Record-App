@@ -23,7 +23,7 @@ manifest.json includes:
   minBootstrapVersion: 1.0.20 or newer
   files: exact SHA-256 map for every payload file
   signature.algorithm: ed25519
-  signature.keyId: ecr-dev-2026-01
+  signature.keyId: ecr-dev-2026-02
   signature.value: Base64 Ed25519 signature over the canonical manifest fields
 
 VALIDATION

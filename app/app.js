@@ -1872,14 +1872,13 @@ function renderTerm(main, cls, termKey, termLabel){
         const previous=scoreMap[catKey][compId];
         const raw=String(e.target.value??"").trim();
         if(raw!==""){
-          const numericText=/^(?:\d+(?:\.\d*)?|\.\d+)$/.test(raw);
-          const n=numericText?Number(raw):NaN,h=Number(comp && comp.hps);
-          if(!Number.isFinite(n)||n<0||!Number.isFinite(h)||h<=0||n>h){
-            alert(`Invalid raw score. Type a numeric value from 0 to ${Number.isFinite(h)&&h>0?h:"the HPS"}.`);
+          const check=validateRawScoreEntry(raw, comp && comp.hps);
+          if(!check.ok){
             e.target.value=previous===undefined||previous===null?"":previous;
+            markRawScoreError(e.target, check.message);
             return;
           }
-          scoreMap[catKey][compId]=n;
+          scoreMap[catKey][compId]=check.value;
         }else delete scoreMap[catKey][compId];
         saveState();
         drawRecord();
@@ -2489,6 +2488,45 @@ function reportCardHtml(cls, s){
 function esc(str){
   if(str===undefined||str===null) return "";
   return String(str).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+}
+
+function validateRawScoreEntry(rawValue,hpsValue){
+  const raw=String(rawValue??"").trim();
+  const hps=Number(hpsValue);
+  if(raw==="") return {ok:true,empty:true,value:null};
+  const numericText=/^(?:\d+(?:\.\d*)?|\.\d+)$/.test(raw);
+  const value=numericText?Number(raw):NaN;
+  if(!Number.isFinite(hps)||hps<=0) return {ok:false,message:"This score item is inactive because its HPS is 0."};
+  if(!Number.isFinite(value)||value<0) return {ok:false,message:`Invalid raw score. Type a numeric value from 0 to ${hps}.`};
+  if(value>hps) return {ok:false,message:`Raw score ${value} exceeds the HPS of ${hps}. The previous value was restored.`};
+  return {ok:true,value};
+}
+
+let rawScoreNoticeTimer=null;
+function markRawScoreError(input,message){
+  if(input){
+    input.classList.add("score-input-error");
+    input.setAttribute("aria-invalid","true");
+    input.title=message;
+    window.setTimeout(()=>{
+      if(!input || !input.isConnected) return;
+      input.classList.remove("score-input-error");
+      input.removeAttribute("aria-invalid");
+    },1600);
+  }
+  let notice=document.getElementById("scoreEntryNotice");
+  if(!notice){
+    notice=document.createElement("div");
+    notice.id="scoreEntryNotice";
+    notice.className="score-entry-notice no-print";
+    notice.setAttribute("role","status");
+    notice.setAttribute("aria-live","polite");
+    document.body.appendChild(notice);
+  }
+  notice.textContent=message;
+  notice.classList.add("show");
+  if(rawScoreNoticeTimer) window.clearTimeout(rawScoreNoticeTimer);
+  rawScoreNoticeTimer=window.setTimeout(()=>notice.classList.remove("show"),2600);
 }
 
 

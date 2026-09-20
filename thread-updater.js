@@ -9,8 +9,10 @@ const MAX_PACKAGE_BYTES = 150 * 1024 * 1024;
 const MAX_UNCOMPRESSED_BYTES = 200 * 1024 * 1024;
 const MAX_ENTRY_BYTES = 64 * 1024 * 1024;
 const MAX_ENTRIES = 100;
-const UPDATE_KEY_ID = 'ecr-dev-2026-01';
-const UPDATE_PUBLIC_KEY_PEM = `-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAy69QpUdyeRiDgL5WOgRpke3GGs8u+j5esH0NO5JtWts=\n-----END PUBLIC KEY-----`;
+const UPDATE_KEY_ID = 'ecr-dev-2026-02';
+const UPDATE_PUBLIC_KEY_PEM = `-----BEGIN PUBLIC KEY-----
+MCowBQYDK2VwAyEAea8+D6VYCljkLJshiTBc42KG5+CmjQWpjJuJb2SND3U=
+-----END PUBLIC KEY-----`;
 
 function versionParts(v) {
   return String(v || '0')

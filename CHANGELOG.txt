@@ -1,3 +1,9 @@
+v1.0.25 — Raw-score input recovery hotfix
+- Replaces blocking raw-score validation alerts with a non-modal notice.
+- Invalid/out-of-HPS entries are rolled back without breaking subsequent score entry.
+- The invalid field is briefly highlighted; no modal focus trap is used.
+- Cumulative application state includes v1.0.21–v1.0.24 fixes.
+
 Version 1.0.20 — Stability & Security Gate
 - Consolidated v1.0.19 clean-slate ECR runtime into full bootstrap.
 - Reliable save acknowledgement + recovery copy + revision-aware local recovery.

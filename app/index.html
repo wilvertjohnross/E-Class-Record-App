@@ -280,6 +280,9 @@
   table.cr-table td.left{text-align:left;font-weight:600;white-space:nowrap;}
   table.cr-table tr.group-row td{background:var(--ink);color:var(--paper);font-weight:700;text-align:left;}
   table.cr-table input{width:44px;text-align:center;padding:2px;font-size:11px;font-family:var(--sans);}
+  table.cr-table input.score-input.score-input-error{outline:2px solid var(--red-pen);outline-offset:-1px;background:#FFF0F0;}
+  .score-entry-notice{position:fixed;right:18px;bottom:18px;max-width:420px;z-index:10050;background:var(--ink);color:var(--paper);border:1px solid var(--border);border-left:5px solid var(--red-pen);border-radius:6px;padding:10px 14px;font-family:var(--sans);font-size:12px;font-weight:700;box-shadow:0 6px 18px rgba(0,0,0,.22);opacity:0;transform:translateY(8px);pointer-events:none;transition:opacity .12s ease,transform .12s ease;}
+  .score-entry-notice.show{opacity:1;transform:translateY(0);}
   table.cr-table td.blank-cell{background:repeating-linear-gradient(45deg, #f7f3e8, #f7f3e8 4px, #eee3c8 4px, #eee3c8 5px);}
   table.cr-table td.computed{background:#F5EFE0;font-weight:700;color:var(--green-chalk);}
   table.cr-table td.grade-final{background:#F5EFE0;font-weight:800;color:var(--red-pen);}

@@ -1,0 +1,43 @@
+E-Class Record App with GS and SF9
+v1.0.25 Five-Pass Release Gate
+
+Purpose
+- Fix raw-score entry becoming unusable after an invalid/out-of-HPS value triggers validation.
+- Replace the blocking raw-score alert with a non-modal validation notice.
+- Restore the previous valid value and allow score entry to continue immediately.
+
+PASS 1 — Package / template integrity: PASS
+- JavaScript syntax checks passed for app.js, main-extension.js, main.js, preload.js,
+  thread-updater.js, sf1-parser.js, and the update builder.
+- Official ECR template remains a clean output shell: 0 formulas, 0 external-link parts,
+  0 calculation chain.
+- Official GS template is unchanged from v1.0.24. Its legacy formula-bearing master remains
+  handled by the existing app-controlled GS output path; no GS behavior changed in this patch.
+
+PASS 2 — Security / updater: PASS
+- Electron security settings retained: contextIsolation on, nodeIntegration off, sandbox on.
+- adm-zip remains pinned to 0.6.0.
+- No private signing key is present in the distributed source tree.
+- Development updater trust key rotated to ecr-dev-2026-02 for this full bootstrap.
+- New Ed25519 key pair was mathematically sign/verify tested before packaging.
+
+PASS 3 — Raw-score data integrity: PASS
+- Tested valid, invalid, decimal, empty, negative, zero-HPS, exact-HPS, and over-HPS cases.
+- Sequential recovery test passed: invalid 31/30 followed by valid 25/30 succeeds normally.
+- Invalid entries restore the previous value before returning.
+- Invalid entries do not reach saveState() or mutate the stored score.
+
+PASS 4 — Official output regression: PASS
+- main-extension.js is byte-identical to the v1.0.24 official-output engine.
+- ECR official template is byte-identical to v1.0.24.
+- GS official template is byte-identical to v1.0.24.
+- No grading/export/template logic was changed for this hotfix.
+
+PASS 5 — Runtime / UX edge cases: PASS
+- Raw-score cells remain direct text/decimal inputs.
+- No blocking alert() remains in the raw-score change handler.
+- Invalid entry produces a non-modal, aria-live status notice and brief field highlight.
+- Previous valid score is restored immediately.
+- Subsequent score entry remains available without reloading the Class Record.
+
+Release decision: PASS — v1.0.25 approved as the next stable bootstrap.
