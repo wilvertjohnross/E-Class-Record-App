@@ -776,6 +776,17 @@
     #restoreWindowBtn{display:none !important;}
   }
 
+  /* ===== Modern school-management shell — presentation only ===== */
+  :root{--background:#edf5f5;--surface:#f7fbfb;--surface-raised:#fff;--surface-subtle:#e1eeee;--surface-muted:#d6e5e5;--text-primary:#143b4a;--text-secondary:#58717c;--border:rgba(20,59,74,.15);--border-strong:rgba(20,59,74,.28);--accent:#087f86;--accent-fill:#087f86;--accent-hover:#056870;--on-accent:#fff;--shadow:rgba(10,42,54,.12);--manila:#e9c46a;--manila-deep:#d2a948;}
+  html,body{background:var(--background);}
+  body{display:grid;grid-template-columns:272px minmax(0,1fr);grid-template-rows:minmax(0,1fr) auto;min-height:100vh;background:radial-gradient(circle at 88% 8%,rgba(77,171,173,.15),transparent 30rem),linear-gradient(135deg,#eff8f8,#e8f1f2);}
+  header.appbar{grid-column:1;grid-row:1 / span 2;display:flex;flex-direction:column;align-items:stretch;gap:18px;padding:24px 16px 18px;color:#fff;background:linear-gradient(180deg,#123d4d,#0c2f3c);border:0;box-shadow:8px 0 26px rgba(10,42,54,.14);overflow-y:auto;}
+  header.appbar h1{font-family:var(--sans);font-size:18px;line-height:1.2;letter-spacing:0;}
+  header.appbar h1 span{display:block;color:#a9dedd;font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;}
+  .class-picker{margin:0;display:grid;grid-template-columns:1fr 1fr;gap:8px;}.class-picker #classPickerLabel,.class-picker select{grid-column:1 / -1;}.class-picker select{min-width:0;width:100%;}.class-picker button{width:100%;padding:8px 7px;font-size:11px;border-radius:8px;}.class-picker #btnTheme{grid-column:1 / -1;}
+  nav.tabs{display:flex;flex-direction:column;gap:4px;padding:8px 0 0;margin-top:2px;overflow:visible;background:transparent;border:0;}nav.tabs::before{content:"Workspace";padding:0 10px 6px;color:#8bbdc0;font-size:10px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;}nav.tabs button.tab{width:100%;padding:10px 12px;border:0;border-radius:9px;background:transparent;color:#d1e3e4;text-align:left;font-size:13px;font-weight:650;}nav.tabs button.tab:hover{background:rgba(255,255,255,.09);color:#fff;}nav.tabs button.tab.active{background:#e7f7f6;color:#066f75;border:0;box-shadow:none;}
+  main{grid-column:2;grid-row:1;position:relative;width:100%;max-width:none;margin:0;padding:32px clamp(22px,4vw,58px);}main::before{content:"";position:fixed;right:-110px;top:65px;width:430px;height:430px;border-radius:50%;background:radial-gradient(circle,rgba(10,127,134,.09) 0 2px,transparent 3px 100%);background-size:18px 18px;opacity:.55;pointer-events:none;z-index:-1;}.card,.control-card,.workflow-nav{border-color:var(--border);border-radius:13px;box-shadow:0 8px 24px var(--shadow);}button{border-radius:8px;background:var(--accent-fill);color:var(--on-accent);}header.appbar button.ghost{color:#d9eeee;border-color:rgba(255,255,255,.24);}select,input[type=text],input[type=number]{border-radius:8px;border-color:var(--border);}footer.status{grid-column:2;grid-row:2;margin:0;padding:12px clamp(22px,4vw,58px);background:rgba(255,255,255,.62);border-top:1px solid var(--border);}
+  @media (max-width:800px){body{display:block;}header.appbar{position:static;padding:14px;box-shadow:none;}.class-picker{grid-template-columns:repeat(3,minmax(0,1fr));}.class-picker #btnTheme{grid-column:auto;}nav.tabs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));}nav.tabs button.tab{text-align:center;}main{padding:20px 14px;}footer.status{padding:12px 14px;}}@media print{body{display:block;background:#fff;}main{padding:0;}main::before{display:none;}}
 </style>
 </head>
 <body>
@@ -793,12 +804,11 @@
     <button id="btnDupClass" style="display:none;">Duplicate</button>
     <button id="btnDelClass" style="display:none;">Delete</button>
   </div>
-</header>
-
 <nav class="tabs role-tabs no-print" id="tabs">
   <button class="tab" data-tab="subjecthome">Subject Teacher Controls</button>
   <button class="tab" data-tab="adviserhome">Adviser Controls</button>
 </nav>
+</header>
 
 <main id="main"></main>
 <button type="button" id="restoreWindowBtn" class="no-print" title="Leave full screen and restore a regular window">↙ Restore Window</button>
