@@ -114,6 +114,15 @@
     color:var(--ink);
   }
   .card .sub{color:var(--ink-soft);font-size:13px;margin-bottom:16px;}
+  .school-logo-settings{display:flex;align-items:center;gap:18px;flex-wrap:wrap;margin-top:10px;}
+  .school-logo-preview{
+    width:92px;height:92px;border:1px solid var(--border);border-radius:6px;background:#fff;
+    display:flex;align-items:center;justify-content:center;padding:8px;box-shadow:0 1px 4px var(--shadow);
+  }
+  .school-logo-preview img{max-width:100%;max-height:100%;object-fit:contain;}
+  .school-logo-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
+  .school-logo-note{font-size:12.5px;color:var(--ink-soft);max-width:620px;line-height:1.45;margin-top:6px;}
+
   .empty-state{
     text-align:center;padding:50px 20px;color:var(--ink-soft);
   }
@@ -606,6 +615,46 @@ function saveState(){
   const el = document.getElementById("statusRight");
   if(el) el.textContent = "Saved " + new Date().toLocaleTimeString();
 }
+function schoolLogoDataUri(){
+  return (APP.settings && APP.settings.schoolLogoDataUri) || SCHOOL_SEAL_DATA_URI;
+}
+
+function ensureAppSettings(){
+  if(!APP.settings || typeof APP.settings !== "object") APP.settings = {};
+  return APP.settings;
+}
+
+function resizeSchoolLogo(file){
+  return new Promise((resolve, reject)=>{
+    if(!file){ reject(new Error("No image selected.")); return; }
+    if(!/^image\/(png|jpeg|webp)$/i.test(file.type || "")){
+      reject(new Error("Please select a PNG, JPG/JPEG, or WebP image.")); return;
+    }
+    if(file.size > 10 * 1024 * 1024){
+      reject(new Error("The logo image is too large. Please use an image smaller than 10 MB.")); return;
+    }
+    const reader = new FileReader();
+    reader.onerror = ()=>reject(new Error("The selected image could not be read."));
+    reader.onload = ()=>{
+      const img = new Image();
+      img.onerror = ()=>reject(new Error("The selected file is not a readable image."));
+      img.onload = ()=>{
+        const maxSide = 700;
+        const scale = Math.min(1, maxSide / Math.max(img.naturalWidth || 1, img.naturalHeight || 1));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
+        canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
+        const ctx = canvas.getContext("2d");
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL("image/png"));
+      };
+      img.src = String(reader.result || "");
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
 function activeClass(){ return APP.classes[APP.activeId]; }
 
 /* =========================================================================
@@ -731,6 +780,22 @@ function renderSetup(main, cls){
     </div>
 
     <div class="card">
+      <h2>School Logo</h2>
+      <div class="sub">Upload your school's logo once. The same logo is used automatically in the Class Record, Grading Sheet, and SF9 for every class in this app.</div>
+      <div class="school-logo-settings">
+        <div class="school-logo-preview"><img id="schoolLogoPreview" src="${schoolLogoDataUri()}" alt="School Logo Preview"></div>
+        <div>
+          <div class="school-logo-actions">
+            <button type="button" class="primary" id="btnChangeSchoolLogo">Upload / Change Logo</button>
+            <button type="button" id="btnResetSchoolLogo">Reset to Default</button>
+            <input type="file" id="schoolLogoFile" accept="image/png,image/jpeg,image/webp" style="display:none;">
+          </div>
+          <div class="school-logo-note">PNG is recommended, especially for logos with a transparent background. The image is resized for efficient storage and is saved with your gradebook data. The DepEd seal and DepEd wordmark are not changed.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
       <h2>Grading Sheet Sign-off</h2>
       <div class="sub">Printed at the bottom of the Grading Sheet: "Prepared by" is always the Subject Teacher above. Fill in who checks and approves it at your school.</div>
       <div class="grid2">
@@ -753,6 +818,38 @@ function renderSetup(main, cls){
       m[f] = e.target.value; saveState(); renderClassPicker();
     });
   });
+  const logoFile = document.getElementById("schoolLogoFile");
+  const changeLogoBtn = document.getElementById("btnChangeSchoolLogo");
+  const resetLogoBtn = document.getElementById("btnResetSchoolLogo");
+  changeLogoBtn.addEventListener("click", ()=>logoFile.click());
+  logoFile.addEventListener("change", async e=>{
+    const file = e.target.files && e.target.files[0];
+    if(!file) return;
+    changeLogoBtn.disabled = true;
+    changeLogoBtn.textContent = "Processing…";
+    try{
+      const dataUri = await resizeSchoolLogo(file);
+      ensureAppSettings().schoolLogoDataUri = dataUri;
+      saveState();
+      document.getElementById("schoolLogoPreview").src = dataUri;
+      document.getElementById("statusLeft").textContent = "School logo updated for all classes, GS, and SF9.";
+    }catch(err){
+      alert(err && err.message ? err.message : "Could not update the school logo.");
+    }finally{
+      logoFile.value = "";
+      changeLogoBtn.disabled = false;
+      changeLogoBtn.textContent = "Upload / Change Logo";
+    }
+  });
+  resetLogoBtn.addEventListener("click", ()=>{
+    if(!confirm("Reset the school logo to the app's default logo?")) return;
+    ensureAppSettings();
+    delete APP.settings.schoolLogoDataUri;
+    saveState();
+    document.getElementById("schoolLogoPreview").src = SCHOOL_SEAL_DATA_URI;
+    document.getElementById("statusLeft").textContent = "School logo reset to default.";
+  });
+
   updateWeightTotal(cls);
   bindCategoryEditorEvents(cls);
 }
@@ -1366,7 +1463,7 @@ function renderTerm(main, cls, termKey, termLabel){
     container.innerHTML = `
       <div class="cr-page">
         <div class="cr-topbar">
-          <div class="cr-seal"><img src="${SCHOOL_SEAL_DATA_URI}" alt="School Seal"></div>
+          <div class="cr-seal"><img src="${schoolLogoDataUri()}" alt="School Seal"></div>
           <div class="cr-title">CLASS RECORD - ${esc(TERM_LABELS[termKey])}</div>
           <div class="cr-seal wordmark"><img src="${DEPED_WORDMARK_DATA_URI}" alt="DepEd"></div>
         </div>
@@ -1401,7 +1498,7 @@ function renderTerm(main, cls, termKey, termLabel){
     container.innerHTML = `
       <div class="gs-page">
         <div class="gs-topbar">
-          <div class="cr-seal"><img src="${SCHOOL_SEAL_DATA_URI}" alt="School Seal"></div>
+          <div class="cr-seal"><img src="${schoolLogoDataUri()}" alt="School Seal"></div>
           <div class="gs-headtext">
             <div class="deped-script">Department of Education</div>
             <div class="region">${esc((m.region||"").toUpperCase())}</div>
@@ -1767,7 +1864,7 @@ function reportCardHtml(cls, s){
     <div class="rc-sheet">
       <div class="rc-corner"></div>
       <div class="rc-sealrow">
-        <div class="rc-seal"><img src="${SCHOOL_SEAL_DATA_URI}" alt="School Seal"></div>
+        <div class="rc-seal"><img src="${schoolLogoDataUri()}" alt="School Seal"></div>
         <div class="rc-headtext">
           <div class="l1">Republic of the Philippines</div>
           <div class="l1">Department of Education</div>

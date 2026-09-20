@@ -1,5 +1,13 @@
 E-Class Record App with GS and SF9
-Version 1.0.2
+Version 1.0.3
+
+
+SCHOOL LOGO IN v1.0.3
+Setup now includes Upload / Change School Logo. The selected school logo is a
+global app setting and is automatically shown on the Class Record, Grading
+Sheet, and SF9 for every class. PNG, JPG/JPEG, and WebP are supported. PNG is
+recommended for transparent-background school logos. Use Reset to Default to
+restore the logo bundled with the app. The DepEd seal and wordmark stay fixed.
 
 NEW CLASS FIX IN v1.0.2
 The + New Class button now uses an in-app dialog instead of window.prompt().

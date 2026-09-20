@@ -1,5 +1,14 @@
 E-Class Record App with GS and SF9
 
+Version 1.0.3
+- Added a global Upload / Change School Logo control under Setup.
+- The selected school logo is used automatically in the Class Record, Grading Sheet, and SF9.
+- School logo selection applies to every class in the app and is stored with the gradebook data/backups.
+- Added Reset to Default for the school logo.
+- Uploaded logos are resized to a maximum of 700 px and stored as PNG for efficient offline use.
+- DepEd seal and DepEd wordmark remain fixed and unchanged.
+- No changes to grade calculations, class data, GS/SF9 grading logic, or printing behavior.
+
 Version 1.0.2
 - Fixed the + New Class button in the Electron desktop app.
 - Replaced the unsupported browser prompt() used by New Class with a native-looking in-app dialog.
