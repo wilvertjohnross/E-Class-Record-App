@@ -1,0 +1,70 @@
+E-Class Record App with GS and SF9
+v1.0.27 — Dark Mode Visual Optimization
+Five-Pass Release Gate
+Date: 2026-09-11
+
+RESULT: PASS — 5/5
+
+PASS 1 — PACKAGE / TEMPLATE INTEGRITY: PASS
+- app/app.js: JavaScript syntax check passed.
+- main-extension.js: JavaScript syntax check passed.
+- Dark-theme CSS parsed with 0 syntax errors.
+- .ecrupdate ZIP integrity test passed.
+- ECR official template unchanged: SHA-256 f097766a15ce879486acdbf501f7dbcadf7a7bf02bf4f15c590e43dae952b70b
+- GS official template unchanged: SHA-256 59bb0ab081466cdf2aa679b8b79d53e86de5fc6042fbb433891938f765fd6669
+- ECR template remains clean slate: 0 formulas / 0 external-link parts.
+- GS template remains unchanged from the stable bootstrap.
+
+PASS 2 — SIGNED UPDATE / SECURITY REGRESSION: PASS
+- Ed25519 signature verified against bootstrap v1.0.25 trusted key ecr-dev-2026-02.
+- All 5 manifest payload hashes verified.
+- No private signing key is present in the payload.
+- No main-process, preload, updater, IPC, or CSP logic changed in this iteration.
+
+PASS 3 — DARK THEME CONTRAST / READABILITY: PASS
+WCAG AA checks (minimum 4.5:1 for normal text) included:
+- Primary text / page background: 14.02:1
+- Primary text / surface: 12.92:1
+- Primary text / raised surface: 11.65:1
+- Secondary text / surface: 8.31:1
+- Secondary text / raised surface: 7.49:1
+- Disabled text / surface: 6.10:1
+- Accent / surface: 6.69:1
+- Success / surface: 6.69:1
+- Warning / surface: 6.93:1
+- Error / surface: 6.14:1
+- Info / surface: 6.18:1
+- Primary action text / fill: 4.62:1
+- Primary action hover text / fill: 4.75:1
+- Danger action text / fill: 6.87:1
+- Default action text / fill: 5.63:1
+- Default action hover: 4.89:1
+- Grade/status bands: 5.33:1 to 7.74:1
+- No pure-black dark background is used. Primary body text is off-white #E8EAED rather than pure white.
+
+PASS 4 — VISUAL HIERARCHY / OFFICIAL OUTPUT REGRESSION: PASS
+- Central semantic theme tokens added for background, surfaces, text, borders, accents and states.
+- Cards use surface level; ECR/GS/SF9 sheets and modals use raised surface level.
+- Sticky learner cells use raised surface + separator instead of heavy shadow.
+- Dark borders use rgba(255,255,255,.12) and strong separators rgba(255,255,255,.20).
+- Dark-mode card/modal/notice shadows removed; elevation is represented primarily by surface shade.
+- Bright state colors were desaturated/remapped for dark backgrounds.
+- School-logo preview retains a neutral light plate; official logos/images are not inverted or recolored.
+- main-extension.js and official ECR/GS templates are byte-identical to v1.0.25 baseline.
+- Official Excel output/preview logic is therefore unchanged.
+
+PASS 5 — GRADING / ENCODING REGRESSION: PASS
+- categoryPS() unchanged.
+- studentTermResult() unchanged.
+- transmute() unchanged.
+- v1.0.25 raw-score validation/recovery functions unchanged.
+- Raw-score invalid-entry path remains non-blocking (no alert() in the validation path).
+- PS/WS/component-WS display formatting included cumulatively and verified:
+  90 -> 90.00
+  62.5 -> 62.50
+  33.333 -> 33.33
+  0 -> 0.00
+- No stored score values or grading arithmetic were changed by formatting.
+
+PACKAGE SHA-256
+7c6fc55842ca3e76059bfd0048c0f7ef04f28240fa340073544d26adabf904df

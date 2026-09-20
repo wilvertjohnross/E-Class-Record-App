@@ -1,6 +1,34 @@
 E-Class Record App with GS and SF9
-Version 1.0.20
+Version 1.1.0
 
+VERSION 1.1.0 — SF2 DAILY ATTENDANCE INTEGRATION
+- First feature-level release after the v1.0.x stabilization line.
+- Adds app-owned School Form 2 (SF2) Daily Attendance for advisory classes.
+- SF2 is opt-in per class from Setup → SF2 / Advisory Class, so ordinary subject classes are not forced to maintain attendance.
+- Uses the uploaded official School Form 2 workbook as the fixed final-output template.
+- Attendance codes in the working screen: blank = Present, × = Absent, upper-half mark = Late Comer, lower-half mark = Cutting Classes.
+- School days are selectable per reporting month; weekdays are preselected and holidays/suspensions can be removed.
+- Calculates monthly absences, tardiness, daily M/F totals, enrolment percentage, ADA, attendance percentage, and learners with 5 consecutive absences.
+- SF2 attendance automatically feeds the corresponding June–April SF9 attendance month; SF9 attendance cells for maintained SF2 months become read-only to prevent conflicting records.
+- Official SF2 output supports Preview, Save XLSX, Open in Excel, and Print through the existing Excel-to-PDF preview engine.
+- Official SF2 template capacity in this supplied page is preserved: up to 25 school days, 21 Male rows, and 25 Female rows.
+- SF2 data is saved in the same local JSON database and included in Export/Import Backup validation.
+- The app remains the logic engine; the official SF2 workbook is used only as the presentation/output shell.
+- Because v1.1.0 adds new main-process IPC actions, install it as a full bootstrap/installer build. Future 1.1.x patches can use the signed local-update mechanism.
+
+VERSION 1.0.27 — DARK MODE VISUAL OPTIMIZATION
+- Cumulative full source package suitable for generating a Windows installer.
+- Includes v1.0.26 two-decimal PS/WS presentation changes.
+- Includes v1.0.25 non-blocking raw-score validation/recovery behavior.
+- Dark mode uses centrally controlled semantic theme tokens and WCAG-AA-oriented contrast.
+- Official ECR/GS templates and app-owned grading/output logic remain bundled.
+- Existing data under Documents\E-Class Record App with GS and SF9 is preserved by upgrades.
+
+WINDOWS INSTALLER BUILD
+1. Extract this ZIP to a normal writable folder.
+2. Install Node.js LTS if needed.
+3. Double-click BUILD_WINDOWS.bat.
+4. The generated NSIS installer will be placed in the dist folder.
 
 VERSION 1.0.20 — STABILITY & SECURITY GATE
 This is a one-time full bootstrap update. It consolidates the v1.0.19 clean-slate

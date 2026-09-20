@@ -676,6 +676,7 @@ ipcMain.handle('update:choose-file', async (event) => {
 const ALLOWED_RUNTIME_ACTIONS = new Set([
   'ecr:official-pdf-preview','ecr:official-popup-preview','ecr:official-save',
   'gs:official-pdf-preview','gs:official-popup-preview','gs:official-save',
+  'sf2:official-pdf-preview','sf2:official-popup-preview','sf2:official-save',
   'summary:import-file','sf9:preview-html','window:fullscreen-state','window:exit-fullscreen',
   'ecr:preview-engine-status','official:preview-engine-status'
 ]);

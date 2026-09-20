@@ -1,0 +1,17 @@
+E-Class Record App with GS and SF9 — Complete Installer Source Package
+Version: 1.0.27
+
+Build on Windows:
+  BUILD_WINDOWS.bat
+
+Manual equivalent:
+  npm install --no-audit --no-fund
+  npm run dist
+
+Expected installer output:
+  dist\E-Class Record App with GS and SF9 Setup 1.0.27.exe
+
+Notes:
+- This package is cumulative through v1.0.27.
+- Existing user data is stored separately under Documents and is not bundled here.
+- The updater private signing key is intentionally NOT included.

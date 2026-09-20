@@ -1,9 +1,9 @@
 E-CLASS RECORD APP — SIGNED DEVELOPMENT UPDATE FORMAT
-Bootstrap security baseline: v1.0.20
+Bootstrap feature/security baseline: v1.1.0
 
 PURPOSE
 Ordinary runtime/UI/template iterations can still be delivered as *.ecrupdate files,
-but v1.0.20+ accepts only packages signed by the trusted Ed25519 development key.
+but v1.1.0+ accepts only packages signed by the trusted Ed25519 development key.
 The private key is kept outside the application and is never distributed with builds.
 
 PACKAGE FORMAT
@@ -20,7 +20,7 @@ manifest.json includes:
   appId: ph.edu.eclassrecord.gs.sf9
   productName: E-Class Record App with GS and SF9
   version: semantic version newer than the effective version
-  minBootstrapVersion: 1.0.20 or newer
+  minBootstrapVersion: 1.1.0 or newer
   files: exact SHA-256 map for every payload file
   signature.algorithm: ed25519
   signature.keyId: ecr-dev-2026-02

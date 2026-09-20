@@ -1,3 +1,25 @@
+VERSION 1.1.0 — SF2 DAILY ATTENDANCE INTEGRATION
+- Added opt-in SF2 / Advisory Class setting.
+- Added SF2 Attendance tab with month selector, selectable school days, fast daily marking, learner remarks, and monthly summary.
+- Added P/A/L/C app-side attendance model and official SF2 symbol conversion.
+- Added automatic SF2 → SF9 monthly attendance synchronization; SF9 attendance fields are locked for months already maintained in SF2 to prevent conflicting records.
+- Added official SF2 XLSX generation from the supplied DepEd template, with external-link residue and broken #REF defined names removed only in generated copies.
+- Added SF2 Excel/PDF preview cache and Print/Open-in-Excel actions.
+- Added SF2 backup validation, learner-delete cleanup, capacity validation, and 5-consecutive-absence calculation.
+- Added SF2 runtime IPC actions to the trusted main-process allowlist.
+- Versioning policy now treats feature additions as minor releases; v1.0.27 remains the final v1.0.x build.
+
+v1.0.27 — Dark-mode visual optimization (cumulative full package)
+- Adds centrally managed semantic dark-theme tokens.
+- Improves contrast, surface hierarchy, borders, disabled states, focus treatment, status colors, and dark-mode table readability.
+- Preserves official-template exports/printing and grading logic.
+- Includes v1.0.26 PS/WS two-decimal display behavior.
+- Includes v1.0.25 raw-score recovery/non-blocking validation behavior.
+
+v1.0.26 — Two-decimal PS/WS display
+- Displays PS and WS consistently to two decimal places in working views and official outputs.
+- No change to the underlying grading/transmutation rules.
+
 v1.0.25 — Raw-score input recovery hotfix
 - Replaces blocking raw-score validation alerts with a non-modal notice.
 - Invalid/out-of-HPS entries are rolled back without breaking subsequent score entry.

@@ -125,7 +125,7 @@ function newClass(name){
       region:"Region I", division:"Vigan City", schoolId:"300052",
       schoolName:"Ilocos Sur National High School", schoolAddress:"",
       schoolYear:"2026-2027",
-      schoolHead:"", subject:"Science", gradeLevel:"10", section:"", teacher:"", adviser:"",
+      schoolHead:"", subject:"Science", gradeLevel:"10", section:"", teacher:"", adviser:"", sf2Enabled:false,
       preparedByName:"", preparedByTitle:"Subject Teacher",
       checkedByName:"Eloisa B. Aquino", checkedByTitle:"Head Teacher VI, Science Department",
       approvedByName:"Rolly A. Raceles", approvedByTitle:"Asst. Principal II"
@@ -135,6 +135,7 @@ function newClass(name){
     scores: { term1:{}, term2:{}, term3:{} },
     otherGrades: {},   // studentId -> { AREA_KEY -> {term1,term2,term3} }
     attendance: {},    // studentId -> { MonthKey -> {classDays, present} }
+    sf2: {activeMonth:"", months:{}}, // daily attendance + SF2 monthly summaries
     comments: {}       // studentId -> { term1, term2, term3 (text) }
   };
 }
@@ -168,6 +169,149 @@ function ensureStudentExtras(cls, sid){
   ATT_MONTHS.forEach(m=>{ if(!cls.attendance[sid][m]) cls.attendance[sid][m] = {classDays:"", present:""}; });
   if(!cls.comments[sid]) cls.comments[sid] = {term1:"",term2:"",term3:""};
   if(!cls.meta.schoolAddress && cls.meta.schoolAddress !== "") cls.meta.schoolAddress = cls.meta.schoolAddress || "";
+}
+
+
+/* =========================================================================
+   SF2 DAILY ATTENDANCE — APP-OWNED DATA MODEL
+   ========================================================================= */
+const SF2_MONTH_NAMES=["January","February","March","April","May","June","July","August","September","October","November","December"];
+const SF2_DAY_CODES={P:"",A:"×",L:"▀",C:"▄"};
+const SF2_DAY_TITLES={P:"Present",A:"Absent",L:"Late comer",C:"Cutting classes"};
+
+function sf2SchoolYearStart(cls){
+  const m=String(cls && cls.meta && cls.meta.schoolYear || "").match(/(20\d{2})/);
+  return m ? Number(m[1]) : new Date().getFullYear();
+}
+function sf2MonthOptions(cls){
+  const y=sf2SchoolYearStart(cls);
+  const seq=[[y,6],[y,7],[y,8],[y,9],[y,10],[y,11],[y,12],[y+1,1],[y+1,2],[y+1,3],[y+1,4]];
+  return seq.map(([yy,mm])=>({key:`${yy}-${String(mm).padStart(2,"0")}`,label:`${SF2_MONTH_NAMES[mm-1]} ${yy}`,month:mm,year:yy}));
+}
+function sf2MonthInfo(key){
+  const m=String(key||"").match(/^(20\d{2})-(0[1-9]|1[0-2])$/);
+  if(!m) return null;
+  const year=Number(m[1]), month=Number(m[2]);
+  return {key:`${year}-${String(month).padStart(2,"0")}`,year,month,label:`${SF2_MONTH_NAMES[month-1]} ${year}`};
+}
+function sf2CalendarDays(key){
+  const info=sf2MonthInfo(key); if(!info) return [];
+  const last=new Date(info.year,info.month,0).getDate();
+  const names=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+  const short=["S","M","T","W","TH","F","S"];
+  return Array.from({length:last},(_,i)=>{
+    const day=i+1,d=new Date(info.year,info.month-1,day),dow=d.getDay();
+    return {date:`${info.year}-${String(info.month).padStart(2,"0")}-${String(day).padStart(2,"0")}`,day,dow,name:names[dow],short:short[dow]};
+  });
+}
+function sf2DefaultSchoolDays(key){
+  return sf2CalendarDays(key).filter(d=>d.dow>=1&&d.dow<=5).map(d=>d.date);
+}
+function ensureSf2Class(cls){
+  if(!cls.sf2 || typeof cls.sf2!=="object" || Array.isArray(cls.sf2)) cls.sf2={activeMonth:"",months:{}};
+  if(!cls.sf2.months || typeof cls.sf2.months!=="object" || Array.isArray(cls.sf2.months)) cls.sf2.months={};
+  const opts=sf2MonthOptions(cls);
+  if(!opts.some(o=>o.key===cls.sf2.activeMonth)){
+    const now=new Date(), current=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
+    cls.sf2.activeMonth=(opts.find(o=>o.key===current)||opts[0]).key;
+  }
+  return cls.sf2;
+}
+function ensureSf2Month(cls,key){
+  const sf2=ensureSf2Class(cls); const info=sf2MonthInfo(key)||sf2MonthInfo(sf2.activeMonth);
+  key=info.key;
+  if(!sf2.months[key] || typeof sf2.months[key]!=="object" || Array.isArray(sf2.months[key])){
+    sf2.months[key]={schoolDays:sf2DefaultSchoolDays(key),marks:{},remarks:{},summary:{}};
+  }
+  const m=sf2.months[key];
+  if(!Array.isArray(m.schoolDays)) m.schoolDays=[];
+  const validDates=new Set(sf2CalendarDays(key).map(d=>d.date));
+  m.schoolDays=[...new Set(m.schoolDays.map(String).filter(d=>validDates.has(d)))].sort();
+  if(!m.marks || typeof m.marks!=="object" || Array.isArray(m.marks)) m.marks={};
+  if(!m.remarks || typeof m.remarks!=="object" || Array.isArray(m.remarks)) m.remarks={};
+  if(!m.summary || typeof m.summary!=="object" || Array.isArray(m.summary)) m.summary={};
+  ["enrollmentFirstFriday","lateEnrollment","registeredEnd","dropout","transferredOut","transferredIn"].forEach(k=>{
+    if(!m.summary[k]||typeof m.summary[k]!=="object"||Array.isArray(m.summary[k])) m.summary[k]={M:"",F:""};
+    if(m.summary[k].M===undefined) m.summary[k].M="";
+    if(m.summary[k].F===undefined) m.summary[k].F="";
+  });
+  cls.students.forEach(st=>{
+    if(!m.marks[st.id]||typeof m.marks[st.id]!=="object"||Array.isArray(m.marks[st.id])) m.marks[st.id]={};
+    if(m.remarks[st.id]===undefined) m.remarks[st.id]="";
+  });
+  return m;
+}
+function sf2Mark(month,sid,date){
+  const v=month && month.marks && month.marks[sid] ? String(month.marks[sid][date]||"P").toUpperCase() : "P";
+  return ["A","L","C"].includes(v)?v:"P";
+}
+function sf2SetMark(month,sid,date,status){
+  if(!month.marks[sid]) month.marks[sid]={};
+  status=String(status||"P").toUpperCase();
+  if(status==="P") delete month.marks[sid][date]; else month.marks[sid][date]=status;
+}
+function sf2NextMark(status){ return ({P:"A",A:"L",L:"C",C:"P"})[status]||"P"; }
+function sf2StudentStats(month,sid){
+  const days=[...(month.schoolDays||[])].sort(); let absent=0,tardy=0,present=0,run=0,maxRun=0;
+  for(const date of days){
+    const st=sf2Mark(month,sid,date);
+    if(st==="A"){ absent++; run++; maxRun=Math.max(maxRun,run); }
+    else { present++; run=0; if(st==="L"||st==="C") tardy++; }
+  }
+  return {classDays:days.length,present,absent,tardy,maxConsecutiveAbsences:maxRun};
+}
+function sf2SexCounts(cls){
+  return {M:cls.students.filter(s=>s.sex==="M").length,F:cls.students.filter(s=>s.sex==="F").length};
+}
+function sf2SummaryNumber(month,key,sex,fallback){
+  const v=month.summary && month.summary[key] ? month.summary[key][sex] : "";
+  if(v===""||v===null||v===undefined) return Number(fallback||0);
+  const n=Number(v); return Number.isFinite(n)&&n>=0?n:Number(fallback||0);
+}
+function sf2ComputedSummary(cls,month){
+  const counts=sf2SexCounts(cls), days=(month.schoolDays||[]).length;
+  const first={M:sf2SummaryNumber(month,"enrollmentFirstFriday","M",counts.M),F:sf2SummaryNumber(month,"enrollmentFirstFriday","F",counts.F)};
+  const late={M:sf2SummaryNumber(month,"lateEnrollment","M",0),F:sf2SummaryNumber(month,"lateEnrollment","F",0)};
+  const reg={M:sf2SummaryNumber(month,"registeredEnd","M",counts.M),F:sf2SummaryNumber(month,"registeredEnd","F",counts.F)};
+  const dropout={M:sf2SummaryNumber(month,"dropout","M",0),F:sf2SummaryNumber(month,"dropout","F",0)};
+  const out={M:sf2SummaryNumber(month,"transferredOut","M",0),F:sf2SummaryNumber(month,"transferredOut","F",0)};
+  const inn={M:sf2SummaryNumber(month,"transferredIn","M",0),F:sf2SummaryNumber(month,"transferredIn","F",0)};
+  const totalAttendance={M:0,F:0}, consec5={M:0,F:0};
+  cls.students.forEach(st=>{ const x=sf2StudentStats(month,st.id); totalAttendance[st.sex==="F"?"F":"M"]+=x.present; if(x.maxConsecutiveAbsences>=5) consec5[st.sex==="F"?"F":"M"]++; });
+  const pctEnroll={M:first.M?reg.M/first.M*100:0,F:first.F?reg.F/first.F*100:0};
+  const ada={M:days?totalAttendance.M/days:0,F:days?totalAttendance.F/days:0};
+  const pctAttend={M:reg.M?ada.M/reg.M*100:0,F:reg.F?ada.F/reg.F*100:0};
+  const sumPair=o=>({M:o.M,F:o.F,T:Number(o.M||0)+Number(o.F||0)});
+  const pctTotal=(num,den)=>den?num/den*100:0;
+  return {
+    schoolDays:days,first:sumPair(first),late:sumPair(late),reg:sumPair(reg),dropout:sumPair(dropout),transferredOut:sumPair(out),transferredIn:sumPair(inn),
+    pctEnroll:{M:pctEnroll.M,F:pctEnroll.F,T:pctTotal(reg.M+reg.F,first.M+first.F)},
+    ada:{M:ada.M,F:ada.F,T:days?(totalAttendance.M+totalAttendance.F)/days:0},
+    pctAttend:{M:pctAttend.M,F:pctAttend.F,T:(reg.M+reg.F)?((days?(totalAttendance.M+totalAttendance.F)/days:0)/(reg.M+reg.F)*100):0},
+    consec5:sumPair(consec5), totalAttendance
+  };
+}
+function sf2MonthToSf9Key(monthKey){
+  const info=sf2MonthInfo(monthKey); if(!info) return null;
+  return ({6:"Jun",7:"Jul",8:"Aug",9:"Sep",10:"Oct",11:"Nov",12:"Dec",1:"Jan",2:"Feb",3:"Mar",4:"Apr"})[info.month]||null;
+}
+function syncSf2MonthToSf9(cls,monthKey){
+  const sf9Key=sf2MonthToSf9Key(monthKey); if(!sf9Key) return;
+  const m=ensureSf2Month(cls,monthKey);
+  cls.students.forEach(st=>{
+    ensureStudentExtras(cls,st.id);
+    const stats=sf2StudentStats(m,st.id);
+    cls.attendance[st.id][sf9Key]={classDays:stats.classDays,present:stats.present};
+  });
+}
+function sf2ExistingMonthForSf9(cls,sf9Key){
+  if(!(cls&&cls.meta&&cls.meta.sf2Enabled===true&&cls.sf2&&cls.sf2.months)) return null;
+  for(const key of Object.keys(cls.sf2.months)) if(sf2MonthToSf9Key(key)===sf9Key) return key;
+  return null;
+}
+function syncExistingSf2MonthsToSf9(cls){
+  if(!(cls&&cls.meta&&cls.meta.sf2Enabled===true&&cls.sf2&&cls.sf2.months)) return;
+  Object.keys(cls.sf2.months).forEach(key=>syncSf2MonthToSf9(cls,key));
 }
 
 function validStateCandidate(parsed){
@@ -359,15 +503,20 @@ function studentFinalResult(cls, studentId){
    ========================================================================= */
 function render(){
   renderClassPicker();
+  const cls = activeClass();
+  const sf2Tab = document.querySelector('nav.tabs .tab[data-tab="sf2"]');
+  const sf2Enabled = !!(cls && cls.meta && cls.meta.sf2Enabled === true);
+  if(sf2Tab) sf2Tab.hidden = !sf2Enabled;
+  if(activeTab === "sf2" && !sf2Enabled) activeTab = "setup";
   document.querySelectorAll("nav.tabs .tab").forEach(b=>{
     b.classList.toggle("active", b.dataset.tab === activeTab);
   });
   const main = document.getElementById("main");
   main.innerHTML = "";
-  const cls = activeClass();
-  if(!cls){ main.innerHTML = `<div class="empty-state"><h2>No class yet</h2><p>Create one with "+ New Class" above.</p></div>`; return; }
+  if(!cls){ if(sf2Tab) sf2Tab.hidden=true; main.innerHTML = `<div class="empty-state"><h2>No class yet</h2><p>Create one with "+ New Class" above.</p></div>`; return; }
   if(activeTab==="setup") renderSetup(main, cls);
   else if(activeTab==="roster") renderRoster(main, cls);
+  else if(activeTab==="sf2") renderSf2(main, cls);
   else if(activeTab==="term1") renderTerm(main, cls, "term1", "Term 1");
   else if(activeTab==="term2") renderTerm(main, cls, "term2", "Term 2");
   else if(activeTab==="term3") renderTerm(main, cls, "term3", "Term 3");
@@ -423,6 +572,12 @@ function renderSetup(main, cls){
     </div>
 
     <div class="card">
+      <h2>SF2 / Advisory Class</h2>
+      <div class="sub">SF2 is an adviser-level attendance form. Enable it only for the class where you maintain the official daily attendance record.</div>
+      <label class="sf2-enable-option"><input type="checkbox" id="f_sf2Enabled" ${m.sf2Enabled===true?"checked":""}> <span><strong>Enable SF2 Daily Attendance for this class</strong><small>When enabled, the SF2 Attendance tab appears and its monthly attendance automatically feeds SF9.</small></span></label>
+    </div>
+
+    <div class="card">
       <h2>School Logo</h2>
       <div class="sub">Upload your school's logo once. The same logo is used automatically in the Class Record, Grading Sheet, and SF9 for every class in this app.</div>
       <div class="school-logo-settings">
@@ -440,7 +595,7 @@ function renderSetup(main, cls){
 
     <div class="card">
       <h2>Official Form Signatories</h2>
-      <div class="sub">The official ECR always uses the Subject Teacher entered above as its signatory, with the fixed title “Subject Teacher.” The signatory entries below remain available for the Grading Sheet and other official forms. The templates themselves stay fixed; the app only fills the required names and titles.</div>
+      <div class="sub">The official ECR always uses the Subject Teacher entered above as its signatory, with the fixed title “Subject Teacher.” SF2 uses the Adviser and School Head entered above. The signatory entries below remain available for the Grading Sheet and other official forms. The templates themselves stay fixed; the app only fills the required names and titles.</div>
       <div class="grid2">
         <div class="field"><label>Prepared by — Name</label><input type="text" id="f_preparedByName" value="${esc(m.preparedByName||"")}" placeholder="Defaults to Subject Teacher"></div>
         <div class="field"><label>Prepared by — Title</label><input type="text" id="f_preparedByTitle" value="${esc(m.preparedByTitle||"Subject Teacher")}" placeholder="e.g. Subject Teacher"></div>
@@ -462,6 +617,11 @@ function renderSetup(main, cls){
     document.getElementById("f_"+f).addEventListener("change", e=>{
       m[f] = e.target.value; saveState(); renderClassPicker();
     });
+  });
+  document.getElementById("f_sf2Enabled").addEventListener("change", e=>{
+    m.sf2Enabled = !!e.target.checked;
+    saveState();
+    render();
   });
   const logoFile = document.getElementById("schoolLogoFile");
   const changeLogoBtn = document.getElementById("btnChangeSchoolLogo");
@@ -631,6 +791,12 @@ function deleteStudentEverywhere(cls,sid){
   if(cls.otherGrades) delete cls.otherGrades[sid];
   if(cls.attendance) delete cls.attendance[sid];
   if(cls.comments) delete cls.comments[sid];
+  if(cls.sf2&&cls.sf2.months){
+    Object.values(cls.sf2.months).forEach(month=>{
+      if(month&&month.marks) delete month.marks[sid];
+      if(month&&month.remarks) delete month.remarks[sid];
+    });
+  }
 }
 
 function applyOfficialSf1Import(cls,data,options={}){
@@ -815,10 +981,159 @@ function renderRoster(main, cls){
     row.querySelector(".s-remove").addEventListener("click", ()=>{
       if(!confirm("Remove this learner and all their scores?")) return;
       cls.students = cls.students.filter(x=>x.id!==sid);
-      ["term1","term2","term3"].forEach(t=>{ delete cls.scores[t][sid]; });
+      deleteStudentEverywhere(cls,sid);
       saveState(); render();
     });
   });
+}
+
+
+function sf2Fmt(v,digits=2){
+  const n=Number(v); return Number.isFinite(n)?n.toFixed(digits):"0.00";
+}
+function sf2SummaryInput(month,key,sex){
+  const v=month.summary && month.summary[key] ? month.summary[key][sex] : "";
+  return v===undefined||v===null?"":String(v);
+}
+function sf2MarkClass(status){ return status==="A"?"absent":status==="L"?"late":status==="C"?"cutting":"present"; }
+function refreshSf2CalculatedView(cls,monthKey){
+  const month=ensureSf2Month(cls,monthKey), days=[...(month.schoolDays||[])].sort();
+  cls.students.forEach(st=>{
+    const x=sf2StudentStats(month,st.id);
+    const a=document.querySelector(`[data-sf2-absent="${CSS.escape(st.id)}"]`); if(a)a.textContent=String(x.absent);
+    const t=document.querySelector(`[data-sf2-tardy="${CSS.escape(st.id)}"]`); if(t)t.textContent=String(x.tardy);
+  });
+  const daily={M:{},F:{}};
+  days.forEach(d=>{daily.M[d]=0;daily.F[d]=0;});
+  cls.students.forEach(st=>{ const sex=st.sex==="F"?"F":"M"; days.forEach(d=>{if(sf2Mark(month,st.id,d)!=="A")daily[sex][d]++;}); });
+  days.forEach(d=>{
+    for(const sex of ["M","F"]){const el=document.querySelector(`[data-sf2-daily="${sex}|${d}"]`);if(el)el.textContent=String(daily[sex][d]);}
+    const total=document.querySelector(`[data-sf2-daily="T|${d}"]`);if(total)total.textContent=String(daily.M[d]+daily.F[d]);
+  });
+  const sm=sf2ComputedSummary(cls,month);
+  const vals={
+    "pctEnroll-M":sf2Fmt(sm.pctEnroll.M),"pctEnroll-F":sf2Fmt(sm.pctEnroll.F),"pctEnroll-T":sf2Fmt(sm.pctEnroll.T),
+    "ada-M":sf2Fmt(sm.ada.M),"ada-F":sf2Fmt(sm.ada.F),"ada-T":sf2Fmt(sm.ada.T),
+    "pctAttend-M":sf2Fmt(sm.pctAttend.M),"pctAttend-F":sf2Fmt(sm.pctAttend.F),"pctAttend-T":sf2Fmt(sm.pctAttend.T),
+    "consec5-M":String(sm.consec5.M),"consec5-F":String(sm.consec5.F),"consec5-T":String(sm.consec5.T)
+  };
+  Object.entries(vals).forEach(([k,v])=>{const el=document.querySelector(`[data-sf2-summary="${k}"]`);if(el)el.textContent=v;});
+  const daysEl=document.getElementById("sf2ClassDays");if(daysEl)daysEl.textContent=String(sm.schoolDays);
+}
+
+function renderSf2(main,cls){
+  if(!(cls && cls.meta && cls.meta.sf2Enabled===true)){
+    main.innerHTML=`<div class="card"><h2>SF2 Daily Attendance is not enabled for this class</h2><p class="sub">Go to Setup → SF2 / Advisory Class and enable it for the advisory section whose attendance you maintain.</p></div>`;
+    return;
+  }
+  const sf2=ensureSf2Class(cls), opts=sf2MonthOptions(cls), key=sf2.activeMonth, month=ensureSf2Month(cls,key), info=sf2MonthInfo(key);
+  const calendar=sf2CalendarDays(key), schoolDays=[...(month.schoolDays||[])].sort();
+  const males=cls.students.filter(s=>s.sex==="M"), females=cls.students.filter(s=>s.sex==="F");
+  const summary=sf2ComputedSummary(cls,month);
+  const dayMap=new Map(calendar.map(d=>[d.date,d]));
+  const dateHeaders=schoolDays.map(d=>{const x=dayMap.get(d);return `<th class="sf2-date-head"><span>${x?x.day:""}</span><small>${x?x.short:""}</small></th>`;}).join("");
+  function markCells(st){
+    return schoolDays.map(date=>{const status=sf2Mark(month,st.id,date);return `<td class="sf2-att-cell"><button type="button" class="sf2-mark ${sf2MarkClass(status)}" data-sid="${esc(st.id)}" data-date="${esc(date)}" data-status="${status}" title="${esc(SF2_DAY_TITLES[status])}">${SF2_DAY_CODES[status]}</button></td>`;}).join("");
+  }
+  function learnerRows(list){
+    return list.map(st=>{const x=sf2StudentStats(month,st.id);return `<tr data-sf2-row="${esc(st.id)}"><td class="sf2-name sticky-learner">${esc(st.name||"")}</td>${markCells(st)}<td class="sf2-total" data-sf2-absent="${esc(st.id)}">${x.absent}</td><td class="sf2-total" data-sf2-tardy="${esc(st.id)}">${x.tardy}</td><td class="sf2-remarks"><input type="text" data-sf2-remark="${esc(st.id)}" value="${esc(month.remarks[st.id]||"")}" placeholder="Remarks / school / reason"></td></tr>`;}).join("");
+  }
+  function dailyTotalRow(label,sex){
+    const cells=schoolDays.map(date=>{
+      const n=cls.students.filter(st=>(sex==="T"||st.sex===sex) && sf2Mark(month,st.id,date)!=="A").length;
+      return `<td class="sf2-daily-total" data-sf2-daily="${sex}|${esc(date)}">${n}</td>`;
+    }).join("");
+    const subset=sex==="T"?cls.students:cls.students.filter(st=>st.sex===sex);
+    const abs=subset.reduce((a,st)=>a+sf2StudentStats(month,st.id).absent,0);
+    const tar=subset.reduce((a,st)=>a+sf2StudentStats(month,st.id).tardy,0);
+    return `<tr class="sf2-total-row"><td class="sf2-name sticky-learner">${label}</td>${cells}<td>${abs}</td><td>${tar}</td><td></td></tr>`;
+  }
+  const calendarButtons=calendar.map(d=>{const on=schoolDays.includes(d.date);return `<button type="button" class="sf2-day-toggle ${on?"active":""} ${d.dow===0||d.dow===6?"weekend":""}" data-date="${d.date}" title="${on?"Included as a school day":"Not included"}"><strong>${d.day}</strong><small>${d.name}</small></button>`;}).join("");
+  const row=(keyName,label,computed=null)=>{
+    const total=(a,b)=>Number(a||0)+Number(b||0);
+    if(computed){return `<tr><td>${label}</td><td data-sf2-summary="${computed}-M">${sf2Fmt(summary[computed].M)}</td><td data-sf2-summary="${computed}-F">${sf2Fmt(summary[computed].F)}</td><td data-sf2-summary="${computed}-T">${sf2Fmt(summary[computed].T)}</td></tr>`;}
+    const mv=sf2SummaryInput(month,keyName,"M"),fv=sf2SummaryInput(month,keyName,"F");
+    const defMap={enrollmentFirstFriday:sf2SexCounts(cls),lateEnrollment:{M:0,F:0},registeredEnd:sf2SexCounts(cls),dropout:{M:0,F:0},transferredOut:{M:0,F:0},transferredIn:{M:0,F:0}};
+    const dm=mv===""?defMap[keyName].M:Number(mv), df=fv===""?defMap[keyName].F:Number(fv);
+    return `<tr><td>${label}</td><td><input type="number" min="0" step="1" data-sf2-summary-input="${keyName}|M" value="${esc(mv)}" placeholder="${dm}"></td><td><input type="number" min="0" step="1" data-sf2-summary-input="${keyName}|F" value="${esc(fv)}" placeholder="${df}"></td><td>${total(dm,df)}</td></tr>`;
+  };
+  main.innerHTML=`
+    <div class="card sf2-card">
+      <div class="sf2-heading"><div><h2>School Form 2 — Daily Attendance</h2><div class="sub">Working view. The official Excel template remains fixed and is filled only when you preview or save SF2.</div></div><div class="sf2-month-block"><label>Reporting month</label><select id="sf2MonthSelect">${opts.map(o=>`<option value="${o.key}" ${o.key===key?"selected":""}>${esc(o.label)}</option>`).join("")}</select></div></div>
+      <div class="toolbar sf2-toolbar">
+        <button id="sf2Weekdays" class="ghost-alt">Use Mon–Fri</button>
+        <button id="sf2ClearMarks" class="ghost-alt">Clear attendance marks</button>
+        <button id="sf2Preview" class="primary">Preview Official SF2</button>
+        <button id="sf2Save" class="ghost-alt">Save Official SF2 (.xlsx)</button>
+      </div>
+      <div class="hint"><strong>Attendance:</strong> blank = Present · <strong>×</strong> = Absent · <strong>▀</strong> = Late Comer · <strong>▄</strong> = Cutting Classes. Click a learner cell to cycle; keyboard shortcuts: P, X/A, L, C. SF2 attendance automatically feeds the corresponding SF9 month.</div>
+      <div class="sf2-schoolday-header"><strong>School days for ${esc(info.label)}</strong><span><strong id="sf2ClassDays">${schoolDays.length}</strong> selected (official template supports up to 25)</span></div>
+      <div class="sf2-calendar">${calendarButtons}</div>
+    </div>
+    <div class="card sf2-grid-card">
+      <div class="scroll-x sf2-scroll"><table class="sf2-table"><thead><tr><th class="sf2-name sticky-learner">Learner</th>${dateHeaders}<th>Absent</th><th>Tardy</th><th class="sf2-remarks-head">Remarks</th></tr></thead><tbody>
+      <tr class="group-row"><td colspan="${schoolDays.length+4}">MALE (${males.length})</td></tr>${learnerRows(males)}${dailyTotalRow("MALE | TOTAL PER DAY","M")}
+      <tr class="group-row"><td colspan="${schoolDays.length+4}">FEMALE (${females.length})</td></tr>${learnerRows(females)}${dailyTotalRow("FEMALE | TOTAL PER DAY","F")}${dailyTotalRow("COMBINED TOTAL PER DAY","T")}
+      </tbody></table></div>
+    </div>
+    <div class="card sf2-summary-card"><h3>Monthly Summary</h3><div class="sub">Blank manual fields use the current roster count or zero as shown by the placeholder. Attendance metrics are calculated by the app.</div><div class="scroll-x"><table class="sf2-summary-table"><thead><tr><th>Summary item</th><th>Male</th><th>Female</th><th>Total</th></tr></thead><tbody>
+      ${row("enrollmentFirstFriday","Enrolment as of 1st Friday of June")}
+      ${row("lateEnrollment","Late enrollment during the month")}
+      ${row("registeredEnd","Registered learner as of end of the month")}
+      ${row(null,"Percentage of enrolment as of end of the month","pctEnroll")}
+      ${row(null,"Average daily attendance","ada")}
+      ${row(null,"Percentage of attendance for the month","pctAttend")}
+      ${row(null,"Learners with 5 consecutive days of absences","consec5")}
+      ${row("dropout","Drop out")}
+      ${row("transferredOut","Transferred out")}
+      ${row("transferredIn","Transferred in")}
+    </tbody></table></div></div>`;
+
+  document.getElementById("sf2MonthSelect").addEventListener("change",e=>{sf2.activeMonth=e.target.value;ensureSf2Month(cls,sf2.activeMonth);saveState();render();});
+  document.getElementById("sf2Weekdays").addEventListener("click",()=>{month.schoolDays=sf2DefaultSchoolDays(key);syncSf2MonthToSf9(cls,key);saveState();render();});
+  document.getElementById("sf2ClearMarks").addEventListener("click",()=>{if(!confirm(`Clear all attendance marks for ${info.label}? Learner remarks and monthly summary values will be kept.`))return;month.marks={};cls.students.forEach(st=>month.marks[st.id]={});syncSf2MonthToSf9(cls,key);saveState();render();});
+  document.getElementById("sf2Preview").addEventListener("click",()=>exportOfficialSf2(cls,"preview"));
+  document.getElementById("sf2Save").addEventListener("click",()=>exportOfficialSf2(cls,"save"));
+  document.querySelectorAll(".sf2-day-toggle").forEach(btn=>btn.addEventListener("click",async()=>{
+    const date=btn.dataset.date,idx=month.schoolDays.indexOf(date);
+    if(idx>=0){month.schoolDays.splice(idx,1);cls.students.forEach(st=>{if(month.marks[st.id])delete month.marks[st.id][date];});}
+    else {if(month.schoolDays.length>=25){markRawScoreError(null,"SF2 supports at most 25 school days in one reporting month. Remove another date before adding this one.");return;}month.schoolDays.push(date);month.schoolDays.sort();}
+    syncSf2MonthToSf9(cls,key);saveState();render();
+  }));
+  const applyMark=(btn,status)=>{
+    const sid=btn.dataset.sid,date=btn.dataset.date;sf2SetMark(month,sid,date,status);btn.dataset.status=status;btn.textContent=SF2_DAY_CODES[status];btn.className=`sf2-mark ${sf2MarkClass(status)}`;btn.title=SF2_DAY_TITLES[status];syncSf2MonthToSf9(cls,key);saveState();refreshSf2CalculatedView(cls,key);
+  };
+  document.querySelectorAll(".sf2-mark").forEach(btn=>{
+    btn.addEventListener("click",()=>applyMark(btn,sf2NextMark(btn.dataset.status)));
+    btn.addEventListener("keydown",e=>{let st=null;const k=e.key.toLowerCase();if(k==="p"||k===" ")st="P";else if(k==="x"||k==="a")st="A";else if(k==="l")st="L";else if(k==="c")st="C";if(st){e.preventDefault();applyMark(btn,st);}});
+  });
+  document.querySelectorAll("[data-sf2-remark]").forEach(inp=>inp.addEventListener("change",()=>{month.remarks[inp.dataset.sf2Remark]=inp.value;saveState();}));
+  document.querySelectorAll("[data-sf2-summary-input]").forEach(inp=>inp.addEventListener("change",()=>{
+    const [field,sex]=inp.dataset.sf2SummaryInput.split("|");let v=inp.value.trim();if(v!==""){const n=Number(v);if(!Number.isFinite(n)||n<0){markRawScoreError(inp,"Monthly SF2 summary values must be zero or greater.");inp.value=month.summary[field][sex]||"";return;}v=Math.round(n);inp.value=String(v);}month.summary[field][sex]=v;saveState();renderSf2(main,cls);
+  }));
+}
+
+function officialSf2Payload(cls){
+  if(!(cls && cls.meta && cls.meta.sf2Enabled===true)) throw new Error("SF2 Daily Attendance is not enabled for this class.");
+  const sf2=ensureSf2Class(cls),key=sf2.activeMonth,month=ensureSf2Month(cls,key),info=sf2MonthInfo(key);
+  const males=cls.students.filter(s=>s.sex==="M"),females=cls.students.filter(s=>s.sex==="F");
+  if(males.length>21||females.length>25) throw new Error(`This uploaded official SF2 page provides 21 Male rows and 25 Female rows. Current roster: ${males.length} Male, ${females.length} Female. Multi-page overflow will be added in a later SF2 iteration.`);
+  if(month.schoolDays.length>25) throw new Error("The official SF2 template provides 25 daily-attendance columns.");
+  const days=[...month.schoolDays].sort().map(date=>{const d=sf2CalendarDays(key).find(x=>x.date===date);return {date,day:d?d.day:"",weekday:d?d.short:""};});
+  const summary=sf2ComputedSummary(cls,month);
+  const students=cls.students.map(st=>{const x=sf2StudentStats(month,st.id);return {id:st.id,name:st.name||"",sex:st.sex==="F"?"F":"M",marks:days.map(d=>sf2Mark(month,st.id,d.date)),absent:x.absent,tardy:x.tardy,remarks:String(month.remarks[st.id]||"")};});
+  return {classId:cls.id||"",monthKey:key,monthLabel:info.label,monthName:SF2_MONTH_NAMES[info.month-1],meta:{...cls.meta},days,students,summary,adviser:cls.meta.adviser||cls.meta.teacher||"",schoolHead:cls.meta.schoolHead||""};
+}
+async function exportOfficialSf2(cls,mode="preview"){
+  if(!window.eclassAPI||typeof window.eclassAPI.runtimeInvoke!=="function"){markRawScoreError(null,"Official SF2 output is available in the installed desktop app.");return;}
+  try{
+    const payload=officialSf2Payload(cls),action=mode==="save"?"sf2:official-save":"sf2:official-pdf-preview";
+    const result=await window.eclassAPI.runtimeInvoke(action,payload);
+    if(result&&result.ok){if(mode==="save")await showInfoDialog("Official SF2 Saved",`The official SF2 template was filled and saved successfully.\n\n${result.path||result.xlsxPath||""}`);return;}
+    if(result&&result.cancelled)return;
+    if(result&&result.previewUnavailable){await showInfoDialog("Official SF2 Preview Unavailable",`${result.error||"Microsoft Excel could not render the official SF2 preview."}\n\nThe filled official workbook is available here:\n${result.xlsxPath||result.path||""}`);return;}
+    markRawScoreError(null,"Could not create the Official SF2: "+(result&&result.error?result.error:"Unknown error"));
+  }catch(err){markRawScoreError(null,"Could not create the Official SF2: "+(err&&err.message?err.message:String(err)));}
 }
 
 /* Minimal CSV parser: handles quoted fields containing commas/newlines,
@@ -2206,10 +2521,14 @@ function renderReport(main, cls){
     return;
   }
   cls.students.forEach(s=>ensureStudentExtras(cls, s.id));
+  syncExistingSf2MonthsToSf9(cls);
+  const sf2ReportNote=cls.meta&&cls.meta.sf2Enabled===true
+    ? " Attendance for months already maintained in SF2 is read directly from SF2 and is locked here to avoid conflicting records."
+    : " Attendance remains a hand-fillable field until SF2 is enabled for this advisory class.";
   main.innerHTML = `
     <div class="card no-print">
       <h2>Report Cards (SF9)</h2>
-      <div class="sub">Two-page spread matching the official Learner's Progress Report: Page 1 is the learning-progress report, Page 2 is attendance, comments, signatures and the Certificate of Transfer. This app only tracks <strong>${esc(cls.meta.subject)}</strong>, so that row fills in automatically — the other learning areas, attendance and comments are blank fields you can type into, same as filling in the paper form.</div>
+      <div class="sub">Two-page spread matching the official Learner's Progress Report: Page 1 is the learning-progress report, Page 2 is attendance, comments, signatures and the Certificate of Transfer. This app only tracks <strong>${esc(cls.meta.subject)}</strong>, so that row fills in automatically — the other learning areas and comments remain hand-fillable.${sf2ReportNote}</div>
       <div class="toolbar">
         <select id="rcStudent"></select>
         <button id="rcPreview" class="ghost-alt" style="background:var(--paper-deep);">SF9 Preview</button>
@@ -2377,7 +2696,9 @@ function reportCardHtml(cls, s){
 
   const attCells = (field)=>ATT_MONTHS.map(mo=>{
     const val = cls.attendance[s.id][mo][field];
-    return `<td><input type="number" class="att-input" data-sid="${esc(s.id)}" data-month="${mo}" data-field="${field}" value="${fmt(val)}" min="0"></td>`;
+    const sf2Source=sf2ExistingMonthForSf9(cls,mo);
+    const locked=!!sf2Source;
+    return `<td><input type="number" class="att-input${locked?" sf2-fed-att":""}" data-sid="${esc(s.id)}" data-month="${mo}" data-field="${field}" value="${fmt(val)}" min="0" ${locked?`readonly title="From SF2 ${esc(sf2MonthInfo(sf2Source).label)}"`:""}></td>`;
   }).join("");
   const absentCells = ATT_MONTHS.map(mo=>{
     const cd = Number(cls.attendance[s.id][mo].classDays)||0;
@@ -2726,6 +3047,40 @@ function validateBackupForImport(data){
       for(const [key,cat] of Object.entries(cls.categories)){
         if(!safeId.test(key)||!cat||typeof cat!=="object"||Array.isArray(cat))throw new Error("Backup contains an invalid grading category.");
         if(cat.components!==undefined){if(!Array.isArray(cat.components)||cat.components.length>200)throw new Error("Backup contains an invalid component list.");for(const c of cat.components){if(!c||typeof c!=="object"||Array.isArray(c)||!c.id||!safeId.test(String(c.id)))throw new Error("Backup contains an invalid assessment-component identifier.");}}
+      }
+    }
+    if(cls.sf2!==undefined){
+      if(!cls.sf2||typeof cls.sf2!=="object"||Array.isArray(cls.sf2))throw new Error("Backup contains invalid SF2 data.");
+      if(cls.sf2.activeMonth!==undefined&&cls.sf2.activeMonth!==""&&!/^20\d{2}-(0[1-9]|1[0-2])$/.test(String(cls.sf2.activeMonth)))throw new Error("Backup contains an invalid active SF2 month.");
+      const months=cls.sf2.months===undefined?{}:cls.sf2.months;
+      if(!months||typeof months!=="object"||Array.isArray(months)||Object.keys(months).length>24)throw new Error("Backup contains an invalid SF2 month collection.");
+      const sf2SummaryKeys=new Set(["enrollmentFirstFriday","lateEnrollment","registeredEnd","dropout","transferredOut","transferredIn"]);
+      for(const [monthKey,month] of Object.entries(months)){
+        if(!/^20\d{2}-(0[1-9]|1[0-2])$/.test(monthKey)||!month||typeof month!=="object"||Array.isArray(month))throw new Error("Backup contains an invalid SF2 month.");
+        const datePrefix=monthKey+"-";
+        if(month.schoolDays!==undefined){
+          if(!Array.isArray(month.schoolDays)||month.schoolDays.length>31)throw new Error("Backup contains an invalid SF2 school-day list.");
+          const seen=new Set();
+          for(const d of month.schoolDays){const ds=String(d);if(!/^20\d{2}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(ds)||!ds.startsWith(datePrefix)||seen.has(ds))throw new Error("Backup contains an invalid or duplicate SF2 school day.");seen.add(ds);}
+        }
+        if(month.marks!==undefined){
+          if(!month.marks||typeof month.marks!=="object"||Array.isArray(month.marks)||Object.keys(month.marks).length>1000)throw new Error("Backup contains invalid SF2 attendance marks.");
+          for(const [sid,marks] of Object.entries(month.marks)){
+            if(!safeId.test(String(sid))||!marks||typeof marks!=="object"||Array.isArray(marks)||Object.keys(marks).length>31)throw new Error("Backup contains an invalid SF2 learner attendance record.");
+            for(const [date,status] of Object.entries(marks)){if(!date.startsWith(datePrefix)||!/^20\d{2}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(date)||!["A","L","C","P"].includes(String(status).toUpperCase()))throw new Error("Backup contains an invalid SF2 attendance code or date.");}
+          }
+        }
+        if(month.remarks!==undefined){
+          if(!month.remarks||typeof month.remarks!=="object"||Array.isArray(month.remarks)||Object.keys(month.remarks).length>1000)throw new Error("Backup contains invalid SF2 remarks.");
+          for(const [sid,remark] of Object.entries(month.remarks)){if(!safeId.test(String(sid))||typeof remark!=="string"||remark.length>2000)throw new Error("Backup contains an invalid SF2 learner remark.");}
+        }
+        if(month.summary!==undefined){
+          if(!month.summary||typeof month.summary!=="object"||Array.isArray(month.summary))throw new Error("Backup contains an invalid SF2 summary.");
+          for(const [field,pair] of Object.entries(month.summary)){
+            if(!sf2SummaryKeys.has(field)||!pair||typeof pair!=="object"||Array.isArray(pair))throw new Error("Backup contains an invalid SF2 summary field.");
+            for(const sex of ["M","F"]){const v=pair[sex];if(v===undefined||v===""||v===null)continue;const n=Number(v);if(!Number.isFinite(n)||n<0||n>100000)throw new Error("Backup contains an invalid SF2 summary value.");}
+          }
+        }
       }
     }
   }

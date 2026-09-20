@@ -1,0 +1,27 @@
+E-Class Record App — v1.0.27 Dark Theme Semantic Tokens
+
+--background: #1A1D22;
+--surface: #20242B;
+--surface-raised: #272C34;
+--surface-subtle: #2C323B;
+--surface-muted: #313844;
+--text-primary: #E8EAED;
+--text-secondary: #B7BEC8;
+--text-disabled: #9AA3AE;
+--border: rgba(255,255,255,.12);
+--border-strong: rgba(255,255,255,.20);
+--accent: #84B594;
+--accent-fill: #3F7958;
+--accent-hover: #447657;
+--success: #84B594;
+--warning: #D4A55D;
+--error: #E38B83;
+--error-fill: #7D433F;
+--info: #7EA6D8;
+--on-accent: #F1F3F5;
+--focus-ring: rgba(132,181,148,.30);
+--overlay: rgba(7,10,14,.72);
+--shadow: rgba(0,0,0,.10);
+--shadow-raised: rgba(0,0,0,.14);
+
+Legacy aliases remain mapped to these semantic tokens so existing app components retain their intended hierarchy.

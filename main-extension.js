@@ -10,6 +10,7 @@ let startupContext = null;
 const previewWindows = new Set();
 let excelEngine = null;
 let templateFingerprintCache = null;
+let sf2TemplateFingerprintCache = null;
 
 function cleanFileName(value) {
   return String(value || 'Class Record')
@@ -48,7 +49,7 @@ function setWorksheetCell(xml, ref, value, type = 'auto') {
     attrs = m ? m[1] : null;
     matched = m ? m[0] : null;
   }
-  if (!matched) throw new Error(`Official ECR template cell ${ref} was not found.`);
+  if (!matched) throw new Error(`Official template cell ${ref} was not found.`);
 
   const style = (attrs.match(/\bs="([^"]+)"/) || [])[1];
   const styleAttr = style ? ` s="${style}"` : '';
@@ -258,8 +259,150 @@ function buildOfficialGsBuffer(payload, ctx) {
   return zip.toBuffer();
 }
 
+
+function validateSf2Payload(payload) {
+  if (!payload || typeof payload !== 'object' || !payload.meta || typeof payload.meta !== 'object' || !Array.isArray(payload.days) || !Array.isArray(payload.students) || !payload.summary) {
+    throw new Error('The SF2 data sent to the official-output engine is incomplete.');
+  }
+  if (payload.days.length > 25) throw new Error('The official SF2 template supports at most 25 school days in one reporting month.');
+  const male = payload.students.filter(s => s && s.sex === 'M');
+  const female = payload.students.filter(s => s && s.sex === 'F');
+  if (male.length > 21 || female.length > 25 || male.length + female.length !== payload.students.length) {
+    throw new Error('This official SF2 page supports at most 21 Male and 25 Female learners.');
+  }
+  for (const d of payload.days) {
+    if (!d || String(d.date || '').length > 20 || String(d.weekday || '').length > 3) throw new Error('SF2 contains an invalid school-day entry.');
+  }
+  for (const st of payload.students) {
+    if (!st || typeof st !== 'object' || String(st.name || '').length > 500 || String(st.remarks || '').length > 2000) throw new Error('SF2 contains an invalid learner record.');
+    if (!Array.isArray(st.marks) || st.marks.length !== payload.days.length) throw new Error(`SF2 attendance is incomplete for ${st.name || 'a learner'}.`);
+    for (const mark of st.marks) if (!['P','A','L','C'].includes(String(mark || 'P'))) throw new Error('SF2 contains an unsupported attendance code.');
+  }
+  for (const [key, value] of Object.entries(payload.meta)) {
+    if (value !== null && value !== undefined && typeof value !== 'string' && typeof value !== 'number') throw new Error(`Invalid SF2 metadata field: ${key}.`);
+    if (String(value ?? '').length > 1000) throw new Error(`SF2 metadata field is unexpectedly long: ${key}.`);
+  }
+}
+
+function cleanBrokenDefinedNames(zip) {
+  const wbEntry = zip.getEntry('xl/workbook.xml');
+  if (!wbEntry) return;
+  let xml = wbEntry.getData().toString('utf8');
+  xml = xml.replace(/<definedName\b[^>]*>#REF!<\/definedName>/g, '');
+  zip.updateFile('xl/workbook.xml', Buffer.from(xml, 'utf8'));
+}
+
+function buildOfficialSf2Buffer(payload, ctx) {
+  validateSf2Payload(payload);
+  const { fs, resolveResource } = ctx;
+  const AdmZip = resolveAdmZip();
+  const officialTemplate = resolveResource('templates/SF2 official Template.xlsx');
+  if (!fs.existsSync(officialTemplate)) throw new Error('The bundled Official SF2 template is missing.');
+  const zip = new AdmZip(fs.readFileSync(officialTemplate));
+  assertSafeImportedXlsx(zip, 'The bundled Official SF2 template');
+  const entry = zip.getEntry('xl/worksheets/sheet1.xml');
+  if (!entry) throw new Error('The official SF2 worksheet was not found in the template.');
+  let xml = entry.getData().toString('utf8');
+  const meta = payload.meta || {};
+  const dayCols = ['D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z','AA','AB'];
+
+  const headerValues = {
+    C6: meta.schoolId || '',
+    K6: meta.schoolYear || '',
+    X6: payload.monthName || payload.monthLabel || '',
+    C8: meta.schoolName || '',
+    X8: meta.gradeLevel || '',
+    AC8: meta.section || '',
+    AC64: payload.monthName || payload.monthLabel || '',
+    AG64: Number(payload.summary.schoolDays || payload.days.length || 0)
+  };
+  for (const [ref, value] of Object.entries(headerValues)) xml = setWorksheetCell(xml, ref, value, typeof value === 'number' ? 'number' : 'string');
+
+  // Calendar header: row 11 = date, row 12 = day of week. Row 13 remains intentionally blank.
+  dayCols.forEach((col, i) => {
+    const d = payload.days[i];
+    xml = setWorksheetCell(xml, `${col}11`, d ? Number(d.day || 0) : '', d ? 'number' : 'string');
+    xml = setWorksheetCell(xml, `${col}12`, d ? String(d.weekday || '') : '', 'string');
+    xml = setWorksheetCell(xml, `${col}13`, '', 'string');
+  });
+
+  const maleRows = Array.from({length:21},(_,i)=>14+i);
+  const femaleRows = Array.from({length:25},(_,i)=>36+i);
+  const allRows = [...maleRows, ...femaleRows];
+  for (const row of allRows) {
+    xml = setWorksheetCell(xml, `A${row}`, '', 'string');
+    xml = setWorksheetCell(xml, `B${row}`, '', 'string');
+    for (const col of dayCols) xml = setWorksheetCell(xml, `${col}${row}`, '', 'string');
+    xml = setWorksheetCell(xml, `AC${row}`, '', 'string');
+    xml = setWorksheetCell(xml, `AD${row}`, '', 'string');
+    xml = setWorksheetCell(xml, `AE${row}`, '', 'string');
+  }
+
+  function writeStudent(row, st, number) {
+    xml = setWorksheetCell(xml, `A${row}`, number, 'number');
+    xml = setWorksheetCell(xml, `B${row}`, st.name || '', 'string');
+    dayCols.forEach((col,i)=>{
+      const mark = String((st.marks || [])[i] || 'P');
+      const symbol = mark === 'A' ? 'x' : mark === 'L' ? '▀' : mark === 'C' ? '▄' : '';
+      xml = setWorksheetCell(xml, `${col}${row}`, symbol, 'string');
+    });
+    xml = setWorksheetCell(xml, `AC${row}`, Number(st.absent || 0), 'number');
+    xml = setWorksheetCell(xml, `AD${row}`, Number(st.tardy || 0), 'number');
+    xml = setWorksheetCell(xml, `AE${row}`, st.remarks || '', 'string');
+  }
+  let seq = 1;
+  payload.students.filter(s=>s.sex==='M').forEach((st,i)=>writeStudent(14+i,st,seq++));
+  payload.students.filter(s=>s.sex==='F').forEach((st,i)=>writeStudent(36+i,st,seq++));
+
+  function presentCount(sex,dateIndex) {
+    return payload.students.filter(st => (sex === 'T' || st.sex === sex) && String(st.marks[dateIndex] || 'P') !== 'A').length;
+  }
+  dayCols.forEach((col,i)=>{
+    if (i < payload.days.length) {
+      xml = setWorksheetCell(xml, `${col}35`, presentCount('M',i), 'number');
+      xml = setWorksheetCell(xml, `${col}61`, presentCount('F',i), 'number');
+      xml = setWorksheetCell(xml, `${col}62`, presentCount('T',i), 'number');
+    } else {
+      xml = setWorksheetCell(xml, `${col}35`, '', 'string');
+      xml = setWorksheetCell(xml, `${col}61`, '', 'string');
+      xml = setWorksheetCell(xml, `${col}62`, '', 'string');
+    }
+  });
+  const maleStudents=payload.students.filter(s=>s.sex==='M'), femaleStudents=payload.students.filter(s=>s.sex==='F');
+  const sumField=(arr,key)=>arr.reduce((a,s)=>a+Number(s[key]||0),0);
+  xml=setWorksheetCell(xml,'AC35',sumField(maleStudents,'absent'),'number');
+  xml=setWorksheetCell(xml,'AD35',sumField(maleStudents,'tardy'),'number');
+  xml=setWorksheetCell(xml,'AC61',sumField(femaleStudents,'absent'),'number');
+  xml=setWorksheetCell(xml,'AD61',sumField(femaleStudents,'tardy'),'number');
+  xml=setWorksheetCell(xml,'AC62',sumField(payload.students,'absent'),'number');
+  xml=setWorksheetCell(xml,'AD62',sumField(payload.students,'tardy'),'number');
+
+  const sm = payload.summary || {};
+  const summaryRows = [
+    [66, sm.first], [68, sm.late], [70, sm.reg], [72, sm.pctEnroll], [74, sm.ada],
+    [75, sm.pctAttend], [77, sm.consec5], [79, sm.dropout], [81, sm.transferredOut], [83, sm.transferredIn]
+  ];
+  for (const [row,obj] of summaryRows) {
+    const isDecimal = [72,74,75].includes(row);
+    const num = value => { const n=Number(value||0); return isDecimal ? Math.round(n*100)/100 : Math.round(n); };
+    xml = setWorksheetCell(xml, `AH${row}`, num(obj ? obj.M : 0), 'number');
+    xml = setWorksheetCell(xml, `AI${row}`, num(obj ? obj.F : 0), 'number');
+    xml = setWorksheetCell(xml, `AJ${row}`, num(obj ? obj.T : 0), 'number');
+  }
+
+  // Put printed names on the existing signature lines; the template's labels remain untouched.
+  if (payload.adviser) xml = setWorksheetCell(xml, 'AD88', payload.adviser, 'string');
+  if (payload.schoolHead) xml = setWorksheetCell(xml, 'AD92', payload.schoolHead, 'string');
+
+  zip.updateFile('xl/worksheets/sheet1.xml', Buffer.from(xml, 'utf8'));
+  stripWorkbookExternalLinks(zip);
+  cleanBrokenDefinedNames(zip);
+  return zip.toBuffer();
+}
+
 function buildOfficialDocumentBuffer(kind, payload, ctx) {
   if (kind === 'gs') return buildOfficialGsBuffer(payload, ctx);
+  if (kind === 'sf2') return buildOfficialSf2Buffer(payload, ctx);
   return buildOfficialEcrBuffer(payload, ctx);
 }
 
@@ -976,6 +1119,29 @@ function gsTemplateFingerprint(ctx) {
   return hash;
 }
 
+
+function sf2TemplateFingerprint(ctx) {
+  const { fs, resolveResource } = ctx;
+  const templatePath = resolveResource('templates/SF2 official Template.xlsx');
+  const stat = fs.statSync(templatePath);
+  const key = `${templatePath}|${stat.size}|${stat.mtimeMs}`;
+  if (sf2TemplateFingerprintCache && sf2TemplateFingerprintCache.key === key) return sf2TemplateFingerprintCache.hash;
+  const crypto = require('crypto');
+  const hash = crypto.createHash('sha256').update(fs.readFileSync(templatePath)).digest('hex');
+  sf2TemplateFingerprintCache = { key, hash };
+  return hash;
+}
+
+function sf2PreviewSignature(payload, ctx) {
+  const crypto = require('crypto');
+  return crypto.createHash('sha256')
+    .update('sf2-preview-v1.1.0\n')
+    .update(sf2TemplateFingerprint(ctx))
+    .update('\n')
+    .update(stableStringify(payload))
+    .digest('hex');
+}
+
 function gsPreviewSignature(payload, ctx) {
   const crypto = require('crypto');
   return crypto.createHash('sha256')
@@ -1276,18 +1442,100 @@ async function createOfficialGsPopupPreview(payload, context) {
   return { ok: true, preview: true, inAppPopup: true, cached: false, signature, xlsxPath, pdfPath };
 }
 
+
+function openSf2PdfPopup(pdfPath, xlsxPath, payload, ctx) {
+  const { BrowserWindow, Menu, shell, getMainWindow } = ctx;
+  if (!BrowserWindow) throw new Error('The in-app preview window service is unavailable.');
+  const { pathToFileURL } = require('url');
+  const parent = typeof getMainWindow === 'function' ? getMainWindow() : null;
+  const className = payload.meta && payload.meta.className ? payload.meta.className : 'SF2';
+  const win = new BrowserWindow({
+    width:1280,height:900,minWidth:900,minHeight:650,
+    parent: parent && !parent.isDestroyed() ? parent : undefined,
+    modal:false,title:`Official SF2 Print Preview — ${className} — ${payload.monthLabel || ''}`,
+    backgroundColor:'#525659',show:false,autoHideMenuBar:false,
+    webPreferences:{contextIsolation:true,nodeIntegration:false,sandbox:true,plugins:true}
+  });
+  previewWindows.add(win);
+  const doPrint=()=>{if(!win.isDestroyed())win.webContents.print({silent:false,printBackground:true,color:true,margins:{marginType:'default'}});};
+  if(Menu){
+    win.setMenu(Menu.buildFromTemplate([
+      {label:'File',submenu:[
+        {label:'Print...',accelerator:'CmdOrCtrl+P',click:doPrint},
+        {label:'Open Official SF2 in Excel',click:()=>shell.openPath(xlsxPath)},
+        {type:'separator'},
+        {label:'Close Preview',accelerator:'Esc',click:()=>{if(!win.isDestroyed())win.close();}}
+      ]},
+      {label:'View',submenu:[{role:'zoomIn'},{role:'zoomOut'},{role:'resetZoom'},{type:'separator'},{role:'togglefullscreen'}]}
+    ]));
+  }
+  const allowedPdfUrl=pathToFileURL(pdfPath).href;
+  win.webContents.on('will-navigate',(event,url)=>{if(url!==allowedPdfUrl&&!url.startsWith(allowedPdfUrl+'#'))event.preventDefault();});
+  win.webContents.setWindowOpenHandler(()=>({action:'deny'}));
+  win.webContents.on('did-fail-load',(_event,code,desc)=>{if(code!==-3)console.error('Official SF2 popup preview failed to load:',code,desc);});
+  win.once('ready-to-show',()=>win.show());
+  win.on('closed',()=>previewWindows.delete(win));
+  win.loadURL(allowedPdfUrl);
+  return win;
+}
+
+async function createOfficialSf2PopupPreview(payload, context) {
+  const ctx={...(startupContext||{}),...(context||{})};
+  validateSf2Payload(payload);
+  if(process.platform!=='win32') return {ok:false,previewUnavailable:true,error:'Official SF2 preview requires Windows and desktop Microsoft Excel.'};
+  const {fs,path,dataPaths}=ctx;
+  const root=dataPaths().root;
+  const previewDir=path.join(root,'Official SF2 Preview Cache');
+  fs.mkdirSync(previewDir,{recursive:true});
+  const classPart=cleanFileName(payload.meta.className||`${payload.meta.gradeLevel||''} ${payload.meta.section||''}`||'SF2');
+  const signature=sf2PreviewSignature(payload,ctx),shortSig=signature.slice(0,20);
+  const monthPart=cleanFileName(payload.monthLabel||'Month');
+  const base=`${classPart} - ${monthPart} - SF2 - ${shortSig}`;
+  const xlsxPath=path.join(previewDir,`${base}.xlsx`),pdfPath=path.join(previewDir,`${base}.pdf`);
+  if(isUsablePreviewFile(fs,xlsxPath)&&isUsablePreviewFile(fs,pdfPath)){
+    openSf2PdfPopup(pdfPath,xlsxPath,payload,ctx);
+    return {ok:true,preview:true,inAppPopup:true,cached:true,signature,xlsxPath,pdfPath};
+  }
+  fs.writeFileSync(xlsxPath,buildOfficialDocumentBuffer('sf2',payload,ctx));
+  let renderError=null;
+  try{
+    if(!excelEngine)excelEngine=new PersistentExcelRenderer(ctx);
+    await excelEngine.render(xlsxPath,pdfPath);
+  }catch(err){
+    renderError=err;try{if(excelEngine)excelEngine.stop();}catch{}excelEngine=null;
+    await new Promise(r=>setTimeout(r,350));
+    const fallback=await fallbackOneShotRender(xlsxPath,pdfPath,ctx);
+    if(!fallback.ok) return {ok:false,previewUnavailable:true,openedFallback:false,xlsxPath,pdfPath,error:fallback.error||(renderError&&renderError.message)||'Microsoft Excel did not create the official SF2 PDF preview.'};
+  }
+  if(!isUsablePreviewFile(fs,pdfPath)) return {ok:false,previewUnavailable:true,openedFallback:false,xlsxPath,pdfPath,error:'Microsoft Excel completed without producing a usable official SF2 PDF preview.'};
+  openSf2PdfPopup(pdfPath,xlsxPath,payload,ctx);
+  try{
+    const cutoff=Date.now()-14*24*60*60*1000;
+    for(const name of fs.readdirSync(previewDir)){const p=path.join(previewDir,name);if(p===xlsxPath||p===pdfPath)continue;try{const st=fs.statSync(p);if(st.isFile()&&st.mtimeMs<cutoff)fs.unlinkSync(p);}catch{}}
+  }catch{}
+  return {ok:true,preview:true,inAppPopup:true,cached:false,signature,xlsxPath,pdfPath};
+}
+
 async function saveOfficialDocument(kind, payload, context) {
   const ctx = { ...(startupContext || {}), ...(context || {}) };
-  validatePayload(payload);
+  if (kind === 'sf2') validateSf2Payload(payload); else validatePayload(payload);
   const { app, dialog, fs, path, getMainWindow } = ctx;
   if (!dialog || typeof dialog.showSaveDialog !== 'function') throw new Error('The Windows Save dialog is unavailable.');
-  const termNo = termNumber(payload.termKey);
-  const classPart = cleanFileName(payload.meta.className || `${payload.meta.gradeLevel || ''} ${payload.meta.section || ''}`);
-  const label = kind === 'gs' ? 'Official GS' : 'Official ECR';
-  const defaultName = `${classPart} - Term ${termNo} - ${label}.xlsx`;
+  const classPart = cleanFileName(payload.meta.className || `${payload.meta.gradeLevel || ''} ${payload.meta.section || ''}` || 'Class');
+  let defaultName, title;
+  if (kind === 'sf2') {
+    const monthPart = cleanFileName(payload.monthLabel || payload.monthKey || 'Month');
+    defaultName = `${classPart} - ${monthPart} - Official SF2.xlsx`;
+    title = 'Save Official SF2';
+  } else {
+    const termNo = termNumber(payload.termKey);
+    const label = kind === 'gs' ? 'Official GS' : 'Official ECR';
+    defaultName = `${classPart} - Term ${termNo} - ${label}.xlsx`;
+    title = kind === 'gs' ? 'Save Official Grading Sheet' : 'Save Official Class Record';
+  }
   const parent = typeof getMainWindow === 'function' ? getMainWindow() : undefined;
   const result = await dialog.showSaveDialog(parent, {
-    title: kind === 'gs' ? 'Save Official Grading Sheet' : 'Save Official Class Record',
+    title,
     defaultPath: path.join(app.getPath('documents'), defaultName),
     filters: [{ name: 'Excel Workbook', extensions: ['xlsx'] }]
   });
@@ -1375,6 +1623,10 @@ module.exports = {
       return createOfficialGsPopupPreview(payload, context);
     }
     if (action === 'gs:official-save') return saveOfficialDocument('gs', payload, context);
+    if (action === 'sf2:official-pdf-preview' || action === 'sf2:official-popup-preview') {
+      return createOfficialSf2PopupPreview(payload, context);
+    }
+    if (action === 'sf2:official-save') return saveOfficialDocument('sf2', payload, context);
     if (action === 'summary:import-file') return importSummaryFile(context);
     if (action === 'sf9:preview-html') return openSf9HtmlPreview(payload, context);
     if (action === 'window:fullscreen-state') {
@@ -1389,7 +1641,7 @@ module.exports = {
     if (action === 'ecr:preview-engine-status' || action === 'official:preview-engine-status') {
       return { ok: true, warm: !!(excelEngine && excelEngine.ready) };
     }
-    return { ok: false, unsupported: true, error: `Runtime action is not available in v1.0.20: ${action}` };
+    return { ok: false, unsupported: true, error: `Runtime action is not available in this build: ${action}` };
   }
 };
 

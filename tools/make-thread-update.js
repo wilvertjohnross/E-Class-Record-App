@@ -78,7 +78,7 @@ const manifest = {
   appId: 'ph.edu.eclassrecord.gs.sf9',
   productName: 'E-Class Record App with GS and SF9',
   version,
-  minBootstrapVersion: '1.0.20',
+  minBootstrapVersion: '1.1.0',
   channel: 'chat-thread-local-development',
   createdAt: new Date().toISOString(),
   files
@@ -96,7 +96,7 @@ const privateKey = fs.readFileSync(signingKeyPath, 'utf8');
 let derivedPublic;
 try { derivedPublic = crypto.createPublicKey(crypto.createPrivateKey(privateKey)).export({type:'spki',format:'pem'}).toString().trim(); }
 catch (err) { console.error('Signing key is not a valid private key:', err.message); process.exit(2); }
-if (derivedPublic !== TRUSTED_PUBLIC_KEY.trim()) { console.error('Signing key does not match the public key trusted by bootstrap v1.0.25.'); process.exit(2); }
+if (derivedPublic !== TRUSTED_PUBLIC_KEY.trim()) { console.error('Signing key does not match the public key trusted by bootstrap v1.1.0.'); process.exit(2); }
 manifest.signature = { algorithm:'ed25519', keyId:'ecr-dev-2026-02', value:crypto.sign(null, canonicalManifestBytes(manifest), privateKey).toString('base64') };
 zip.addFile('manifest.json', Buffer.from(JSON.stringify(manifest, null, 2), 'utf8'));
 fs.mkdirSync(path.dirname(output), { recursive: true });

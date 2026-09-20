@@ -1,0 +1,19 @@
+E-Class Record App with GS and SF9 — v1.1.0
+Build type: Full bootstrap / complete installer source
+Feature milestone: Official SF2 Daily Attendance integration
+Base: v1.0.27 complete installer source
+
+Why full bootstrap is required:
+- v1.1.0 adds SF2 runtime IPC actions to main.js.
+- main.js is part of the trusted Electron shell and is not replaced by ordinary .ecrupdate overlays.
+- After v1.1.0 is installed, future v1.1.x runtime patches can target minimum bootstrap 1.1.0.
+
+Official SF2 source template:
+- School Form 2 (SF2) Daily Attendance Report of Learners(1).xlsx
+- Bundled as templates/SF2 official Template.xlsx
+- Source template is preserved byte-for-byte.
+- Generated copies are filled by the app and cleaned of stale external-link / broken defined-name residue.
+
+Data remains under:
+Documents\E-Class Record App with GS and SF9\eclass-record-data.json
+Existing v1.0.x user data is preserved. SF2 data is added lazily only when the advisory feature is enabled/used.
