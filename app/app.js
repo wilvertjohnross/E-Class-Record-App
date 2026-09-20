@@ -831,6 +831,7 @@ function render(){
   if(role==="subject"&&!subjectCls){activeTab="subjecthome";renderSubjectTeacherHome(main,null);return;}
   const cls=role==="adviser"?adviserCls:subjectCls;
   if(activeTab==="setup") renderSetup(main, cls);
+  else if(activeTab==="classroster") renderClassRoster(main, cls);
   else if(activeTab==="sf9setup") renderSf9Setup(main, cls);
   else if(activeTab==="roster") renderRoster(main, cls);
   else if(activeTab==="sf2") renderSf2(main, cls);
@@ -874,7 +875,7 @@ function renderSubjectTeacherHome(main,cls){
       <div class="hub-title-row"><div><h2>Class Overview</h2><div class="sub">Manage this teaching class, its learner roster, and its independent grading workspace.</div></div><div class="hub-context"><strong>${esc(cls.meta.className||"Current Class")}</strong><br>${esc(cls.meta.gradeLevel||"")} ${esc(cls.meta.section||"")}</div></div>
       <div class="control-hub">
         <div class="control-card"><div><div class="module-code">CLASS</div><h3>Class Setup</h3><p>Set the class name, subject, grade level, section, teacher, school details, and grading configuration.</p></div><div class="card-actions"><button class="primary" data-go-tab="setup">Open Class Setup</button></div></div>
-        <div class="control-card"><div><div class="module-code">ROSTER</div><h3>Learner Roster</h3><p>Add, paste, or import learners for this class. This roster remains independent from Adviser records.</p></div><div class="card-actions"><button class="primary" data-go-tab="setup">Manage Roster</button><span class="status-chip">${cls.students.length} learners</span></div></div>
+        <div class="control-card"><div><div class="module-code">ROSTER</div><h3>Learner Roster</h3><p>Add, paste, or import learners for this class. This roster remains independent from Adviser records.</p></div><div class="card-actions"><button class="primary" data-go-tab="classroster">Manage Roster</button><span class="status-chip">${cls.students.length} learners</span></div></div>
       </div>
       <div class="class-management no-print"><strong>Class management</strong><button class="small ghost-alt" data-click-id="btnNewClass">+ New Class</button><button class="small ghost-alt" data-click-id="btnDupClass">Duplicate Class</button><button class="small danger" data-click-id="btnDelClass">Delete Class</button></div>
     </div>`;
@@ -1095,8 +1096,16 @@ function renderSetup(main, cls){
     </div>
   `;
 
+  const setupSplit=main.querySelector(".class-setup-split");
+  const rosterCard=setupSplit&&setupSplit.querySelector(".class-roster-card");
+  const logoCard=setupSplit&&setupSplit.nextElementSibling;
+  if(rosterCard) rosterCard.remove();
+  if(setupSplit&&logoCard&&logoCard.querySelector("#schoolLogoPreview")) setupSplit.appendChild(logoCard);
+  ["f_teacher","f_adviser","f_schoolHead"].forEach(id=>document.getElementById(id)?.closest(".field")?.remove());
+
   ["className","gradeLevel","section","teacher","adviser","schoolHead","region","division","schoolId","schoolName","schoolYear","schoolAddress","preparedByName","preparedByTitle","checkedByName","checkedByTitle","approvedByName","approvedByTitle"].forEach(f=>{
-    document.getElementById("f_"+f).addEventListener("change", e=>{
+    const input=document.getElementById("f_"+f); if(!input) return;
+    input.addEventListener("change", e=>{
       m[f] = unicodeText(e.target.value); saveState(); renderClassPicker();
     });
   });
@@ -1155,9 +1164,15 @@ function renderSetup(main, cls){
     document.getElementById("statusLeft").textContent = "School logo reset to default.";
   });
 
-  bindClassRosterManager(cls);
   updateWeightTotal(cls);
   bindCategoryEditorEvents(cls);
+}
+
+function renderClassRoster(main, cls){
+  const repairedRosterEntries=repairMultilineSubjectRoster(cls);
+  if(repairedRosterEntries) saveState();
+  main.innerHTML=`<div class="class-roster-view">${classRosterManagerHtml(cls)}</div>`;
+  bindClassRosterManager(cls);
 }
 
 function renderSf9Setup(main, cls){

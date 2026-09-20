@@ -791,6 +791,11 @@
   /* Compact single-column Class Setup. The roster follows as its own working card. */
   .class-setup-split{grid-template-columns:minmax(0,760px);gap:16px;}.class-setup-card{padding:18px;}.class-setup-card .grid3,.class-setup-card .grid2{grid-template-columns:1fr;gap:0;}.class-setup-card .field{margin-bottom:9px;}.class-setup-card .sub{margin-bottom:12px;}.class-setup-card .import-summary{margin:10px 0;padding:9px 11px;}.class-roster-card{position:static;max-height:none;min-height:0;}
 </style>
+<style>
+  /* Class Setup owns class details; the logo sits beside it and the roster is a separate view. */
+  .class-setup-split{grid-template-columns:minmax(0,1fr) minmax(280px,.42fr);gap:16px;align-items:start;}
+  @media(max-width:900px){.class-setup-split{grid-template-columns:1fr;}}
+</style>
 </head>
 <body>
 
@@ -810,7 +815,8 @@
 <nav class="tabs role-tabs no-print" id="tabs">
   <div class="nav-group">Teaching</div>
   <button class="tab" data-tab="subjecthome">Class Overview</button>
-  <button class="tab" data-tab="setup">Classes &amp; Roster</button>
+  <button class="tab" data-tab="setup">Class Setup</button>
+  <button class="tab" data-tab="classroster">Learner Roster</button>
   <details class="nav-disclosure"><summary>Grading</summary><div class="nav-submenu">
     <button class="tab" data-tab="term1">Class Record — Term 1</button>
     <button class="tab" data-tab="term2">Class Record — Term 2</button>
