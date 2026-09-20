@@ -241,10 +241,11 @@
   table.rc-legend td.desc{color:var(--green-chalk);}
 
   table.rc-att{width:100%;border-collapse:collapse;font-size:9.5px;margin-bottom:16px;}
-  table.rc-att th, table.rc-att td{border:1px solid var(--ink);padding:3px 3px;text-align:center;}
-  table.rc-att th{background:var(--paper-deep);font-weight:700;}
-  table.rc-att td.rc-att-label{text-align:left;font-weight:700;white-space:normal;font-size:9px;width:60px;}
-  table.rc-att input{width:100%;border:none;background:transparent;text-align:center;font-size:9.5px;padding:1px;font-family:var(--sans);}
+  table.rc-att th, table.rc-att td{border:1px solid var(--ink);padding:3px 3px;text-align:center;background:#FFFFFF;}
+  table.rc-att th{background:#FFFFFF;font-weight:700;}
+  table.rc-att td.rc-att-label{text-align:left;font-weight:700;white-space:normal;font-size:9px;width:60px;background:#FFFFFF;}
+  table.rc-att input{width:100%;border:none;background:transparent;text-align:center;font-size:9.5px;padding:1px;font-family:var(--sans);appearance:textfield;-moz-appearance:textfield;}
+  table.rc-att input::-webkit-outer-spin-button, table.rc-att input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
 
   .rc-comment-block{margin-bottom:10px;}
   .rc-comment-block label{font-size:10.5px;font-weight:700;margin-right:6px;}
@@ -309,7 +310,7 @@
   .sf2-remarks input{width:100%;min-width:215px;border:0;background:transparent;padding:4px 6px;text-align:left;}
   .sf2-total-row td{font-weight:800;background:#F5EFE0!important;}
   .sf2-total-row .sticky-learner{background:#F5EFE0!important;}
-  .sf2-fed-att{background:var(--paper-deep)!important;color:var(--ink-soft)!important;cursor:not-allowed;}
+  .sf2-fed-att{background:transparent!important;color:var(--ink)!important;cursor:default;}
   table.sf2-summary-table{border-collapse:collapse;width:100%;max-width:850px;font-size:12px;margin-top:10px;}
   table.sf2-summary-table th,table.sf2-summary-table td{border:1px solid var(--border);padding:6px 8px;text-align:center;}
   table.sf2-summary-table th{background:var(--manila);font-weight:800;}
@@ -607,7 +608,7 @@
   html[data-theme="dark"] .sf2-mark{color:var(--text-primary);}
   html[data-theme="dark"] .sf2-mark.absent,html[data-theme="dark"] .sf2-mark.late,html[data-theme="dark"] .sf2-mark.cutting{color:var(--text-primary);}
   html[data-theme="dark"] .sf2-total,html[data-theme="dark"] .sf2-total-row td,html[data-theme="dark"] .sf2-total-row .sticky-learner{background:var(--surface-subtle)!important;color:var(--text-primary);}
-  html[data-theme="dark"] .sf2-fed-att{background:var(--surface-subtle)!important;color:var(--text-secondary)!important;}
+  html[data-theme="dark"] .sf2-fed-att{background:transparent!important;color:var(--ink)!important;cursor:default;}
   html[data-theme="dark"] .sf2-remarks input{background:transparent;color:var(--text-primary);}
   html[data-theme="dark"] table.sf2-summary-table th{background:#373029;color:var(--text-primary);}
   html[data-theme="dark"] table.sf2-summary-table td{background:var(--surface);color:var(--text-primary);border-color:var(--border);}
@@ -644,8 +645,10 @@
   html[data-theme="dark"] table.cr-master th.firstterm-cell-th{background:var(--surface-raised);}
   html[data-theme="dark"] table.cr-master td.meta-value,
   html[data-theme="dark"] table.gs-inforow td.val{background:var(--surface-subtle);color:var(--accent);}
-  html[data-theme="dark"] table.rc-grades th,
-  html[data-theme="dark"] table.rc-att th{background:var(--surface-subtle);color:var(--text-primary);}
+  html[data-theme="dark"] table.rc-grades th{background:var(--surface-subtle);color:var(--text-primary);}
+  html[data-theme="dark"] table.rc-att th,
+  html[data-theme="dark"] table.rc-att td{background:#FFFFFF;color:var(--ink);border-color:var(--ink);}
+  html[data-theme="dark"] table.rc-att input{color:var(--ink);background:transparent;}
   html[data-theme="dark"] table.cr-table td.blank-cell{background:repeating-linear-gradient(45deg,#22272E,#22272E 4px,#2A3038 4px,#2A3038 5px);}
   html[data-theme="dark"] table.cr-table input.score-input.score-input-error{outline-color:var(--error);background:#3A2425;color:var(--text-primary);}
 
