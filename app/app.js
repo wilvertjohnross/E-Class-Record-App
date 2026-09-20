@@ -567,11 +567,14 @@ function setSaveStatus(text,isError=false){
 function saveState(){
   try{
     Object.values(APP.classes||{}).forEach(c=>{
+      c.domain="subject";
       ensureSubjectConfig(c);
       ensureClassRecordSubject(c);
-      syncClassRecordToSummary(c);
     });
-  }catch(err){ console.warn("Could not synchronize Class Record grades into Summary before saving",err); }
+    const adv=ensureAdviserWorkspace();
+    ensureSubjectConfig(adv);
+    adv.students.forEach(st=>ensureStudentExtras(adv,st.id));
+  }catch(err){ console.warn("Could not normalize role-separated app data before saving",err); }
   if(!APP._persistence || typeof APP._persistence!=="object") APP._persistence={};
   APP._persistence.revision=persistenceRevision(APP)+1;
   APP._persistence.modifiedAt=new Date().toISOString();
@@ -645,6 +648,45 @@ function resizeSchoolLogo(file){
 
 function activeClass(){ return APP.classes[APP.activeId]; }
 
+function cloneJson(value){ return JSON.parse(JSON.stringify(value)); }
+function createAdviserWorkspace(seed=null){
+  const base=seed?cloneJson(seed):newClass("Advisory Class");
+  base.id=base.id&&String(base.id).startsWith("adv_")?base.id:uid("adv");
+  base.domain="adviser";
+  base.createdAt=base.createdAt||Date.now();
+  if(!base.meta||typeof base.meta!=="object") base.meta={};
+  if(!base.meta.className) base.meta.className="Advisory Class";
+  if(!base.meta.sf1SourceStatus) base.meta.sf1SourceStatus=seed?"migrated":"not-imported";
+  if(!Array.isArray(base.students)) base.students=[];
+  if(!base.otherGrades||typeof base.otherGrades!=="object") base.otherGrades={};
+  if(!base.attendance||typeof base.attendance!=="object") base.attendance={};
+  if(!base.comments||typeof base.comments!=="object") base.comments={};
+  if(!base.sf2||typeof base.sf2!=="object") base.sf2={activeMonth:"",months:{}};
+  ensureSubjectConfig(base);
+  base.students.forEach(st=>{ensureSf1Profile(st);ensureStudentExtras(base,st.id);});
+  return base;
+}
+function ensureAdviserWorkspace(){
+  if(!APP.adviserWorkspace||typeof APP.adviserWorkspace!=="object"||Array.isArray(APP.adviserWorkspace)){
+    const seed=activeClass()||null;
+    APP.adviserWorkspace=createAdviserWorkspace(seed);
+  }
+  const adv=APP.adviserWorkspace;
+  adv.domain="adviser";
+  if(!adv.meta||typeof adv.meta!=="object") adv.meta={};
+  if(!adv.meta.className) adv.meta.className="Advisory Class";
+  if(!Array.isArray(adv.students)) adv.students=[];
+  if(!adv.otherGrades||typeof adv.otherGrades!=="object") adv.otherGrades={};
+  if(!adv.attendance||typeof adv.attendance!=="object") adv.attendance={};
+  if(!adv.comments||typeof adv.comments!=="object") adv.comments={};
+  if(!adv.sf2||typeof adv.sf2!=="object") adv.sf2={activeMonth:"",months:{}};
+  ensureSubjectConfig(adv);
+  adv.students.forEach(st=>{ensureSf1Profile(st);ensureStudentExtras(adv,st.id);});
+  return adv;
+}
+function adviserClass(){ return ensureAdviserWorkspace(); }
+function adviserSf1Ready(cls){ return !!(cls&&cls.domain==="adviser"&&cls.meta&&cls.meta.sf1SourceStatus==="imported"); }
+
 /* =========================================================================
    GRADE COMPUTATION
    ========================================================================= */
@@ -710,7 +752,7 @@ function studentFinalResult(cls, studentId){
    RENDER: shell
    ========================================================================= */
 const SUBJECT_WORKFLOW_TABS=new Set(["subjecthome","setup","term1","term2","term3","final","summary"]);
-const ADVISER_WORKFLOW_TABS=new Set(["adviserhome","roster","sf2","sf5","report","sf9setup","sf10"]);
+const ADVISER_WORKFLOW_TABS=new Set(["adviserhome","roster","sf2","advisersummary","sf5","report","sf9setup","sf10"]);
 function roleForTab(tab){
   if(ADVISER_WORKFLOW_TABS.has(tab)) return "adviser";
   return "subject";
@@ -724,6 +766,7 @@ function subjectWorkflowKey(tab){
 function adviserWorkflowKey(tab){
   if(tab==="roster") return "sf1";
   if(tab==="sf2") return "sf2";
+  if(tab==="advisersummary") return "summary";
   if(tab==="sf5") return "sf5";
   if(tab==="report"||tab==="sf9setup") return "sf9";
   if(tab==="sf10") return "sf10";
@@ -742,6 +785,7 @@ function workflowNavHtml(role,current){
   return `<div class="workflow-nav no-print"><span class="workflow-label">Adviser</span>
     <button class="small ${key==="sf1"?"active":""}" data-go-tab="roster">SF1</button>
     <button class="small ${key==="sf2"?"active":""}" data-go-tab="sf2">SF2</button>
+    <button class="small ${key==="summary"?"active":""}" data-go-tab="advisersummary">Summary of Subject Grades</button>
     <button class="small ${key==="sf5"?"active":""}" data-go-tab="sf5">SF5</button>
     <button class="small ${key==="sf9"?"active":""}" data-go-tab="report">SF9</button>
     <button class="small ${key==="sf10"?"active":""}" data-go-tab="sf10">SF10</button>
@@ -766,12 +810,13 @@ function prependWorkflowNavigation(main,current){
 }
 function render(){
   renderClassPicker();
-  const cls = activeClass();
-  if(cls){
-    ensureSubjectConfig(cls);
-    ensureClassRecordSubject(cls);
-    syncClassRecordToSummary(cls);
+  const subjectCls=activeClass();
+  if(subjectCls){
+    subjectCls.domain="subject";
+    ensureSubjectConfig(subjectCls);
+    ensureClassRecordSubject(subjectCls);
   }
+  const adviserCls=ensureAdviserWorkspace();
   const role=roleForTab(activeTab);
   document.querySelectorAll("nav.tabs .tab").forEach(b=>{
     const roleHome=role==="adviser"?"adviserhome":"subjecthome";
@@ -779,29 +824,36 @@ function render(){
   });
   const main = document.getElementById("main");
   main.innerHTML = "";
-  if(activeTab==="subjecthome"){renderSubjectTeacherHome(main,cls);return;}
-  if(activeTab==="adviserhome"){renderAdviserHome(main,cls);return;}
-  if(!cls){activeTab="subjecthome";renderSubjectTeacherHome(main,null);return;}
+  if(activeTab==="subjecthome"){renderSubjectTeacherHome(main,subjectCls);return;}
+  if(activeTab==="adviserhome"){renderAdviserHome(main,adviserCls);return;}
+  if(role==="subject"&&!subjectCls){activeTab="subjecthome";renderSubjectTeacherHome(main,null);return;}
+  const cls=role==="adviser"?adviserCls:subjectCls;
   if(activeTab==="setup") renderSetup(main, cls);
   else if(activeTab==="sf9setup") renderSf9Setup(main, cls);
   else if(activeTab==="roster") renderRoster(main, cls);
   else if(activeTab==="sf2") renderSf2(main, cls);
-  else if(activeTab==="sf5") renderComingSoon(main,"SF5","School Form 5","The official template and computation logic will be added after we establish the SF5 specification.");
-  else if(activeTab==="sf10") renderComingSoon(main,"SF10","School Form 10","The official template and learner-record logic will be added after the new SF10 specification is established.");
+  else if(activeTab==="advisersummary") renderSummary(main, cls);
+  else if(activeTab==="sf5") renderComingSoon(main,"SF5","School Form 5","The official template and computation logic will be added after we establish the SF5 specification. Its learner identity and subject-grade data will come from the Adviser SF1 domain.");
+  else if(activeTab==="sf10") renderComingSoon(main,"SF10","School Form 10","The official template and learner-record logic will be added after the new SF10 specification is established. Its learner identity will come from the Adviser SF1 domain.");
   else if(activeTab==="term1") renderTerm(main, cls, "term1", "Term 1");
   else if(activeTab==="term2") renderTerm(main, cls, "term2", "Term 2");
   else if(activeTab==="term3") renderTerm(main, cls, "term3", "Term 3");
   else if(activeTab==="final") renderFinal(main, cls);
-  else if(activeTab==="summary") renderSummary(main, cls);
+  else if(activeTab==="summary") renderSubjectSummary(main, cls);
   else if(activeTab==="report") renderReport(main, cls);
-  else {activeTab="subjecthome";renderSubjectTeacherHome(main,cls);return;}
+  else {activeTab=role==="adviser"?"adviserhome":"subjecthome";role==="adviser"?renderAdviserHome(main,adviserCls):renderSubjectTeacherHome(main,subjectCls);return;}
   prependWorkflowNavigation(main,activeTab);
 }
 
 function renderClassPicker(){
   const sel = document.getElementById("classSelect");
+  const label=document.getElementById("classPickerLabel");
+  const adviserMode=roleForTab(activeTab)==="adviser";
+  if(sel) sel.style.display=adviserMode?"none":"";
+  if(label) label.style.display=adviserMode?"none":"";
+  if(!sel) return;
   sel.innerHTML = "";
-  Object.values(APP.classes).sort((a,b)=>a.createdAt-b.createdAt).forEach(c=>{
+  Object.values(APP.classes||{}).sort((a,b)=>a.createdAt-b.createdAt).forEach(c=>{
     const opt = document.createElement("option");
     opt.value = c.id;
     opt.textContent = c.meta.className || "(untitled class)";
@@ -812,40 +864,45 @@ function renderClassPicker(){
 
 function renderSubjectTeacherHome(main,cls){
   if(!cls){
-    main.innerHTML=`<div class="card coming-soon-panel"><div class="module-code">CLASS</div><h2>No class yet</h2><p class="sub">Create your first class to begin building a Class Record and Summary of Grades.</p><button class="primary" data-click-id="btnNewClass">+ Create New Class</button></div>`;
+    main.innerHTML=`<div class="card coming-soon-panel"><div class="module-code">CLASS</div><h2>No Subject Teacher class yet</h2><p class="sub">Create your first teaching class, then encode learner names or import a CSV roster.</p><button class="primary" data-click-id="btnNewClass">+ Create New Class</button></div>`;
     return;
   }
-  const link=classRecordLinkStatus(cls);
   main.innerHTML=`
     <div class="card">
-      <div class="hub-title-row"><div><h2>Subject Teacher Controls</h2><div class="sub">Build and maintain the grading records for the active class.</div></div><div class="hub-context"><strong>${esc(cls.meta.className||"Current Class")}</strong><br>${esc(cls.meta.gradeLevel||"")} ${esc(cls.meta.section||"")}</div></div>
+      <div class="hub-title-row"><div><h2>Subject Teacher Controls</h2><div class="sub">Independent grading workspace for non-adviser teaching classes. These rosters do not populate Adviser official forms.</div></div><div class="hub-context"><strong>${esc(cls.meta.className||"Current Class")}</strong><br>${esc(cls.meta.gradeLevel||"")} ${esc(cls.meta.section||"")}</div></div>
       <div class="control-hub">
-        <div class="control-card"><div><div class="module-code">CLASS</div><h3>Classes</h3><p>Configure school/class information and choose the active Class Record Subject for this grading sheet.</p></div><div class="card-actions"><button class="primary" data-go-tab="setup">Open Class Setup</button><span class="status-chip">${cls.students.length} learners</span></div></div>
-        <div class="control-card"><div><div class="module-code">CR</div><h3>Class Record</h3><p>Encode raw scores, view the Grading Sheet, and manage Term 1–3 plus Final Grades for <strong>${esc(classRecordSubjectLabel(cls))}</strong>.</p></div><div class="card-actions"><button class="primary" data-go-tab="term1">Open Class Record</button><span class="status-chip ${link.ok?"ok":"warn"}">${link.ok?"Linked to Summary":"Link needs attention"}</span></div></div>
-        <div class="control-card"><div><div class="module-code">SUMMARY</div><h3>Summary of Grades</h3><p>Consolidate all learning-area grades. This is the single grade source used by SF9.</p></div><div class="card-actions"><button class="primary" data-go-tab="summary">Open Summary</button></div></div>
+        <div class="control-card"><div><div class="module-code">CLASS</div><h3>Classes & Roster</h3><p>Create the teaching class and maintain its learner roster manually or through CSV import.</p></div><div class="card-actions"><button class="primary" data-go-tab="setup">Open Classes</button><span class="status-chip">${cls.students.length} learners</span></div></div>
+        <div class="control-card"><div><div class="module-code">CR</div><h3>Class Record</h3><p>Encode raw scores and manage Term 1, Term 2, Term 3, and Final Grades for <strong>${esc(classRecordSubjectLabel(cls))}</strong>.</p></div><div class="card-actions"><button class="primary" data-go-tab="term1">Open Class Record</button></div></div>
+        <div class="control-card"><div><div class="module-code">SUMMARY</div><h3>Summary of Grades</h3><p>View the term and final grades produced by this specific Subject Teacher class record.</p></div><div class="card-actions"><button class="primary" data-go-tab="summary">Open Summary</button></div></div>
       </div>
       <div class="class-management no-print"><strong>Class management</strong><button class="small ghost-alt" data-click-id="btnNewClass">+ New Class</button><button class="small ghost-alt" data-click-id="btnDupClass">Duplicate Class</button><button class="small danger" data-click-id="btnDelClass">Delete Class</button></div>
     </div>`;
 }
 function renderAdviserHome(main,cls){
-  if(!cls){
-    main.innerHTML=`<div class="card coming-soon-panel"><div class="module-code">ADVISER</div><h2>No active class</h2><p class="sub">Create or select a class first, then return to Adviser Controls.</p><button class="primary" data-go-tab="subjecthome">Go to Subject Teacher Controls</button></div>`;
-    return;
-  }
   const sf2On=!!(cls.meta&&cls.meta.sf2Enabled===true);
   const sc=ensureSubjectConfig(cls);
+  const sourceStatus=String(cls.meta&&cls.meta.sf1SourceStatus||"not-imported");
+  const sf1Ready=sourceStatus==="imported";
   main.innerHTML=`
     <div class="card">
-      <div class="hub-title-row"><div><h2>Adviser Controls</h2><div class="sub">Adviser forms and learner records for the active advisory class.</div></div><div class="hub-context"><strong>${esc(cls.meta.className||"Current Class")}</strong><br>${esc(cls.meta.adviser||"Adviser not set")}</div></div>
-      <div class="control-hub">
-        <div class="control-card"><div><div class="module-code">SF1</div><h3>School Form 1</h3><p>Maintain the learner masterlist and import learner information from an official SF1 workbook.</p></div><div class="card-actions"><button class="primary" data-go-tab="roster">Open SF1 / Masterlist</button><span class="status-chip">${cls.students.length} learners</span></div></div>
-        <div class="control-card"><div><div class="module-code">SF2</div><h3>School Form 2</h3><p>Maintain daily attendance and monthly attendance summaries that feed SF9 automatically.</p></div><div class="card-actions"><button class="primary" data-go-tab="sf2">Open SF2</button><span class="status-chip ${sf2On?"ok":"warn"}">${sf2On?"Enabled":"Not enabled"}</span></div></div>
-        <div class="control-card coming-soon"><div><div class="module-code">SF5</div><h3>School Form 5</h3><p>Promotion, retention, and end-of-year reporting. Template and logic will be established next.</p></div><div class="card-actions"><button class="ghost-alt" data-go-tab="sf5">View Placeholder</button><span class="status-chip">Coming Soon</span></div></div>
-        <div class="control-card"><div><div class="module-code">SF9</div><h3>School Form 9</h3><p>Generate learner report cards from Summary of Grades and SF2 attendance. Curriculum: <strong>${esc(sc.classType)}</strong>.</p></div><div class="card-actions"><button class="primary" data-go-tab="report">Open SF9</button></div></div>
-        <div class="control-card coming-soon"><div><div class="module-code">SF10</div><h3>School Form 10</h3><p>Permanent learner record. Template and logic will be integrated once the specification is established.</p></div><div class="card-actions"><button class="ghost-alt" data-go-tab="sf10">View Placeholder</button><span class="status-chip">Coming Soon</span></div></div>
+      <div class="hub-title-row"><div><h2>Adviser Controls</h2><div class="sub">Independent official-forms workspace. The SF1 masterlist is the authoritative learner source for SF2, SF5, SF9, SF10, and the Adviser grade summary.</div></div><div class="hub-context"><strong>${esc(cls.meta.className||"Advisory Class")}</strong><br>${esc(cls.meta.adviser||"Adviser")}</div></div>
+      <div class="toolbar no-print">
+        <button id="adviserImportSf1" class="primary">${sf1Ready?"Update Adviser Masterlist from SF1":"Import Adviser SF1 Masterlist"}</button>
+        <span class="status-chip ${sf1Ready?"ok":"warn"}">${sf1Ready?"SF1 masterlist established":sourceStatus==="migrated"?"Legacy data copied — import SF1 to make it authoritative":"SF1 not imported yet"}</span>
       </div>
+      <div class="control-hub">
+        <div class="control-card"><div><div class="module-code">SF1</div><h3>School Form 1</h3><p>Read-only official School Register viewer. This is the source masterlist for all Adviser official forms.</p></div><div class="card-actions"><button class="primary" data-go-tab="roster">Open SF1 Viewer</button><span class="status-chip">${cls.students.length} learners</span></div></div>
+        <div class="control-card"><div><div class="module-code">SF2</div><h3>School Form 2</h3><p>Daily attendance for learners originating from the Adviser SF1 masterlist.</p></div><div class="card-actions"><button class="primary" data-go-tab="sf2">Open SF2</button><span class="status-chip ${sf2On?"ok":"warn"}">${sf2On?"Enabled":"Not enabled"}</span></div></div>
+        <div class="control-card"><div><div class="module-code">GRADES</div><h3>Summary of Subject Grades</h3><p>Consolidated learning-area grades for the advisory class. This grade matrix feeds SF9 and future SF5/SF10 logic.</p></div><div class="card-actions"><button class="primary" data-go-tab="advisersummary">Open Adviser Summary</button></div></div>
+        <div class="control-card coming-soon"><div><div class="module-code">SF5</div><h3>School Form 5</h3><p>Promotion, retention, and end-of-year reporting. Learner identity and grades will come from the Adviser domain.</p></div><div class="card-actions"><button class="ghost-alt" data-go-tab="sf5">View Placeholder</button><span class="status-chip">Coming Soon</span></div></div>
+        <div class="control-card"><div><div class="module-code">SF9</div><h3>School Form 9</h3><p>Generate report cards from the Adviser Summary of Subject Grades and SF2 attendance. Curriculum: <strong>${esc(sc.classType)}</strong>.</p></div><div class="card-actions"><button class="primary" data-go-tab="report">Open SF9</button></div></div>
+        <div class="control-card coming-soon"><div><div class="module-code">SF10</div><h3>School Form 10</h3><p>Permanent learner record. Learner identity will come from the Adviser SF1 masterlist.</p></div><div class="card-actions"><button class="ghost-alt" data-go-tab="sf10">View Placeholder</button><span class="status-chip">Coming Soon</span></div></div>
+      </div>
+      <div class="hint">Subject Teacher classes are intentionally separate. Their manually/CSV-created rosters and grades do not alter this Adviser masterlist.</div>
     </div>`;
+  document.getElementById("adviserImportSf1").addEventListener("click",()=>importOfficialSf1IntoClass(cls));
 }
+
 function renderComingSoon(main,code,title,message){
   main.innerHTML=`<div class="card coming-soon-panel"><div class="module-code">${esc(code)}</div><h2>${esc(title)}</h2><p class="sub">${esc(message)}</p><div class="hint">No placeholder calculations or unofficial form logic have been added.</div></div>`;
 }
@@ -853,6 +910,66 @@ function renderComingSoon(main,code,title,message){
 /* =========================================================================
    RENDER: Setup tab
    ========================================================================= */
+function classRosterManagerHtml(cls){
+  const males=cls.students.filter(s=>s.sex==="M"), females=cls.students.filter(s=>s.sex==="F");
+  const row=s=>`<tr data-class-roster-sid="${esc(s.id)}">
+    <td><input type="text" class="crs-name" value="${esc(s.name)}" style="width:280px;text-align:left;" placeholder="Learner name"></td>
+    <td><select class="crs-sex"><option value="M" ${s.sex==="M"?"selected":""}>Male</option><option value="F" ${s.sex==="F"?"selected":""}>Female</option></select></td>
+    <td><button class="small danger crs-remove">Remove</button></td>
+  </tr>`;
+  return `<div class="card">
+    <div class="hub-title-row"><div><h2>Subject Teacher Learner Roster</h2><div class="sub">Enroll learners by typing names, pasting a list, or importing a CSV. This roster belongs only to this teaching class and never modifies the Adviser SF1 masterlist.</div></div><div class="hub-context">${males.length} Male • ${females.length} Female • ${cls.students.length} Total</div></div>
+    <div class="toolbar no-print">
+      <button id="classAddStudent" class="primary">+ Add learner</button>
+      <button id="classPasteNames" class="ghost-alt" style="background:var(--paper-deep);">Paste names</button>
+      <button id="classImportCsv" class="ghost-alt" style="background:var(--paper-deep);">Import Names CSV</button>
+      <button id="classDownloadRosterTemplate" class="ghost-alt" style="background:var(--paper-deep);">Download Names CSV template</button>
+      <input type="file" id="classCsvFile" accept=".csv,text/csv" style="display:none;">
+    </div>
+    <div class="hint" style="margin-bottom:10px;">Only learner names are required. Sex is retained because the official Class Record separates Male and Female learners.</div>
+    <div class="scroll-x"><table class="data" id="classRosterTable"><thead><tr><th style="text-align:left;">Learner Name</th><th>Sex</th><th></th></tr></thead><tbody>
+      <tr class="group-row"><td colspan="3">MALE (${males.length})</td></tr>${males.map(row).join("")}
+      <tr class="group-row"><td colspan="3">FEMALE (${females.length})</td></tr>${females.map(row).join("")}
+    </tbody></table></div>
+  </div>`;
+}
+
+function bindClassRosterManager(cls){
+  document.getElementById("classAddStudent").addEventListener("click",()=>{
+    if(cls.students.length>=1000){alert("This class has reached the 1,000-learner safety limit.");return;}
+    cls.students.push({id:uid("s"),name:"",lrn:"",age:"",sex:"M",birthDate:"",sf1Profile:cleanSf1Profile()});
+    saveState();render();
+  });
+  document.getElementById("classPasteNames").addEventListener("click",async()=>{
+    const value=await showTextEntryDialog({title:"Paste learner names",message:"Paste one learner name per line. These names are added only to this Subject Teacher class. Learners will initially be placed in the Male group; you can change Sex afterward.",multiline:true,confirmText:"Add learners",required:true});
+    if(!value)return;
+    const existing=new Set((cls.students||[]).map(s=>normalizeLearnerName(s.name)).filter(Boolean));
+    const seen=new Set();
+    const names=value.split("\\n").map(t=>unicodeText(t).trim()).filter(Boolean).filter(name=>{const nk=normalizeLearnerName(name);if(!nk||existing.has(nk)||seen.has(nk))return false;seen.add(nk);return true;});
+    if(cls.students.length+names.length>1000){alert("That paste would exceed the 1,000-learner safety limit for one class.");return;}
+    names.forEach(name=>cls.students.push({id:uid("s"),name,lrn:"",age:"",sex:"M",birthDate:"",sf1Profile:cleanSf1Profile()}));
+    saveState();render();
+  });
+  document.getElementById("classDownloadRosterTemplate").addEventListener("click",()=>{
+    const csv='Name\\n"Dela Cruz, Juan"\\n"Santos, Maria"\\n';
+    const blob=new Blob([csv],{type:"text/csv"}),url=URL.createObjectURL(blob),a=document.createElement("a");
+    a.href=url;a.download="subject-teacher-roster-template.csv";a.click();URL.revokeObjectURL(url);
+  });
+  document.getElementById("classImportCsv").addEventListener("click",()=>document.getElementById("classCsvFile").click());
+  document.getElementById("classCsvFile").addEventListener("change",e=>{
+    const file=e.target.files[0];if(!file)return;
+    if(file.size>10*1024*1024){alert("That CSV exceeds the 10 MB safety limit.");e.target.value="";return;}
+    const reader=new FileReader();reader.onload=()=>{try{const added=importRosterCsv(cls,reader.result);saveState();render();alert("Imported "+added+" learner(s) from the CSV.");}catch(err){alert("Could not read that CSV: "+err.message);}};
+    reader.readAsText(file);e.target.value="";
+  });
+  document.querySelectorAll("#classRosterTable tr[data-class-roster-sid]").forEach(row=>{
+    const sid=row.dataset.classRosterSid,s=cls.students.find(x=>x.id===sid);if(!s)return;
+    row.querySelector(".crs-name").addEventListener("change",e=>{s.name=unicodeText(e.target.value);saveState();renderClassPicker();render();});
+    row.querySelector(".crs-sex").addEventListener("change",e=>{s.sex=e.target.value;saveState();render();});
+    row.querySelector(".crs-remove").addEventListener("click",()=>{if(!confirm("Remove this learner and all their scores?"))return;cls.students=cls.students.filter(x=>x.id!==sid);deleteStudentEverywhere(cls,sid);saveState();render();});
+  });
+}
+
 function renderSetup(main, cls){
   const m = ensureClassRecordSubject(cls);
   const linkStatus=classRecordLinkStatus(cls);
@@ -860,7 +977,7 @@ function renderSetup(main, cls){
   main.innerHTML = `
     <div class="card">
       <h2>Class Setup</h2>
-      <div class="sub">This area defines the class and the specific Class Record / Grading Sheet being built. SF9 curriculum choices are configured separately from <strong>Adviser Controls → SF9 → Modify SF9 Setup</strong>.</div>
+      <div class="sub">This area defines an independent Subject Teacher class and the specific Class Record / Grading Sheet being built. Its roster and grades do not populate Adviser official forms.</div>
       <div class="field"><label>Class label (shown in the class switcher)</label>
         <input type="text" id="f_className" value="${esc(m.className)}"></div>
       <div class="grid3">
@@ -869,10 +986,10 @@ function renderSetup(main, cls){
         <div class="field"><label>Section</label><input type="text" id="f_section" value="${esc(m.section)}"></div>
       </div>
       ${electiveMode?`<div class="field"><label>Elective Subject</label><select id="f_classRecordElective">${catalogOptionHtml(ELECTIVE_CATALOG,m.classRecordElectiveId)}</select><div class="hint">Electives are kept in a separate dropdown so the main subject list stays manageable as additional special-program electives are added.</div></div>`:""}
-      ${!linkStatus.ok?`<div class="import-summary" style="border-color:var(--red-pen);"><strong>Summary link needs attention:</strong> ${esc(linkStatus.message)}</div>`:`<div class="import-summary"><strong>Summary link:</strong> ${esc(classRecordSubjectLabel(cls))} → ${esc(linkStatus.key||"—")} column. Computed term grades from this Class Record are synchronized there automatically.</div>`}
+      <div class="import-summary"><strong>Independent Subject Teacher record:</strong> this Class Record and its Summary of Grades remain within this teaching class and do not feed Adviser SF9/SF5/SF10.</div>
       <div class="grid3">
         <div class="field"><label>Subject Teacher</label><input type="text" id="f_teacher" value="${esc(m.teacher)}"></div>
-        <div class="field"><label>Adviser</label><input type="text" id="f_adviser" value="${esc(m.adviser)}"></div>
+        <div class="field"><label>Class Adviser — optional, local only</label><input type="text" id="f_adviser" value="${esc(m.adviser)}"></div>
         <div class="field"><label>School Head / Principal</label><input type="text" id="f_schoolHead" value="${esc(m.schoolHead)}"></div>
       </div>
       <div class="grid3">
@@ -887,6 +1004,7 @@ function renderSetup(main, cls){
       <div class="field"><label>School Address</label><input type="text" id="f_schoolAddress" value="${esc(m.schoolAddress||"")}"></div>
     </div>
 
+    ${classRosterManagerHtml(cls)}
 
     <div class="card">
       <h2>School Logo</h2>
@@ -906,7 +1024,7 @@ function renderSetup(main, cls){
 
     <div class="card">
       <h2>Official Form Signatories</h2>
-      <div class="sub">The official ECR uses the Subject Teacher above. SF2 uses the Adviser and School Head. These additional entries remain available for the Grading Sheet and other official forms.</div>
+      <div class="sub">These signatories belong only to this Subject Teacher grading workspace and its Class Record / Grading Sheet outputs.</div>
       <div class="grid2">
         <div class="field"><label>Prepared by — Name</label><input type="text" id="f_preparedByName" value="${esc(m.preparedByName||"")}" placeholder="Defaults to Subject Teacher"></div>
         <div class="field"><label>Prepared by — Title</label><input type="text" id="f_preparedByTitle" value="${esc(m.preparedByTitle||"Subject Teacher")}" placeholder="e.g. Subject Teacher"></div>
@@ -934,24 +1052,22 @@ function renderSetup(main, cls){
   document.getElementById("f_classRecordSubject").addEventListener("change",e=>{
     const next=e.target.value,prev=m.classRecordSubjectId;
     if(next===prev)return;
-    if(classHasEncodedScores(cls) && !confirm(`This class already contains encoded raw scores. Changing the Class Record Subject will make those same scores feed a different Summary of Grades column.\n\nChange from ${classRecordSubjectLabel(cls)} to ${classRecordSubjectOption(next)?.label||next}?`)){
+    if(classHasEncodedScores(cls) && !confirm(`This class already contains encoded raw scores. Changing the Class Record Subject will reinterpret the same encoded raw scores under a different learning area for this Subject Teacher class.\n\nChange from ${classRecordSubjectLabel(cls)} to ${classRecordSubjectOption(next)?.label||next}?`)){
       render();return;
     }
     m.classRecordSubjectId=next;
     ensureClassRecordSubject(cls);
-    syncClassRecordToSummary(cls);
     saveState();render();
   });
   const electiveSelect=document.getElementById("f_classRecordElective");
   if(electiveSelect) electiveSelect.addEventListener("change",e=>{
     const next=e.target.value,prev=m.classRecordElectiveId;
     if(next===prev)return;
-    if(classHasEncodedScores(cls) && !confirm(`This class already contains encoded raw scores. Changing the active elective will make those same scores feed a different Summary of Grades elective column.\n\nContinue?`)){
+    if(classHasEncodedScores(cls) && !confirm(`This class already contains encoded raw scores. Changing the active elective will reinterpret the same encoded raw scores as a different elective for this Subject Teacher class.\n\nContinue?`)){
       render();return;
     }
     m.classRecordElectiveId=next;
     ensureClassRecordSubject(cls);
-    syncClassRecordToSummary(cls);
     saveState();render();
   });
 
@@ -987,30 +1103,31 @@ function renderSetup(main, cls){
     document.getElementById("statusLeft").textContent = "School logo reset to default.";
   });
 
+  bindClassRosterManager(cls);
   updateWeightTotal(cls);
   bindCategoryEditorEvents(cls);
 }
 
 function renderSf9Setup(main, cls){
-  const m=ensureClassRecordSubject(cls),sc=ensureSubjectConfig(cls);
+  const m=cls.meta||{},sc=ensureSubjectConfig(cls);
   const regular=sc.classType==="Regular";
   main.innerHTML=`
     <div class="card">
-      <div class="hub-title-row"><div><h2>SF9 Setup</h2><div class="sub">SF9 curriculum configuration is independent from the Class Record setup. Shared class information is inherited automatically and cannot be edited here.</div></div><div><button class="ghost-alt no-print" data-go-tab="report">← Back to SF9 Report Cards</button></div></div>
+      <div class="hub-title-row"><div><h2>SF9 Setup</h2><div class="sub">SF9 belongs to the Adviser domain. Learner identity comes from SF1 and grades come from the Adviser Summary of Subject Grades.</div></div><div><button class="ghost-alt no-print" data-go-tab="report">← Back to SF9 Report Cards</button></div></div>
       <div class="grid3">
-        <div class="field"><label>Region — automatic</label><input value="${esc(m.region||"")}" readonly></div>
-        <div class="field"><label>Division — automatic</label><input value="${esc(m.division||"")}" readonly></div>
-        <div class="field"><label>School — automatic</label><input value="${esc(m.schoolName||"")}" readonly></div>
-        <div class="field"><label>School ID — automatic</label><input value="${esc(m.schoolId||"")}" readonly></div>
-        <div class="field"><label>School Year — automatic</label><input value="${esc(m.schoolYear||"")}" readonly></div>
-        <div class="field"><label>Grade / Section — automatic</label><input value="${esc([m.gradeLevel,m.section].filter(Boolean).join(" - "))}" readonly></div>
-        <div class="field"><label>School Head / Principal — automatic</label><input value="${esc(m.schoolHead||"")}" readonly></div>
-        <div class="field"><label>Adviser — automatic</label><input value="${esc(m.adviser||"")}" readonly></div>
+        <div class="field"><label>Region — from SF1</label><input value="${esc(m.region||"")}" readonly></div>
+        <div class="field"><label>Division — from SF1</label><input value="${esc(m.division||"")}" readonly></div>
+        <div class="field"><label>School — from SF1</label><input value="${esc(m.schoolName||"")}" readonly></div>
+        <div class="field"><label>School ID — from SF1</label><input value="${esc(m.schoolId||"")}" readonly></div>
+        <div class="field"><label>School Year — from SF1</label><input value="${esc(m.schoolYear||"")}" readonly></div>
+        <div class="field"><label>Grade / Section — from SF1</label><input value="${esc([m.gradeLevel,m.section].filter(Boolean).join(" - "))}" readonly></div>
+        <div class="field"><label>School Head / Principal</label><input value="${esc(m.schoolHead||"")}" readonly></div>
+        <div class="field"><label>Adviser</label><input value="${esc(m.adviser||"")}" readonly></div>
       </div>
     </div>
     <div class="card">
       <h2>SF9 Curriculum / Subject Structure</h2>
-      <div class="sub">These choices determine the learning-area labels and active elective rows shown in SF9 and Summary of Grades. They do not change the subject of the current Class Record.</div>
+      <div class="sub">These choices control the learning-area labels and active elective rows in the Adviser Summary and SF9. They do not affect any Subject Teacher class.</div>
       <div class="grid3">
         <div class="field"><label>Class Type</label><select id="sf9_classType">${subjectOptionHtml(CLASS_TYPE_OPTIONS,sc.classType)}</select></div>
         <div class="field"><label>Mathematics</label><select id="sf9_mathName" ${regular?"disabled":""}>${subjectOptionHtml(SUBJECT_NAME_OPTIONS.MATH,sc.MATH)}</select></div>
@@ -1021,19 +1138,15 @@ function renderSf9Setup(main, cls){
         <div class="field"><label>Elective 1</label><select id="sf9_elective1" ${regular?"disabled":""}>${catalogOptionHtml(ELECTIVE_CATALOG,sc.ELEC1_ID,sc.ELEC2_ID)}</select></div>
         <div class="field"><label>Elective 2</label><select id="sf9_elective2" ${regular?"disabled":""}>${catalogOptionHtml(ELECTIVE_CATALOG,sc.ELEC2_ID,sc.ELEC1_ID)}</select></div>
       </div>
-      <div class="import-summary"><strong>Grade source:</strong> SF9 learning-area grades are read only from <strong>Summary of Grades</strong>. The current Class Record contributes automatically to its linked Summary column.</div>
+      <div class="import-summary"><strong>Grade source:</strong> SF9 reads learning-area grades only from <strong>Adviser Controls → Summary of Subject Grades</strong>.</div>
     </div>`;
-  document.getElementById("sf9_classType").addEventListener("change",e=>{
-    sc.classType=e.target.value;ensureSubjectConfig(cls);syncClassRecordToSummary(cls);saveState();render();
-  });
-  [["sf9_mathName","MATH"],["sf9_scienceName","SCI"],["sf9_tleName","TLE"]].forEach(([id,key])=>{
-    document.getElementById(id).addEventListener("change",e=>{sc[key]=e.target.value;ensureSubjectConfig(cls);saveState();render();});
-  });
+  document.getElementById("sf9_classType").addEventListener("change",e=>{sc.classType=e.target.value;ensureSubjectConfig(cls);saveState();render();});
+  [["sf9_mathName","MATH"],["sf9_scienceName","SCI"],["sf9_tleName","TLE"]].forEach(([id,key])=>{document.getElementById(id).addEventListener("change",e=>{sc[key]=e.target.value;ensureSubjectConfig(cls);saveState();render();});});
   [["sf9_elective1","ELEC1_ID"],["sf9_elective2","ELEC2_ID"]].forEach(([id,key])=>{
     document.getElementById(id).addEventListener("change",e=>{
       const next=e.target.value,other=key==="ELEC1_ID"?sc.ELEC2_ID:sc.ELEC1_ID;
       if(next===other){alert("Elective 1 and Elective 2 must be different subjects.");render();return;}
-      sc[key]=next;ensureSubjectConfig(cls);syncClassRecordToSummary(cls);saveState();render();
+      sc[key]=next;ensureSubjectConfig(cls);saveState();render();
     });
   });
 }
@@ -1132,10 +1245,10 @@ function showOfficialSf1ImportDialog(data,fileName,cls){
     const backdrop=document.createElement("div"); backdrop.className="app-modal-backdrop no-print";
     const modal=document.createElement("div"); modal.className="app-modal import-modal"; modal.setAttribute("role","dialog"); modal.setAttribute("aria-modal","true");
     const warnings=(data.warnings||[]).slice(0,5);
-    const sampleRows=learners.map(x=>`<tr><td style="text-align:left;">${esc(x.name||"")}</td><td>${esc(x.lrn||"")}</td><td>${esc(x.age||"")}</td><td>${x.sex==="F"?"Female":x.sex==="M"?"Male":"—"}</td></tr>`).join("");
+    const sampleRows=learners.map(x=>`<tr><td style="text-align:left;">${esc(x.name||"")}</td><td>${esc(x.lrn||"")}</td><td>${esc(x.age||"")}</td><td>${x.sex==="F"?"Female":x.sex==="M"?"Male":""}</td></tr>`).join("");
     modal.innerHTML=`
-      <h3>Import SF1 Roster</h3>
-      <p><strong>${esc(fileName||"SF1 workbook")}</strong> was recognized as a compatible School Form 1. Review the detected roster before importing.</p>
+      <h3>Import Adviser SF1 Masterlist</h3>
+      <p><strong>${esc(fileName||"SF1 workbook")}</strong> was recognized as a compatible School Form 1. This import establishes the authoritative learner masterlist for Adviser official forms.</p>
       <div class="import-summary">
         <strong>Learners:</strong> ${learners.length} (${Number(counts.male||0)} male, ${Number(counts.female||0)} female)
         &nbsp;•&nbsp; <strong>Grade:</strong> ${esc(meta.gradeLevel||"—")}
@@ -1143,25 +1256,18 @@ function showOfficialSf1ImportDialog(data,fileName,cls){
         &nbsp;•&nbsp; <strong>School Year:</strong> ${esc(meta.schoolYear||"—")}
         ${data.detection?`&nbsp;•&nbsp; <strong>Detection:</strong> ${Math.round(Number(data.detection.confidence||0))}%`:""}
       </div>
-      <div class="hint" style="margin-top:8px;">SF1 will be treated as the authoritative source for <strong>learner identity and the available SF1 profile fields</strong> (birth date, language/religion, address, parents/guardian, contact, modality and remarks). Existing learners are matched by LRN first, then by name. Their existing scores and SF9 data remain attached.</div>
+      <div class="hint" style="margin-top:8px;">The Adviser masterlist will mirror this SF1. Learners not present in the newly imported SF1 will be removed from the Adviser domain and its dependent SF2/SF9 records. Subject Teacher class rosters are completely unaffected.</div>
       <div class="scroll-x" style="margin-top:10px;max-height:340px;overflow-y:auto;">
-        <table class="import-map-table">
-          <thead><tr><th style="text-align:left;">Learner Name</th><th>LRN</th><th>Age</th><th>Sex</th></tr></thead>
-          <tbody>${sampleRows}</tbody>
-        </table>
+        <table class="import-map-table"><thead><tr><th style="text-align:left;">Learner Name</th><th>LRN</th><th>Age</th><th>Sex</th></tr></thead><tbody>${sampleRows}</tbody></table>
       </div>
-      <div class="import-options">
-        <label><input type="checkbox" id="sf1RemoveAbsent"> Remove current learners who are not listed in this SF1</label>
-      </div>
-      <div class="hint">Leave this unchecked for the safest merge. If enabled, learners absent from SF1 will be removed together with their stored scores, attendance, comments and other SF9 data.</div>
       ${warnings.length?`<div class="app-modal-error" style="margin-top:10px;">${warnings.map(w=>esc(w)).join("<br>")}</div>`:""}
-      <div class="app-modal-actions"><button type="button" class="cancel" id="sf1Cancel">Cancel</button><button type="button" class="primary" id="sf1Confirm">Import SF1 Roster</button></div>`;
+      <div class="app-modal-actions"><button type="button" class="cancel" id="sf1Cancel">Cancel</button><button type="button" class="primary" id="sf1Confirm">Use as Adviser Masterlist</button></div>`;
     backdrop.appendChild(modal); document.body.appendChild(backdrop);
     const finish=result=>{ document.removeEventListener("keydown",onKey,true); backdrop.remove(); resolve(result); };
     const onKey=e=>{ if(e.key==="Escape"){ e.preventDefault(); finish(null); } };
     document.addEventListener("keydown",onKey,true);
     modal.querySelector("#sf1Cancel").addEventListener("click",()=>finish(null));
-    modal.querySelector("#sf1Confirm").addEventListener("click",()=>finish({removeAbsent:modal.querySelector("#sf1RemoveAbsent").checked}));
+    modal.querySelector("#sf1Confirm").addEventListener("click",()=>finish({removeAbsent:true}));
     backdrop.addEventListener("click",e=>{ if(e.target===backdrop) finish(null); });
   });
 }
@@ -1183,6 +1289,11 @@ function applyOfficialSf1Import(cls,data,options={}){
   const sources=Array.isArray(data.learners)?data.learners:[];
   if(!sources.length) throw new Error("No learners were found in the SF1 data.");
   if(sources.length>1000) throw new Error("SF1 contains more than the 1,000-learner safety limit for one class.");
+  const meta=data&&data.meta&&typeof data.meta==="object"?data.meta:{};
+  [["schoolId","schoolId"],["region","region"],["division","division"],["schoolName","schoolName"],["schoolYear","schoolYear"],["gradeLevel","gradeLevel"],["section","section"],["adviser","adviser"],["schoolHead","schoolHead"]].forEach(([dst,src])=>{if(meta[src]!==undefined&&String(meta[src]).trim()!=="")cls.meta[dst]=unicodeText(meta[src]).trim();});
+  cls.meta.className=[cls.meta.gradeLevel,cls.meta.section].filter(Boolean).join(" - ")||cls.meta.className||"Advisory Class";
+  cls.meta.sf1SourceStatus="imported";
+  cls.meta.sf1ImportedAt=new Date().toISOString();
   const original=[...cls.students];
   const idx=buildStudentImportIndexes(cls);
   const ordered=[], usedIds=new Set();
@@ -1266,182 +1377,84 @@ async function importOfficialSf1IntoClass(cls){
     if(stats.added) parts.push(`${stats.added} new learner${stats.added===1?"":"s"} added`);
     if(stats.removed) parts.push(`${stats.removed} learner${stats.removed===1?"":"s"} removed because they were absent from SF1`);
     if(stats.warnings) parts.push(`${stats.warnings} SF1 warning${stats.warnings===1?"":"s"}`);
-    await showInfoDialog("SF1 Import Complete",parts.join(" • "));
+    await showInfoDialog("Adviser SF1 Masterlist Updated",parts.join(" • "));
   }catch(err){ alert("Could not import the SF1 roster: "+(err&&err.message?err.message:String(err))); }
 }
 
 /* =========================================================================
    RENDER: Roster tab
    ========================================================================= */
-function renderRoster(main, cls){
-  const males = cls.students.filter(s=>s.sex==="M");
-  const females = cls.students.filter(s=>s.sex==="F");
+function sf1ViewerPayload(cls){
   cls.students.forEach(ensureSf1Profile);
-  const gradeLabel=/^grade\b/i.test(String(cls.meta.gradeLevel||""))?String(cls.meta.gradeLevel||""):(cls.meta.gradeLevel?`Grade ${cls.meta.gradeLevel}`:"");
-  const region=String(cls.meta.region||"");
-  function officialRow(s){
-    const p=ensureSf1Profile(s);
-    const c=(v,extra="")=>`<td class="${extra}">${esc(v||"")}</td>`;
-    return `<tr class="sf1-data-row" data-sf1-view-sid="${esc(s.id)}">
-      ${c(s.lrn,"center")}${c(s.name,"sf1-name")}${c(s.sex,"center")}${c(s.birthDate,"center")}${c(s.age,"center")}
-      ${c(p.motherTongue)}${c(p.ipEthnicGroup,"center")}${c(p.religion)}
-      ${c(p.houseStreet)}${c(p.barangay)}${c(p.municipalityCity)}${c(p.province)}
-      ${c(p.fatherName)}${c(p.motherName)}${c(p.guardianName)}${c(p.guardianRelationship)}
-      ${c(p.contactNumber,"center")}${c(p.learningModality,"center")}${c(p.remarks)}
-    </tr>`;
+  return {
+    meta:{
+      schoolId:String(cls.meta.schoolId||""),
+      region:String(cls.meta.region||""),
+      division:String(cls.meta.division||""),
+      schoolName:String(cls.meta.schoolName||""),
+      schoolYear:String(cls.meta.schoolYear||""),
+      gradeLevel:String(cls.meta.gradeLevel||""),
+      section:String(cls.meta.section||""),
+      adviser:String(cls.meta.adviser||""),
+      schoolHead:String(cls.meta.schoolHead||"")
+    },
+    students:cls.students.map(s=>{
+      const p=ensureSf1Profile(s);
+      return {
+        id:String(s.id||""), name:String(s.name||""), lrn:String(s.lrn||""),
+        sex:s.sex==="F"?"F":"M", age:String(s.age||""), birthDate:String(s.birthDate||""),
+        motherTongue:String(p.motherTongue||""), ipEthnicGroup:String(p.ipEthnicGroup||""), religion:String(p.religion||""),
+        houseStreet:String(p.houseStreet||""), barangay:String(p.barangay||""), municipalityCity:String(p.municipalityCity||""), province:String(p.province||""),
+        fatherName:String(p.fatherName||""), motherName:String(p.motherName||""), guardianName:String(p.guardianName||""),
+        guardianRelationship:String(p.guardianRelationship||""), contactNumber:String(p.contactNumber||""),
+        learningModality:String(p.learningModality||""), remarks:String(p.remarks||"")
+      };
+    })
+  };
+}
+
+async function openOfficialSf1Viewer(cls, autoPrint=false){
+  if(!window.eclassAPI || typeof window.eclassAPI.runtimeInvoke!=="function"){
+    alert("Official SF1 preview is available in the installed desktop app."); return;
   }
-  function editorRows(list){
-    return list.map(s=>`
-      <tr data-sid="${esc(s.id)}">
-        <td><input type="text" class="s-name" value="${esc(s.name)}" style="width:220px;text-align:left;"></td>
-        <td><input type="text" class="s-lrn" value="${esc(s.lrn||"")}" style="width:120px;" placeholder="LRN"></td>
-        <td><input type="number" class="s-age" value="${esc(s.age||"")}" style="width:60px;" placeholder="Age"></td>
-        <td><select class="s-sex"><option value="M" ${s.sex==="M"?"selected":""}>Male</option><option value="F" ${s.sex==="F"?"selected":""}>Female</option></select></td>
-        <td><button class="small danger s-remove">Remove</button></td>
-      </tr>`).join("");
+  try{
+    const result=await window.eclassAPI.runtimeInvoke(autoPrint?"sf1:official-print":"sf1:official-pdf-preview",sf1ViewerPayload(cls));
+    if(!result||!result.ok){
+      alert("Could not render the official SF1: "+(result&&result.error?result.error:"Unknown error"));
+    }
+  }catch(err){
+    alert("Could not render the official SF1: "+(err&&err.message?err.message:String(err)));
   }
-  const legendRows=[
-    ["Transfered Out","T/O","Name of Public (P) / Private (PR) School & Effectivity Date","CCT Recipient","CCT","CCT Control/reference number & Effectivity Date"],
-    ["Transfered In","T/I","Name of Public (P) / Private (PR) School & Effectivity Date","Balik Aral","B/A","Name of school last attended & Year"],
-    ["Dropped","DRP","Reason and Effectivity Date","Special Needs Education","SNED","Specify"],
-    ["Late Enrollment","LE","Reason (Enrollment beyond 1st Friday of SY)","Accelerated","ACL","Specify Level & Effectivity Date"]
-  ];
-  main.innerHTML = `
-    <div class="card">
+}
+
+function renderRoster(main, cls){
+  const ready=adviserSf1Ready(cls);
+  const males=cls.students.filter(s=>s.sex==="M").length;
+  const females=cls.students.filter(s=>s.sex==="F").length;
+  main.innerHTML=`
+    <div class="card sf1-viewer-card">
       <div class="hub-title-row">
-        <div><h2>SF1 / School Register <span class="badge-count">${cls.students.length} learners</span></h2><div class="sub">Official-form working view based on the uploaded DepEd SF1 layout.</div></div>
-        <div class="hub-context">${males.length} Male • ${females.length} Female • ${cls.students.length} Total</div>
+        <div><h2>School Form 1 (SF1)</h2><div class="sub">Read-only official School Register viewer. The displayed/printed form uses the preserved SF1 workbook template.</div></div>
+        <div class="hub-context">${ready?`${males} Male • ${females} Female • ${cls.students.length} Total`:"SF1 masterlist not established"}</div>
       </div>
-      <div class="toolbar no-print">
-        <button id="importSf1" class="primary">Import SF1 (.xls/.xlsx)</button>
-        <button id="addStudent" class="ghost-alt" style="background:var(--paper-deep);">+ Add learner</button>
-        <button id="pasteNames" class="ghost-alt" style="background:var(--paper-deep);">Paste names</button>
-        <button id="importCsv" class="ghost-alt" style="background:var(--paper-deep);">Import CSV</button>
-        <button id="downloadTemplate" class="ghost-alt" style="background:var(--paper-deep);">Download CSV template</button>
-        <input type="file" id="csvFile" accept=".csv,text/csv" style="display:none;">
-      </div>
-      <div class="sf1-view-note"><strong>SF1 import now preserves the available profile fields from the official register</strong> in addition to learner name, LRN, sex and age. Horizontal scrolling is expected because the official form is very wide.</div>
-
-      <div class="sf1-official-wrap">
-        <div class="sf1-form">
-          <div class="sf1-form-title">School Form 1 (SF 1) School Register</div>
-          <div class="sf1-form-subtitle">(This replaces Form 1, Master List &amp; STS Form 2-Family Background and Profile)</div>
-          <div class="sf1-meta-grid row1">
-            <div class="label">School ID</div><div class="value">${esc(cls.meta.schoolId||"")}</div>
-            <div class="value">${esc(region)}</div>
-            <div class="label">Division</div><div class="value">${esc(cls.meta.division||"")}</div>
-          </div>
-          <div class="sf1-meta-grid row2">
-            <div class="label">School Name</div><div class="value">${esc(cls.meta.schoolName||"")}</div>
-            <div class="label">School Year</div><div class="value">${esc(cls.meta.schoolYear||"")}</div>
-            <div class="label">Grade Level</div><div class="value">${esc(gradeLabel)}</div>
-            <div class="label">Section</div><div class="value">${esc(cls.meta.section||"")}</div>
-          </div>
-          <table class="sf1-official">
-            <colgroup>
-              <col style="width:115px"><col style="width:250px"><col style="width:55px"><col style="width:100px"><col style="width:75px">
-              <col style="width:120px"><col style="width:80px"><col style="width:110px"><col style="width:150px"><col style="width:130px">
-              <col style="width:160px"><col style="width:120px"><col style="width:210px"><col style="width:210px"><col style="width:180px">
-              <col style="width:110px"><col style="width:140px"><col style="width:135px"><col style="width:210px">
-            </colgroup>
-            <thead>
-              <tr>
-                <th rowspan="2">LRN</th>
-                <th rowspan="2">NAME<br><span class="sf1-remarks-note">(Last Name, First Name, Middle Name)</span></th>
-                <th rowspan="2">Sex<br>(M/F)</th>
-                <th rowspan="2">BIRTH DATE<br><span class="sf1-remarks-note">(mm/dd/yyyy)</span></th>
-                <th rowspan="2">AGE as of<br>1st Friday June</th>
-                <th rowspan="2">MOTHER TONGUE<br><span class="sf1-remarks-note">(Grade 1 to 3 Only)</span></th>
-                <th rowspan="2">IP<br><span class="sf1-remarks-note">(Ethnic Group)</span></th>
-                <th rowspan="2">RELIGION</th>
-                <th colspan="4">ADDRESS</th>
-                <th colspan="2">PARENTS</th>
-                <th colspan="2">GUARDIAN<br><span class="sf1-remarks-note">(if Not Parent)</span></th>
-                <th rowspan="2">Contact Number of Parent or Guardian</th>
-                <th rowspan="2">Learning Modality</th>
-                <th>REMARKS</th>
-              </tr>
-              <tr>
-                <th>House # / Street / Sitio / Purok</th><th>Barangay</th><th>Municipality / City</th><th>Province</th>
-                <th>Father's Name<br><span class="sf1-remarks-note">(Last Name, First Name, Middle Name)</span></th>
-                <th>Mother's Maiden Name<br><span class="sf1-remarks-note">(Last Name, First Name, Middle Name)</span></th>
-                <th>Name</th><th>Relationship</th><th><span class="sf1-remarks-note">(Please refer to the legend below)</span></th>
-              </tr>
-            </thead>
-            <tbody>
-              ${males.map(officialRow).join("")}
-              <tr class="sf1-total-row"><td class="center">${males.length}</td><td>&lt;=== TOTAL MALE</td><td colspan="17"></td></tr>
-              ${females.map(officialRow).join("")}
-              <tr class="sf1-total-row"><td class="center">${females.length}</td><td>&lt;=== TOTAL FEMALE</td><td colspan="17"></td></tr>
-              <tr class="sf1-combined-row"><td class="center">${cls.students.length}</td><td>&lt;=== COMBINED</td><td colspan="17"></td></tr>
-            </tbody>
-          </table>
-          <div class="sf1-footer-grid">
-            <div>
-              <div class="sf1-footer-title">List and Code of Indicators under REMARKS column</div>
-              <table class="sf1-legend"><thead><tr><th>Indicator</th><th>Code</th><th>Required Information</th><th>Indicator</th><th>Code</th><th>Required Information</th></tr></thead>
-              <tbody>${legendRows.map(r=>`<tr>${r.map(v=>`<td>${esc(v)}</td>`).join("")}</tr>`).join("")}</tbody></table>
-            </div>
-            <div>
-              <table class="sf1-counts"><thead><tr><th>REGISTERED</th><th>BoSY</th><th>EoSY</th></tr></thead><tbody>
-                <tr><td>MALE</td><td class="center">${males.length}</td><td></td></tr>
-                <tr><td>FEMALE</td><td class="center">${females.length}</td><td></td></tr>
-                <tr><td>TOTAL</td><td class="center">${cls.students.length}</td><td></td></tr>
-              </tbody></table>
-            </div>
-            <div class="sf1-signatures">
-              <div class="sf1-signature-box"><div class="cap">Prepared by:</div><div class="sf1-signature-name">${esc(cls.meta.adviser||"")}</div><div class="sf1-signature-label">(Signature of Adviser over Printed Name)</div><div class="sf1-date-row"><span>BoSY Date:</span><span>EoSY Date:</span></div></div>
-              <div class="sf1-signature-box"><div class="cap">Certified Correct:</div><div class="sf1-signature-name">${esc(cls.meta.schoolHead||"")}</div><div class="sf1-signature-label">(Signature of School Head over Printed Name)</div><div class="sf1-date-row"><span>BoSY Date:</span><span>EoSY Date:</span></div></div>
-            </div>
-          </div>
+      <div class="sf1-viewer-panel">
+        <div class="sf1-viewer-icon" aria-hidden="true">SF1</div>
+        <div class="sf1-viewer-copy">
+          <strong>Official SF1 Template View</strong>
+          <p>${ready?"The form layout, merged cells, column widths, row heights, borders, legends, registration block, and certification area come from the preserved official workbook rather than an HTML reconstruction.":"Import the Adviser SF1 masterlist from the Adviser Controls home first. Import/update controls are intentionally kept out of this viewer tab."}</p>
+          <div class="sf1-viewer-meta">${ready?`${esc(cls.meta.schoolName||"School")} • ${esc(cls.meta.gradeLevel||"")} ${esc(cls.meta.section||"")} • SY ${esc(cls.meta.schoolYear||"")}`:"Adviser official-form data must originate from SF1"}</div>
         </div>
       </div>
-
-      <details class="sf1-editor no-print">
-        <summary>Manage learner names, LRN, age, sex, or remove a learner</summary>
-        <div class="sf1-editor-body">
-          <div class="hint" style="margin-bottom:8px;">The official-form view above is the working register. This compact editor remains available for roster maintenance.</div>
-          <div class="scroll-x"><table class="data" id="rosterTable"><thead><tr><th style="text-align:left;">Name</th><th>LRN</th><th>Age</th><th>Sex</th><th></th></tr></thead><tbody>
-            <tr class="group-row"><td colspan="5">MALE (${males.length})</td></tr>${editorRows(males)}
-            <tr class="group-row"><td colspan="5">FEMALE (${females.length})</td></tr>${editorRows(females)}
-          </tbody></table></div>
-        </div>
-      </details>
+      <div class="toolbar no-print" style="margin-top:16px;">
+        <button id="sf1PreviewOfficial" class="primary" ${ready?"":"disabled"}>Preview Official SF1</button>
+        <button id="sf1PrintOfficial" class="ghost-alt" style="background:var(--paper-deep);" ${ready?"":"disabled"}>Print Official SF1</button>
+      </div>
+      <div class="hint">SF1 is intentionally view-only in this module. Learner data is never edited here.</div>
     </div>`;
-  document.getElementById("importSf1").addEventListener("click", ()=>importOfficialSf1IntoClass(cls));
-  document.getElementById("addStudent").addEventListener("click", ()=>{
-    if(cls.students.length>=1000){alert("This class has reached the 1,000-learner safety limit.");return;}
-    cls.students.push({id:uid("s"), name:"", lrn:"", age:"", sex:"M", birthDate:"", sf1Profile:cleanSf1Profile()});
-    saveState(); render();
-  });
-  document.getElementById("pasteNames").addEventListener("click", async ()=>{
-    const text = await showTextEntryDialog({title:"Paste learner names",message:"Paste one learner name per line. Imported learners will initially be placed in the Male group; you can change Sex afterward.",multiline:true,confirmText:"Add learners",required:true});
-    if(!text) return;
-    const names=text.split("\n").map(t=>unicodeText(t).trim()).filter(Boolean);
-    if(cls.students.length+names.length>1000){alert("That paste would exceed the 1,000-learner safety limit for one class.");return;}
-    names.forEach(name=>{ cls.students.push({id:uid("s"), name, lrn:"", age:"", sex:"M", birthDate:"", sf1Profile:cleanSf1Profile()}); });
-    saveState(); render();
-  });
-  document.getElementById("downloadTemplate").addEventListener("click", ()=>{
-    const csv = 'Name,LRN,Age,Sex\n"Dela Cruz, Juan",123456789012,15,Male\n"Santos, Maria",123456789013,15,Female\n';
-    const blob = new Blob([csv], {type:"text/csv"}); const url = URL.createObjectURL(blob); const a = document.createElement("a");
-    a.href = url; a.download = "roster-template.csv"; a.click(); URL.revokeObjectURL(url);
-  });
-  document.getElementById("importCsv").addEventListener("click", ()=>{ document.getElementById("csvFile").click(); });
-  document.getElementById("csvFile").addEventListener("change", e=>{
-    const file = e.target.files[0]; if(!file) return;
-    if(file.size > 10 * 1024 * 1024){ alert("That CSV exceeds the 10 MB safety limit."); e.target.value=""; return; }
-    const reader = new FileReader(); reader.onload = ()=>{try{const added = importRosterCsv(cls, reader.result);saveState(); render();alert("Imported "+added+" learner(s) from the CSV.");}catch(err){alert("Could not read that CSV: "+err.message);}};
-    reader.readAsText(file); e.target.value = "";
-  });
-  document.querySelectorAll("#rosterTable tr[data-sid]").forEach(row=>{
-    const sid = row.dataset.sid; const s = cls.students.find(x=>x.id===sid);
-    row.querySelector(".s-name").addEventListener("change", e=>{s.name=unicodeText(e.target.value); saveState(); renderClassPicker(); render();});
-    row.querySelector(".s-lrn").addEventListener("change", e=>{s.lrn=e.target.value; saveState(); render();});
-    row.querySelector(".s-age").addEventListener("change", e=>{s.age=e.target.value; saveState(); render();});
-    row.querySelector(".s-sex").addEventListener("change", e=>{s.sex=e.target.value; saveState(); render();});
-    row.querySelector(".s-remove").addEventListener("click", ()=>{if(!confirm("Remove this learner and all their scores?")) return;cls.students = cls.students.filter(x=>x.id!==sid);deleteStudentEverywhere(cls,sid);saveState(); render();});
-  });
+  if(ready){
+    document.getElementById("sf1PreviewOfficial").addEventListener("click",()=>openOfficialSf1Viewer(cls,false));
+    document.getElementById("sf1PrintOfficial").addEventListener("click",()=>openOfficialSf1Viewer(cls,true));
+  }
 }
 
 function sf2Fmt(v,digits=2){
@@ -1478,6 +1491,10 @@ function refreshSf2CalculatedView(cls,monthKey){
 }
 
 function renderSf2(main,cls){
+  if(cls&&cls.domain==="adviser"&&!adviserSf1Ready(cls)){
+    main.innerHTML=`<div class="card"><h2>SF1 masterlist required</h2><p class="sub">SF2 is an Adviser official form and its learner roster must originate from SF1. Return to Adviser Controls and import the official SF1 masterlist first.</p></div>`;
+    return;
+  }
   if(!(cls && cls.meta && cls.meta.sf2Enabled===true)){
     main.innerHTML=`<div class="card"><h2>SF2 Daily Attendance is not enabled for this class</h2><p class="sub">Enable SF2 for this advisory class to begin maintaining official daily attendance. Once enabled, its monthly attendance feeds SF9 automatically.</p><div class="toolbar"><button id="enableSf2Now" class="primary">Enable SF2 for This Class</button></div></div>`;
     document.getElementById("enableSf2Now").addEventListener("click",()=>{cls.meta.sf2Enabled=true;ensureSf2Class(cls);saveState();render();});
@@ -1647,6 +1664,8 @@ function importRosterCsv(cls, text){
   // Build the complete import first. Nothing is appended until all limits are known,
   // preventing a failed oversized import from leaving a partially modified roster.
   const pending=[];
+  const existingNames=new Set((cls.students||[]).map(s=>normalizeLearnerName(s.name)).filter(Boolean));
+  const pendingNames=new Set();
   for(let i=startIdx; i<rows.length; i++){
     const r = rows[i];
     const name = unicodeText(colMap.name!==undefined ? (r[colMap.name]||"") : (r[0]||"")).trim();
@@ -1655,6 +1674,9 @@ function importRosterCsv(cls, text){
     const age = colMap.age!==undefined ? String(r[colMap.age]||"").trim() : "";
     const sexRaw = colMap.sex!==undefined ? String(r[colMap.sex]||"").trim().toLowerCase() : "";
     const sex = sexRaw.startsWith("f") ? "F" : "M";
+    const nk=normalizeLearnerName(name);
+    if(nk&&(existingNames.has(nk)||pendingNames.has(nk))) continue;
+    if(nk) pendingNames.add(nk);
     pending.push({name,lrn,age,sex});
   }
   if(!pending.length) throw new Error("No learner names were found in that file.");
@@ -2228,7 +2250,7 @@ function showImportResult(stats, termKey){
     `${stats.imported} raw score${stats.imported===1?"":"s"} imported`,
     `${stats.matched} learner${stats.matched===1?"":"s"} matched`
   ];
-  if(stats.added) parts.push(`${stats.added} learner${stats.added===1?"":"s"} added to roster`);
+  if(stats.unmatched) parts.push(`${stats.unmatched} learner${stats.unmatched===1?"":"s"} skipped because they were not enrolled in this Subject Teacher roster`);
   if(stats.preserved) parts.push(`${stats.preserved} existing score${stats.preserved===1?"":"s"} preserved`);
   if(stats.unmatched) parts.push(`${stats.unmatched} CSV row${stats.unmatched===1?"":"s"} not matched`);
   if(stats.invalid) parts.push(`${stats.invalid} invalid/out-of-HPS value${stats.invalid===1?"":"s"} skipped`);
@@ -2275,7 +2297,7 @@ function showOfficialEcrImportDialog(data,fileName,currentTermKey){
           </tbody>
         </table>
       </div>
-      <p style="margin-top:12px;">The app will update the class information available in the workbook, match existing learners by name, add missing learners, copy the HPS/weights, and <strong>replace the raw scores for the detected term</strong>. Other terms are not changed.</p>
+      <p style="margin-top:12px;">The app will update the class information available in the workbook, match learners against the existing Subject Teacher roster by name, copy the HPS/weights, and <strong>replace the raw scores for the detected term</strong>. Learners not already enrolled in this class are skipped; use Classes → Learner Roster or CSV import to enroll them first.</p>
       <div class="hint">PS, WS, Initial Grade, Term Grade and Descriptor are not blindly copied from Excel. They are recalculated using this app's grading logic from the imported raw scores. LRN and age remain unchanged because they are not fields in this official ECR template.</div>
       ${warnings.length?`<div class="app-modal-error" style="margin-top:10px;">${warnings.map(w=>esc(w)).join("<br>")}</div>`:""}
       <div class="app-modal-actions"><button type="button" class="cancel" id="offImpCancel">Cancel</button><button type="button" class="primary" id="offImpConfirm">Import Official ECR</button></div>`;
@@ -2328,7 +2350,7 @@ function applyOfficialEcrImport(cls,data){
 
   if(!cls.scores[targetTermKey]) cls.scores[targetTermKey]={};
   const idx=buildStudentImportIndexes(cls);
-  let matched=0,added=0,importedScores=0,invalid=0,unresolvedSex=0,gradeChecks=0,gradeMismatches=0;
+  let matched=0,added=0,unmatched=0,importedScores=0,invalid=0,unresolvedSex=0,gradeChecks=0,gradeMismatches=0;
   const importedStudentIds=[];
 
   for(const source of (data.students||[])){
@@ -2342,11 +2364,8 @@ function applyOfficialEcrImport(cls,data){
     }
     const sourceSex=source.sex==="F"?"F":source.sex==="M"?"M":"";
     if(!student){
-      if(!sourceSex){ unresolvedSex++; continue; }
-      student={id:uid("s"),name,lrn:"",age:"",sex:sourceSex};
-      cls.students.push(student); ensureStudentExtras(cls,student.id); added++;
-      idx.byName.set(normalizeLearnerName(name),student);
-      const tk=learnerTokenKey(name); if(tk){ if(!idx.byTokens.has(tk)) idx.byTokens.set(tk,[]); idx.byTokens.get(tk).push(student); }
+      unmatched++;
+      continue;
     }else{
       matched++;
       student.name=name;
@@ -2383,7 +2402,7 @@ function applyOfficialEcrImport(cls,data){
     if(Number(computed)!==official) gradeMismatches++;
   });
 
-  return {termKey:targetTermKey,matched,added,learners:importedStudentIds.length,importedScores,invalid,unresolvedSex,gradeChecks,gradeMismatches,warnings:(data.warnings||[]).length};
+  return {termKey:targetTermKey,matched,added,unmatched,learners:importedStudentIds.length,importedScores,invalid,unresolvedSex,gradeChecks,gradeMismatches,warnings:(data.warnings||[]).length};
 }
 
 async function importOfficialEcrIntoClass(cls,currentTermKey){
@@ -2613,11 +2632,10 @@ function renderTerm(main, cls, termKey, termLabel){
     main.innerHTML = `
       <div class="card no-print">
         <h2>${termLabel}</h2>
-        <div class="sub">You can build the class manually from Roster, or import an already-filled compatible Excel Class Record.</div>
-        <div class="toolbar"><button id="termImportOfficial" class="primary">Import ECR (.xlsx)</button></div>
+        <div class="sub">Create this Subject Teacher roster first by encoding learner names or importing a CSV from Classes.</div>
+        <div class="toolbar"><button class="primary" data-go-tab="setup">Go to Classes & Roster</button></div>
       </div>
-      <div class="empty-state"><h2>No learners yet</h2><p>Import a compatible filled ECR to bring in learner names, HPS and raw scores automatically, or add learners from Adviser Controls → SF1.</p></div>`;
-    document.getElementById("termImportOfficial").addEventListener("click",()=>importOfficialEcrIntoClass(cls,termKey));
+      <div class="empty-state"><h2>No learners yet</h2><p>Subject Teacher rosters are enrolled from Classes by manual entry or CSV. ECR imports only apply scores to learners already enrolled in this class.</p></div>`;
     return;
   }
 
@@ -2752,7 +2770,7 @@ function renderTerm(main, cls, termKey, termLabel){
    ========================================================================= */
 function renderFinal(main, cls){
   if(!cls.students.length){
-    main.innerHTML = `<div class="empty-state"><h2>No learners yet</h2><p>Add learners in Adviser Controls → SF1 first.</p></div>`;
+    main.innerHTML = `<div class="empty-state"><h2>No learners yet</h2><p>Add learners in Subject Teacher Controls → Classes first.</p></div>`;
     return;
   }
   const males = cls.students.filter(s=>s.sex==="M");
@@ -2828,7 +2846,7 @@ function summaryStudentRow(cls, s, termKey){
   const subAreas = mapehComponentAreas(cls);
   const electiveAreas = activeElectiveAreas(cls);
   function cell(area){
-    const locked = area.key===classRecordSubjectAreaKey(cls);
+    const locked = cls.domain!=="adviser" && area.key===classRecordSubjectAreaKey(cls);
     const val = areaTermValue(cls, s, area, termKey);
     if(locked) return `<td class="computed">${val===null?"—":val}</td>`;
     return `<td><input type="number" class="summary-input" data-sid="${esc(s.id)}" data-key="${area.key}" data-term="${termKey}" value="${val===null?"":val}" min="60" max="100"></td>`;
@@ -2923,7 +2941,7 @@ function showSummaryImportDialog(cls, rows, fileName, termKey){
     const modal=document.createElement("div");modal.className="app-modal import-modal";
     modal.innerHTML=`
       <h3>Import Summary Table — ${esc(SUMMARY_TERM_LABELS[termKey])}</h3>
-      <p><strong>${esc(fileName||"Summary file")}</strong> was read. Map the learner-name and subject columns below. Imported grades are written to Summary of Grades, which is the sole grade source used by SF9.</p>
+      <p><strong>${esc(fileName||"Summary file")}</strong> was read. Map the learner-name and subject columns below. Imported grades are written into the current grade-summary workspace and matched to learners by name.</p>
       <div class="import-summary">Header row: <strong>${headerRow+1}</strong> • Data rows: <strong>${dataRows.length}</strong> • Auto-mapped subjects: <strong>${maps.filter(m=>m.col>=0).length}/${maps.length}</strong></div>
       <div class="import-grid">
         <div class="field"><label>Learner Name *</label><select id="sumName">${optionHtml(autoName)}</select></div>
@@ -2932,7 +2950,7 @@ function showSummaryImportDialog(cls, rows, fileName, termKey){
       <div class="scroll-x"><table class="import-map-table"><thead><tr><th>SF9 Learning Area</th><th>Summary Column</th></tr></thead><tbody>
       ${maps.map((m,i)=>`<tr><td>${esc(m.area.label)}</td><td><select class="sum-map" data-i="${i}">${optionHtml(m.col)}</select></td></tr>`).join("")}
       </tbody></table></div>
-      <div class="hint" style="margin-top:10px;">Learners are matched by normalized name because official grading sheets do not provide LRN. Exact normalized-name matches are preferred; a unique token-equivalent name is used only as a fallback. Ambiguous duplicate names are never guessed. The active Class Record subject remains authoritative and is not overwritten by this import.</div>
+      <div class="hint" style="margin-top:10px;">Learners are matched by normalized name because official grading sheets do not provide LRN. Exact normalized-name matches are preferred; a unique token-equivalent name is used only as a fallback. Ambiguous duplicate names are never guessed. In the Adviser workspace, all mapped subject columns may be imported. Ambiguous duplicate learner names are never guessed.</div>
       <div class="app-modal-error" id="sumErr"></div>
       <div class="app-modal-actions"><button class="cancel" id="sumCancel">Cancel</button><button class="primary" id="sumConfirm">Import Grades</button></div>`;
     backdrop.appendChild(modal);document.body.appendChild(backdrop);
@@ -2968,7 +2986,7 @@ function matchSummaryLearner(index,name){
 }
 function applySummaryImport(cls, config){
   const idx=buildSummaryNameIndex(cls);let matched=0,unmatched=0,ambiguous=0,imported=0,invalid=0,lockedSkipped=0;
-  const seen=new Set(),activeKey=classRecordSubjectAreaKey(cls);
+  const seen=new Set(),activeKey=cls.domain==="adviser"?null:classRecordSubjectAreaKey(cls);
   for(const row of config.dataRows){
     const name=unicodeText((row||[])[config.nameCol]).trim();
     if(!name)continue;
@@ -2985,7 +3003,7 @@ function applySummaryImport(cls, config){
       imported++;
     }
   }
-  syncClassRecordToSummary(cls);
+  if(cls.domain!=="adviser") syncClassRecordToSummary(cls);
   return {matched,unmatched,ambiguous,imported,invalid,lockedSkipped,termKey:config.termKey};
 }
 async function importSummaryTable(cls){
@@ -3023,25 +3041,50 @@ async function downloadSummaryTemplate(cls){
 ${result.path||result.xlsxPath||""}`);
 }
 
-function renderSummary(main, cls){
-  syncClassRecordToSummary(cls);
-  const linkStatus=classRecordLinkStatus(cls);
+function renderSubjectSummary(main, cls){
   if(!cls.students.length){
-    main.innerHTML = `<div class="empty-state"><h2>No learners yet</h2><p>Add learners in Adviser Controls → SF1 first.</p></div>`;
+    main.innerHTML=`<div class="empty-state"><h2>No learners yet</h2><p>Add learner names manually or import a CSV from Subject Teacher Controls → Classes.</p></div>`;
+    return;
+  }
+  const row=s=>{
+    const t1=studentTermResult(cls,"term1",s.id).term,t2=studentTermResult(cls,"term2",s.id).term,t3=studentTermResult(cls,"term3",s.id).term;
+    const vals=[t1,t2,t3].filter(v=>v!==null&&v!==undefined),final=vals.length?averageWhole(vals):null;
+    const remark=final===null?"":(final>=75?"Passed":"Failed");
+    const f=v=>v===null||v===undefined?"":v;
+    return `<tr><td class="name-cell">${esc(s.name||"")}</td><td class="computed">${f(t1)}</td><td class="computed">${f(t2)}</td><td class="computed">${f(t3)}</td><td class="grade-final">${f(final)}</td><td>${remark}</td></tr>`;
+  };
+  const males=cls.students.filter(s=>s.sex==="M"),females=cls.students.filter(s=>s.sex==="F");
+  main.innerHTML=`<div class="card">
+    <div class="hub-title-row"><div><h2>Summary of Grades</h2><div class="sub">Class-specific grade summary for <strong>${esc(classRecordSubjectLabel(cls))}</strong>. Values are derived only from this Subject Teacher Class Record and do not feed Adviser official forms.</div></div><div class="hub-context">${esc(cls.meta.className||"Current Class")}</div></div>
+    <div class="scroll-x"><table class="data"><thead><tr><th style="text-align:left;">Learner</th><th>Term 1</th><th>Term 2</th><th>Term 3</th><th>Final Grade</th><th>Remarks</th></tr></thead><tbody>
+      <tr class="group-row"><td colspan="6">MALE</td></tr>${males.map(row).join("")||`<tr><td colspan="6" class="hint">No male learners</td></tr>`}
+      <tr class="group-row"><td colspan="6">FEMALE</td></tr>${females.map(row).join("")||`<tr><td colspan="6" class="hint">No female learners</td></tr>`}
+    </tbody></table></div>
+  </div>`;
+}
+
+function renderSummary(main, cls){
+  if(cls.domain!=="adviser"){renderSubjectSummary(main,cls);return;}
+  if(!adviserSf1Ready(cls)){
+    main.innerHTML=`<div class="empty-state"><h2>SF1 masterlist required</h2><p>The Adviser Summary of Subject Grades is available only after the official SF1 masterlist has been imported from Adviser Controls.</p></div>`;
+    return;
+  }
+  if(!cls.students.length){
+    main.innerHTML = `<div class="empty-state"><h2>No Adviser SF1 masterlist yet</h2><p>Return to Adviser Controls and import the official SF1 masterlist first.</p></div>`;
     return;
   }
   cls.students.forEach(s=>ensureStudentExtras(cls, s.id));
   main.innerHTML = `
     <div class="card">
-      <h2>Summary of Grades</h2>
-      <div class="sub">This is the <strong>single source of truth for all SF9 learning-area grades</strong>. The active Class Record subject, <strong>${esc(classRecordSubjectLabel(cls))}</strong>, is synchronized automatically from the Term tabs. Other subjects are entered here or imported from a Summary workbook.</div>
-      ${linkStatus.ok?`<div class="import-summary"><strong>Active Class Record link:</strong> ${esc(classRecordSubjectLabel(cls))} → ${esc(linkStatus.key)}. This column is read-only because its values come from the current Class Record / Grading Sheet.</div>`:`<div class="import-summary" style="border-color:var(--red-pen);"><strong>Active Class Record is not linked:</strong> ${esc(linkStatus.message)} The grading sheet will not write into an elective Summary column until this is resolved in SF9 Setup.</div>`}
+      <h2>Summary of Subject Grades</h2>
+      <div class="sub">Consolidated learning-area grades for the advisory class. Learner identity comes only from the Adviser SF1 masterlist. This summary is the grade source for SF9 and the future SF5/SF10 workflows.</div>
+      <div class="import-summary"><strong>Independent Adviser grade domain:</strong> Subject Teacher Class Records do not write into this table automatically. Subject grades may be entered here or imported by learner name.</div>
       <div class="toolbar">
         <div class="cr-viewtoggle">
           ${["term1","term2","term3"].map(t=>`<button class="small summary-termbtn ${SUMMARY_TERM.current===t?"active":""}" data-term="${t}">${SUMMARY_TERM_LABELS[t]}</button>`).join("")}
         </div>
-        <button id="summaryTemplate" class="ghost-alt" style="background:var(--paper-deep);">Download Summary Template (.xlsx)</button>
-        <button id="summaryImport" class="primary">Import Summary Table (.xlsx/.csv)</button>
+        <button id="summaryTemplate" class="ghost-alt" style="background:var(--paper-deep);">Download Adviser Grade Template (.xlsx)</button>
+        <button id="summaryImport" class="primary">Import Subject Grades (.xlsx/.csv)</button>
       </div>
       <div class="scroll-x" id="summaryTableWrap"></div>
     </div>`;
@@ -3050,30 +3093,26 @@ function renderSummary(main, cls){
     document.getElementById("summaryTableWrap").innerHTML = summaryTableHtml(cls, SUMMARY_TERM.current);
     document.querySelectorAll(".summary-input").forEach(inp=>{
       inp.addEventListener("change", e=>{
-        const sid = e.target.dataset.sid, key = e.target.dataset.key, term = e.target.dataset.term;
-        ensureStudentExtras(cls, sid);
-        cls.otherGrades[sid][key][term] = e.target.value;
-        saveState();
-        draw();
+        const sid=e.target.dataset.sid,key=e.target.dataset.key,term=e.target.dataset.term;
+        ensureStudentExtras(cls,sid);
+        cls.otherGrades[sid][key][term]=e.target.value;
+        saveState();draw();
       });
     });
   }
   document.getElementById("summaryTemplate").addEventListener("click",()=>downloadSummaryTemplate(cls));
   document.getElementById("summaryImport").addEventListener("click",()=>importSummaryTable(cls));
-  document.querySelectorAll(".summary-termbtn").forEach(b=>{
-    b.addEventListener("click", ()=>{
-      SUMMARY_TERM.current = b.dataset.term;
-      document.querySelectorAll(".summary-termbtn").forEach(x=>x.classList.toggle("active", x===b));
-      draw();
-    });
-  });
+  document.querySelectorAll(".summary-termbtn").forEach(b=>b.addEventListener("click",()=>{SUMMARY_TERM.current=b.dataset.term;document.querySelectorAll(".summary-termbtn").forEach(x=>x.classList.toggle("active",x===b));draw();}));
   draw();
 }
 
 function renderReport(main, cls){
-  syncClassRecordToSummary(cls);
+  if(!adviserSf1Ready(cls)){
+    main.innerHTML=`<div class="card"><div class="hub-title-row"><div><h2>School Form 9</h2><div class="sub">SF9 requires the Adviser SF1 masterlist first. Import it from Adviser Controls so learner identity originates from SF1.</div></div><div><button class="ghost-alt no-print" data-go-tab="sf9setup">Modify SF9 Setup</button></div></div></div>`;
+    return;
+  }
   if(!cls.students.length){
-    main.innerHTML = `<div class="card"><div class="hub-title-row"><div><h2>School Form 9</h2><div class="sub">No learners are available for report-card preview yet. Add learners in Adviser Controls → SF1 first.</div></div><div><button class="ghost-alt no-print" data-go-tab="sf9setup">Modify SF9 Setup</button></div></div></div>`;
+    main.innerHTML = `<div class="card"><div class="hub-title-row"><div><h2>School Form 9</h2><div class="sub">No Adviser SF1 masterlist is available yet. Import the official SF1 from Adviser Controls first.</div></div><div><button class="ghost-alt no-print" data-go-tab="sf9setup">Modify SF9 Setup</button></div></div></div>`;
     return;
   }
   cls.students.forEach(s=>ensureStudentExtras(cls, s.id));
@@ -3084,7 +3123,7 @@ function renderReport(main, cls){
   main.innerHTML = `
     <div class="card no-print">
       <h2>Report Cards (SF9)</h2>
-      <div class="sub">SF9 learning-area grades are <strong>read-only here</strong> and come exclusively from Summary of Grades. The current Class Record / Grading Sheet synchronizes its active subject into Summary automatically; other subject grades are entered or imported in Summary.${sf2ReportNote} Teacher comments remain editable here.</div>
+      <div class="sub">SF9 learner identity comes from the Adviser SF1 masterlist. Learning-area grades are <strong>read-only here</strong> and come exclusively from Adviser Controls → Summary of Subject Grades.${sf2ReportNote} Teacher comments remain editable here.</div>
       <div class="toolbar">
         <select id="rcStudent"></select>
         <button class="ghost-alt" data-go-tab="sf9setup">Modify SF9 Setup</button>
@@ -3599,7 +3638,12 @@ function validateBackupForImport(data){
   };
   walk(data);
   if(Object.keys(data.classes).length>2000) throw new Error("Backup contains too many classes.");
-  for(const [cid,cls] of Object.entries(data.classes)){
+  const roleRecords=Object.entries(data.classes);
+  if(data.adviserWorkspace!==undefined){
+    if(!data.adviserWorkspace||typeof data.adviserWorkspace!=="object"||Array.isArray(data.adviserWorkspace)) throw new Error("Backup contains an invalid Adviser workspace.");
+    roleRecords.push(["adviserWorkspace",data.adviserWorkspace]);
+  }
+  for(const [cid,cls] of roleRecords){
     if(!safeId.test(cid)||!cls||typeof cls!=="object"||Array.isArray(cls)) throw new Error("Backup contains an invalid class record.");
     if(!Array.isArray(cls.students)||cls.students.length>1000) throw new Error("Backup contains an invalid learner list.");
     for(const st of cls.students){if(!st||typeof st!=="object"||Array.isArray(st)||!st.id||!safeId.test(String(st.id)))throw new Error("Backup contains an invalid learner identifier.");}

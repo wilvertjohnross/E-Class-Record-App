@@ -11,6 +11,7 @@ const previewWindows = new Set();
 let excelEngine = null;
 let templateFingerprintCache = null;
 let sf2TemplateFingerprintCache = null;
+let sf1TemplateFingerprintCache = null;
 
 function cleanFileName(value) {
   return String(value || 'Class Record').normalize('NFC')
@@ -1152,6 +1153,136 @@ try {
         }
         continue
       }
+      if ($cmd -eq 'renderSf1Template') {
+        $workbook = $null
+        $sheet = $null
+        try {
+          $template = [string]$req.templatePath
+          $xls = [string]$req.xlsPath
+          $pdf = [string]$req.pdfPath
+          $plan = $req.plan
+          if (-not (Test-Path -LiteralPath $template)) { throw ('Official SF1 template was not found: ' + $template) }
+          if (Test-Path -LiteralPath $xls) { Remove-Item -LiteralPath $xls -Force -ErrorAction SilentlyContinue }
+          if (Test-Path -LiteralPath $pdf) { Remove-Item -LiteralPath $pdf -Force -ErrorAction SilentlyContinue }
+          $workbook = $excel.Workbooks.Open($template, 0, $true)
+          $sheet = $workbook.Worksheets.Item(1)
+
+          function Set-Sf1MergeSafeCell($sheetObj, [string]$address, $value) {
+            $r = $sheetObj.Range($address)
+            $t = $r
+            if ($r.MergeCells) { $t = $r.MergeArea.Cells.Item(1,1) }
+            if ($null -eq $value -or [string]$value -eq '') { $t.ClearContents() }
+            else { $t.Value2 = [string]$value }
+            if ($t -ne $r) { try { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($t) } catch {} }
+            try { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($r) } catch {}
+          }
+
+          function Insert-Sf1FormattedRow($sheetObj, [int]$rowNumber) {
+            $sourceRow = $rowNumber - 1
+            $src = $sheetObj.Rows.Item(($sourceRow.ToString() + ':' + $sourceRow.ToString()))
+            $dst = $sheetObj.Rows.Item(($rowNumber.ToString() + ':' + $rowNumber.ToString()))
+            $src.Copy()
+            [void]$dst.Insert(-4121)
+            $excel.CutCopyMode = $false
+            try { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($src) } catch {}
+            try { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($dst) } catch {}
+          }
+
+          foreach ($prop in $plan.headers.PSObject.Properties) { Set-Sf1MergeSafeCell $sheet ([string]$prop.Name) $prop.Value }
+
+          $maleCount = [int]$plan.maleCount
+          $femaleCount = [int]$plan.femaleCount
+          $maleExtra = [Math]::Max(0, $maleCount - 16)
+          for ($i=0; $i -lt $maleExtra; $i++) { Insert-Sf1FormattedRow $sheet (23 + $i) }
+          $femaleTotalBase = 42 + $maleExtra
+          $femaleExtra = [Math]::Max(0, $femaleCount - 18)
+          for ($i=0; $i -lt $femaleExtra; $i++) { Insert-Sf1FormattedRow $sheet ($femaleTotalBase + $i) }
+
+          $maleSlots = [Math]::Max(16, $maleCount)
+          $femaleSlots = [Math]::Max(18, $femaleCount)
+          $maleStart = 7
+          $maleTotalRow = $maleStart + $maleSlots
+          $femaleStart = $maleTotalRow + 1
+          $femaleTotalRow = $femaleStart + $femaleSlots
+          $combinedRow = $femaleTotalRow + 1
+          $footerShift = $maleExtra + $femaleExtra
+
+          $fields = @(
+            @('A','lrn'), @('C','name'), @('G','sex'), @('H','birthDate'), @('J','age'),
+            @('L','motherTongue'), @('N','ipEthnicGroup'), @('O','religion'), @('P','houseStreet'),
+            @('R','barangay'), @('U','municipalityCity'), @('W','province'), @('AB','fatherName'),
+            @('AF','motherName'), @('AK','guardianName'), @('AO','guardianRelationship'),
+            @('AP','contactNumber'), @('AR','learningModality'), @('AS','remarks')
+          )
+
+          for ($i=0; $i -lt $maleSlots; $i++) {
+            $row = $maleStart + $i
+            $st = $null
+            if ($i -lt $maleCount) { $st = $plan.males[$i] }
+            foreach ($f in $fields) {
+              $v = $null
+              if ($st -ne $null) { $v = $st.($f[1]) }
+              Set-Sf1MergeSafeCell $sheet ($f[0] + $row) $v
+            }
+            $sheet.Rows.Item(($row.ToString() + ':' + $row.ToString())).Hidden = ($i -ge $maleCount)
+          }
+          for ($i=0; $i -lt $femaleSlots; $i++) {
+            $row = $femaleStart + $i
+            $st = $null
+            if ($i -lt $femaleCount) { $st = $plan.females[$i] }
+            foreach ($f in $fields) {
+              $v = $null
+              if ($st -ne $null) { $v = $st.($f[1]) }
+              Set-Sf1MergeSafeCell $sheet ($f[0] + $row) $v
+            }
+            $sheet.Rows.Item(($row.ToString() + ':' + $row.ToString())).Hidden = ($i -ge $femaleCount)
+          }
+
+          Set-Sf1MergeSafeCell $sheet ('A' + $maleTotalRow) $maleCount
+          Set-Sf1MergeSafeCell $sheet ('C' + $maleTotalRow) '<=== TOTAL MALE'
+          Set-Sf1MergeSafeCell $sheet ('A' + $femaleTotalRow) $femaleCount
+          Set-Sf1MergeSafeCell $sheet ('C' + $femaleTotalRow) '<=== TOTAL FEMALE'
+          Set-Sf1MergeSafeCell $sheet ('A' + $combinedRow) ($maleCount + $femaleCount)
+          Set-Sf1MergeSafeCell $sheet ('C' + $combinedRow) '<=== COMBINED'
+
+          $countsMaleRow = 46 + $footerShift
+          $countsFemaleRow = 49 + $footerShift
+          $countsTotalRow = 51 + $footerShift
+          Set-Sf1MergeSafeCell $sheet ('X' + $countsMaleRow) $maleCount
+          Set-Sf1MergeSafeCell $sheet ('AA' + $countsMaleRow) $null
+          Set-Sf1MergeSafeCell $sheet ('X' + $countsFemaleRow) $femaleCount
+          Set-Sf1MergeSafeCell $sheet ('AA' + $countsFemaleRow) $null
+          Set-Sf1MergeSafeCell $sheet ('X' + $countsTotalRow) ($maleCount + $femaleCount)
+          Set-Sf1MergeSafeCell $sheet ('AA' + $countsTotalRow) $null
+
+          $sigRow = 46 + $footerShift
+          Set-Sf1MergeSafeCell $sheet ('AE' + $sigRow) $plan.adviser
+          Set-Sf1MergeSafeCell $sheet ('AN' + $sigRow) $plan.schoolHead
+
+          try {
+            $links = @($workbook.LinkSources(1))
+            foreach ($lnk in $links) { if ($lnk) { $workbook.BreakLink([string]$lnk, 1) } }
+          } catch {}
+          $workbook.SaveAs($xls, 56)
+          [void]$sheet.ExportAsFixedFormat(0, $pdf)
+          $workbook.Close($false)
+          [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($sheet)
+          [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($workbook)
+          $sheet = $null
+          $workbook = $null
+          Send-EcrMessage @{ type='response'; id=$id; ok=$true; pdfPath=$pdf; xlsPath=$xls }
+        }
+        catch {
+          $msg = $_.Exception.Message
+          try { if ($workbook -ne $null) { $workbook.Close($false) } } catch {}
+          if ($sheet -ne $null) { try { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($sheet) } catch {} }
+          if ($workbook -ne $null) { try { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($workbook) } catch {} }
+          $sheet = $null
+          $workbook = $null
+          Send-EcrMessage @{ type='response'; id=$id; ok=$false; error=$msg }
+        }
+        continue
+      }
       if ($cmd -eq 'render') {
         $workbook = $null
         $sheet = $null
@@ -1347,6 +1478,10 @@ class PersistentExcelRenderer {
     return await this.request('renderEcrTemplate', { templatePath, xlsxPath, pdfPath, plan });
   }
 
+  async renderSf1Template(templatePath, xlsPath, pdfPath, plan) {
+    return await this.request('renderSf1Template', { templatePath, xlsPath, pdfPath, plan });
+  }
+
   async render(xlsxPath, pdfPath) {
     try {
       return await this.request('render', { xlsxPath, pdfPath });
@@ -1521,6 +1656,77 @@ function previewSignature(payload, ctx) {
     .update('\n')
     .update(stableStringify(payload))
     .digest('hex');
+}
+
+
+function sf1TemplateFingerprint(ctx) {
+  const { fs, resolveResource } = ctx;
+  const templatePath = resolveResource('templates/SF1 official Template.xls');
+  const stat = fs.statSync(templatePath);
+  const key = `${templatePath}|${stat.size}|${stat.mtimeMs}`;
+  if (sf1TemplateFingerprintCache && sf1TemplateFingerprintCache.key === key) return sf1TemplateFingerprintCache.hash;
+  const crypto = require('crypto');
+  const hash = crypto.createHash('sha256').update(fs.readFileSync(templatePath)).digest('hex');
+  sf1TemplateFingerprintCache = { key, hash };
+  return hash;
+}
+
+function sf1PreviewSignature(payload, ctx) {
+  const crypto = require('crypto');
+  return crypto.createHash('sha256')
+    .update('sf1-preserved-template-viewer-v1.3.2\n')
+    .update(sf1TemplateFingerprint(ctx))
+    .update('\n')
+    .update(stableStringify(payload))
+    .digest('hex');
+}
+
+function validateSf1ViewerPayload(payload) {
+  if (!payload || typeof payload !== 'object') throw new Error('SF1 viewer data is missing.');
+  if (!payload.meta || typeof payload.meta !== 'object') throw new Error('SF1 class information is missing.');
+  if (!Array.isArray(payload.students) || payload.students.length > 1000) throw new Error('SF1 learner data is invalid.');
+  for (const st of payload.students) {
+    if (!st || typeof st !== 'object') throw new Error('SF1 contains an invalid learner record.');
+    if (!['M','F'].includes(String(st.sex || '').toUpperCase())) throw new Error('SF1 contains an invalid learner sex value.');
+    for (const value of Object.values(st)) {
+      if (typeof value === 'string' && value.length > 2000) throw new Error('SF1 contains an excessively long learner field.');
+    }
+  }
+}
+
+function makeSf1ExcelRenderPlan(payload) {
+  validateSf1ViewerPayload(payload);
+  const meta = payload.meta || {};
+  const gradeRaw = String(meta.gradeLevel || '').trim();
+  const gradeLevel = !gradeRaw ? '' : (/^grade\b/i.test(gradeRaw) ? gradeRaw : `Grade ${gradeRaw}`);
+  const headers = {
+    F3: String(meta.schoolId || ''),
+    K3: String(meta.region || ''),
+    T3: String(meta.division || ''),
+    F4: String(meta.schoolName || ''),
+    T4: String(meta.schoolYear || ''),
+    AE4: gradeLevel,
+    AM4: String(meta.section || '')
+  };
+  const cleanStudent = st => ({
+    lrn:String(st.lrn||''), name:String(st.name||''), sex:st.sex==='F'?'F':'M', birthDate:String(st.birthDate||''), age:String(st.age||''),
+    motherTongue:String(st.motherTongue||''), ipEthnicGroup:String(st.ipEthnicGroup||''), religion:String(st.religion||''),
+    houseStreet:String(st.houseStreet||''), barangay:String(st.barangay||''), municipalityCity:String(st.municipalityCity||''), province:String(st.province||''),
+    fatherName:String(st.fatherName||''), motherName:String(st.motherName||''), guardianName:String(st.guardianName||''),
+    guardianRelationship:String(st.guardianRelationship||''), contactNumber:String(st.contactNumber||''),
+    learningModality:String(st.learningModality||''), remarks:String(st.remarks||'')
+  });
+  const males = payload.students.filter(st=>st.sex==='M').map(cleanStudent);
+  const females = payload.students.filter(st=>st.sex==='F').map(cleanStudent);
+  return {
+    headers,
+    males,
+    females,
+    maleCount:males.length,
+    femaleCount:females.length,
+    adviser:String(meta.adviser||''),
+    schoolHead:String(meta.schoolHead||'')
+  };
 }
 
 function isUsablePreviewFile(fs, filePath) {
@@ -1703,6 +1909,85 @@ async function createOfficialPopupPreview(payload, context) {
   } catch {}
 
   return { ok: true, preview: true, inAppPopup: true, cached: false, signature, xlsxPath, pdfPath };
+}
+
+
+function openSf1PdfPopup(pdfPath, payload, ctx, autoPrint=false) {
+  const { BrowserWindow, Menu, getMainWindow } = ctx;
+  if (!BrowserWindow) throw new Error('The in-app SF1 viewer service is unavailable.');
+  const { pathToFileURL } = require('url');
+  const parent = typeof getMainWindow === 'function' ? getMainWindow() : null;
+  const meta = payload.meta || {};
+  const label = [meta.gradeLevel, meta.section].filter(Boolean).join(' - ') || 'School Register';
+  const win = new BrowserWindow({
+    width: 1320, height: 900, minWidth: 900, minHeight: 650,
+    parent: parent && !parent.isDestroyed() ? parent : undefined,
+    modal:false, title:`Official SF1 Preview — ${label}`, backgroundColor:'#525659', show:false, autoHideMenuBar:false,
+    webPreferences:{contextIsolation:true,nodeIntegration:false,sandbox:true,plugins:true}
+  });
+  previewWindows.add(win);
+  const doPrint=()=>{if(!win.isDestroyed())win.webContents.print({silent:false,printBackground:true,color:true,margins:{marginType:'default'}});};
+  if(Menu){
+    win.setMenu(Menu.buildFromTemplate([
+      {label:'File',submenu:[{label:'Print...',accelerator:'CmdOrCtrl+P',click:doPrint},{type:'separator'},{label:'Close Preview',accelerator:'Esc',click:()=>{if(!win.isDestroyed())win.close();}}]},
+      {label:'View',submenu:[{role:'zoomIn'},{role:'zoomOut'},{role:'resetZoom'},{type:'separator'},{role:'togglefullscreen'}]}
+    ]));
+  }
+  const allowedPdfUrl=pathToFileURL(pdfPath).href;
+  win.webContents.on('will-navigate',(event,url)=>{if(url!==allowedPdfUrl&&!url.startsWith(allowedPdfUrl+'#'))event.preventDefault();});
+  win.webContents.setWindowOpenHandler(()=>({action:'deny'}));
+  win.webContents.on('did-fail-load',(_event,code,desc)=>{if(code!==-3)console.error('Official SF1 popup preview failed to load:',code,desc);});
+  win.once('ready-to-show',()=>win.show());
+  if(autoPrint) win.webContents.once('did-finish-load',()=>setTimeout(doPrint,450));
+  win.on('closed',()=>previewWindows.delete(win));
+  win.loadURL(allowedPdfUrl);
+  return win;
+}
+
+async function createOfficialSf1PopupPreview(payload, context, autoPrint=false) {
+  const ctx={...(startupContext||{}),...(context||{})};
+  validateSf1ViewerPayload(payload);
+  if(process.platform!=='win32') return {ok:false,previewUnavailable:true,error:'Official SF1 preview requires Windows and desktop Microsoft Excel.'};
+  const {fs,path,dataPaths,resolveResource}=ctx;
+  const templatePath=resolveResource('templates/SF1 official Template.xls');
+  if(!fs.existsSync(templatePath)) return {ok:false,previewUnavailable:true,error:'The preserved official SF1 template is missing from this update.'};
+  const root=dataPaths().root;
+  const previewDir=path.join(root,'Official SF1 Preview Cache');
+  fs.mkdirSync(previewDir,{recursive:true});
+  const signature=sf1PreviewSignature(payload,ctx), shortSig=signature.slice(0,20);
+  const meta=payload.meta||{};
+  const base=cleanFileName(`${meta.gradeLevel||'Grade'} ${meta.section||'Section'} - SF1 - ${shortSig}`);
+  const xlsPath=path.join(previewDir,`${base}.xls`), pdfPath=path.join(previewDir,`${base}.pdf`);
+  if(isUsablePreviewFile(fs,xlsPath)&&isUsablePreviewFile(fs,pdfPath)){
+    openSf1PdfPopup(pdfPath,payload,ctx,autoPrint);
+    return {ok:true,preview:true,inAppPopup:true,cached:true,signature,xlsPath,pdfPath};
+  }
+  const plan=makeSf1ExcelRenderPlan(payload);
+  let renderError=null;
+  try{
+    if(!excelEngine)excelEngine=new PersistentExcelRenderer(ctx);
+    await excelEngine.renderSf1Template(templatePath,xlsPath,pdfPath,plan);
+  }catch(err){
+    renderError=err;
+    try{if(excelEngine)excelEngine.stop();}catch{}
+    excelEngine=null;
+    try{
+      excelEngine=new PersistentExcelRenderer(ctx);
+      await excelEngine.start();
+      await excelEngine.renderSf1Template(templatePath,xlsPath,pdfPath,plan);
+    }catch(err2){
+      try{if(excelEngine)excelEngine.stop();}catch{}
+      excelEngine=null;
+      return {ok:false,previewUnavailable:true,error:(err2&&err2.message)||(renderError&&renderError.message)||'Microsoft Excel could not render the official SF1.'};
+    }
+  }
+  if(!isUsablePreviewFile(fs,pdfPath)) return {ok:false,previewUnavailable:true,error:'Microsoft Excel completed without producing a usable official SF1 PDF preview.'};
+  openSf1PdfPopup(pdfPath,payload,ctx,autoPrint);
+  try{
+    const cutoff=Date.now()-14*24*60*60*1000;
+    for(const name of fs.readdirSync(previewDir)){const p=path.join(previewDir,name);if(p===xlsPath||p===pdfPath)continue;try{const st=fs.statSync(p);if(st.isFile()&&st.mtimeMs<cutoff)fs.unlinkSync(p);}catch{}}
+  }catch{}
+  return {ok:true,preview:true,inAppPopup:true,cached:false,signature,xlsPath,pdfPath};
 }
 
 function openGsPdfPopup(pdfPath, xlsxPath, payload, ctx) {
@@ -2142,6 +2427,8 @@ module.exports = {
       return createOfficialSf2PopupPreview(payload, context);
     }
     if (action === 'sf2:official-save') return saveOfficialDocument('sf2', payload, context);
+    if (action === 'sf1:official-pdf-preview' || action === 'sf1:official-popup-preview') return createOfficialSf1PopupPreview(payload, context, false);
+    if (action === 'sf1:official-print') return createOfficialSf1PopupPreview(payload, context, true);
     if (action === 'summary:import-file') {
       if (payload && payload.kind === 'official-ecr') return importOfficialEcrFileRuntime(context);
       if (payload && payload.kind === 'sf1') return importFlexibleSf1FileRuntime(context);
