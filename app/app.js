@@ -176,8 +176,18 @@ function ensureStudentExtras(cls, sid){
    SF2 DAILY ATTENDANCE — APP-OWNED DATA MODEL
    ========================================================================= */
 const SF2_MONTH_NAMES=["January","February","March","April","May","June","July","August","September","October","November","December"];
-const SF2_DAY_CODES={P:"",A:"×",L:"▀",C:"▄"};
-const SF2_DAY_TITLES={P:"Present",A:"Absent",L:"Late comer",C:"Cutting classes"};
+const SF2_DAY_CODES={P:"",A:"X",L:"T"};
+const SF2_DAY_TITLES={P:"Present",A:"Absent",L:"Tardy"};
+function sf2NormalizeMark(value){
+  const v=String(value||"P").toUpperCase();
+  if(v==="A") return "A";
+  // Keep the existing v1.1.x JSON schema stable: L is retained internally
+  // as the stored tardy code, but the UI and official SF2 display it as T.
+  // Legacy Cutting Classes (C) records were already counted as tardy, so
+  // they are presented as Tardy after upgrade without losing attendance data.
+  if(v==="T"||v==="L"||v==="C") return "L";
+  return "P";
+}
 
 function sf2SchoolYearStart(cls){
   const m=String(cls && cls.meta && cls.meta.schoolYear || "").match(/(20\d{2})/);
@@ -242,21 +252,21 @@ function ensureSf2Month(cls,key){
   return m;
 }
 function sf2Mark(month,sid,date){
-  const v=month && month.marks && month.marks[sid] ? String(month.marks[sid][date]||"P").toUpperCase() : "P";
-  return ["A","L","C"].includes(v)?v:"P";
+  const value=month && month.marks && month.marks[sid] ? month.marks[sid][date] : "P";
+  return sf2NormalizeMark(value);
 }
 function sf2SetMark(month,sid,date,status){
   if(!month.marks[sid]) month.marks[sid]={};
-  status=String(status||"P").toUpperCase();
+  status=sf2NormalizeMark(status);
   if(status==="P") delete month.marks[sid][date]; else month.marks[sid][date]=status;
 }
-function sf2NextMark(status){ return ({P:"A",A:"L",L:"C",C:"P"})[status]||"P"; }
+function sf2NextMark(status){ return ({P:"A",A:"L",L:"P"})[sf2NormalizeMark(status)]||"P"; }
 function sf2StudentStats(month,sid){
   const days=[...(month.schoolDays||[])].sort(); let absent=0,tardy=0,present=0,run=0,maxRun=0;
   for(const date of days){
     const st=sf2Mark(month,sid,date);
     if(st==="A"){ absent++; run++; maxRun=Math.max(maxRun,run); }
-    else { present++; run=0; if(st==="L"||st==="C") tardy++; }
+    else { present++; run=0; if(st==="L") tardy++; }
   }
   return {classDays:days.length,present,absent,tardy,maxConsecutiveAbsences:maxRun};
 }
@@ -995,7 +1005,7 @@ function sf2SummaryInput(month,key,sex){
   const v=month.summary && month.summary[key] ? month.summary[key][sex] : "";
   return v===undefined||v===null?"":String(v);
 }
-function sf2MarkClass(status){ return status==="A"?"absent":status==="L"?"late":status==="C"?"cutting":"present"; }
+function sf2MarkClass(status){ return status==="A"?"absent":status==="L"?"tardy":"present"; }
 function refreshSf2CalculatedView(cls,monthKey){
   const month=ensureSf2Month(cls,monthKey), days=[...(month.schoolDays||[])].sort();
   cls.students.forEach(st=>{
@@ -1066,7 +1076,7 @@ function renderSf2(main,cls){
         <button id="sf2Preview" class="primary">Preview Official SF2</button>
         <button id="sf2Save" class="ghost-alt">Save Official SF2 (.xlsx)</button>
       </div>
-      <div class="hint"><strong>Attendance:</strong> blank = Present · <strong>×</strong> = Absent · <strong>▀</strong> = Late Comer · <strong>▄</strong> = Cutting Classes. Click a learner cell to cycle; keyboard shortcuts: P, X/A, L, C. SF2 attendance automatically feeds the corresponding SF9 month.</div>
+      <div class="hint"><strong>Attendance:</strong> blank = Present · <strong>X</strong> = Absent · <strong>T</strong> = Tardy. One whole-day mark is used per learner per school day; there is no AM/PM split. Click once for Absent, click again for Tardy, and click a third time to return to Present. Keyboard shortcuts: P, X/A, T. SF2 attendance automatically feeds the corresponding SF9 month.</div>
       <div class="sf2-schoolday-header"><strong>School days for ${esc(info.label)}</strong><span><strong id="sf2ClassDays">${schoolDays.length}</strong> selected (official template supports up to 25)</span></div>
       <div class="sf2-calendar">${calendarButtons}</div>
     </div>
@@ -1105,7 +1115,7 @@ function renderSf2(main,cls){
   };
   document.querySelectorAll(".sf2-mark").forEach(btn=>{
     btn.addEventListener("click",()=>applyMark(btn,sf2NextMark(btn.dataset.status)));
-    btn.addEventListener("keydown",e=>{let st=null;const k=e.key.toLowerCase();if(k==="p"||k===" ")st="P";else if(k==="x"||k==="a")st="A";else if(k==="l")st="L";else if(k==="c")st="C";if(st){e.preventDefault();applyMark(btn,st);}});
+    btn.addEventListener("keydown",e=>{let st=null;const k=e.key.toLowerCase();if(k==="p"||k===" ")st="P";else if(k==="x"||k==="a")st="A";else if(k==="t")st="L";if(st){e.preventDefault();applyMark(btn,st);}});
   });
   document.querySelectorAll("[data-sf2-remark]").forEach(inp=>inp.addEventListener("change",()=>{month.remarks[inp.dataset.sf2Remark]=inp.value;saveState();}));
   document.querySelectorAll("[data-sf2-summary-input]").forEach(inp=>inp.addEventListener("change",()=>{
@@ -3067,7 +3077,7 @@ function validateBackupForImport(data){
           if(!month.marks||typeof month.marks!=="object"||Array.isArray(month.marks)||Object.keys(month.marks).length>1000)throw new Error("Backup contains invalid SF2 attendance marks.");
           for(const [sid,marks] of Object.entries(month.marks)){
             if(!safeId.test(String(sid))||!marks||typeof marks!=="object"||Array.isArray(marks)||Object.keys(marks).length>31)throw new Error("Backup contains an invalid SF2 learner attendance record.");
-            for(const [date,status] of Object.entries(marks)){if(!date.startsWith(datePrefix)||!/^20\d{2}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(date)||!["A","L","C","P"].includes(String(status).toUpperCase()))throw new Error("Backup contains an invalid SF2 attendance code or date.");}
+            for(const [date,status] of Object.entries(marks)){if(!date.startsWith(datePrefix)||!/^20\d{2}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(date)||!["A","T","L","C","P"].includes(String(status).toUpperCase()))throw new Error("Backup contains an invalid SF2 attendance code or date.");}
           }
         }
         if(month.remarks!==undefined){

@@ -276,7 +276,7 @@ function validateSf2Payload(payload) {
   for (const st of payload.students) {
     if (!st || typeof st !== 'object' || String(st.name || '').length > 500 || String(st.remarks || '').length > 2000) throw new Error('SF2 contains an invalid learner record.');
     if (!Array.isArray(st.marks) || st.marks.length !== payload.days.length) throw new Error(`SF2 attendance is incomplete for ${st.name || 'a learner'}.`);
-    for (const mark of st.marks) if (!['P','A','L','C'].includes(String(mark || 'P'))) throw new Error('SF2 contains an unsupported attendance code.');
+    for (const mark of st.marks) if (!['P','A','L'].includes(String(mark || 'P'))) throw new Error('SF2 contains an unsupported attendance code.');
   }
   for (const [key, value] of Object.entries(payload.meta)) {
     if (value !== null && value !== undefined && typeof value !== 'string' && typeof value !== 'number' && !(key === 'sf2Enabled' && typeof value === 'boolean')) throw new Error(`Invalid SF2 metadata field: ${key}.`);
@@ -343,7 +343,7 @@ function buildOfficialSf2Buffer(payload, ctx) {
     xml = setWorksheetCell(xml, `B${row}`, st.name || '', 'string');
     dayCols.forEach((col,i)=>{
       const mark = String((st.marks || [])[i] || 'P');
-      const symbol = mark === 'A' ? 'x' : mark === 'L' ? '▀' : mark === 'C' ? '▄' : '';
+      const symbol = mark === 'A' ? 'X' : mark === 'L' ? 'T' : '';
       xml = setWorksheetCell(xml, `${col}${row}`, symbol, 'string');
     });
     xml = setWorksheetCell(xml, `AC${row}`, Number(st.absent || 0), 'number');
@@ -1135,7 +1135,7 @@ function sf2TemplateFingerprint(ctx) {
 function sf2PreviewSignature(payload, ctx) {
   const crypto = require('crypto');
   return crypto.createHash('sha256')
-    .update('sf2-preview-v1.1.0\n')
+    .update('sf2-preview-v1.1.2\n')
     .update(sf2TemplateFingerprint(ctx))
     .update('\n')
     .update(stableStringify(payload))

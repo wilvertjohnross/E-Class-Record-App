@@ -1,6 +1,17 @@
 E-Class Record App with GS and SF9
-Version 1.1.1
+Version 1.1.2
 
+
+
+VERSION 1.1.2 — SIMPLIFIED SF2 X / T ATTENDANCE MARKING
+- Replaces the bundled SF2 output template with the newly supplied School Form 2 workbook, byte-for-byte; no static wording, layout, merges, borders, dimensions, logos, or print setup in that uploaded template is edited by this release.
+- Simplifies the SF2 working-view marking cycle to: blank = Present → X = Absent → T = Tardy → blank = Present.
+- Uses one whole-day attendance mark per learner per school day; there is no AM/PM split and Cutting Classes is no longer a selectable attendance state.
+- Keyboard shortcuts are P/Space for Present, X/A for Absent, and T for Tardy.
+- Official SF2 output writes uppercase X and T into the full daily attendance cell.
+- Keeps the existing v1.1.x local JSON attendance schema stable: the prior L code is retained internally as the tardy storage code, while legacy C records are interpreted as Tardy so existing SF2 data is not lost.
+- Existing v1.1.0/v1.1.1 SF2 data and backups remain import-compatible; grading, ECR, GS, SF9 calculations, and Electron/updater security architecture are unchanged.
+- This is a focused patch release on the v1.1.x SF2 line.
 
 VERSION 1.1.1 — SF2 INPUT / METADATA REGRESSION FIX
 - Fixes the v1.1.0 official-output metadata validator so the boolean class property sf2Enabled is accepted as valid metadata.

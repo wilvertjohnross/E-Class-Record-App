@@ -1,0 +1,23 @@
+E-Class Record App with GS and SF9 — v1.1.2
+
+Release: SF2 Simplified X / T Attendance Marking
+Base: v1.1.1 SF2 Input / Metadata Regression Fix
+
+Scope
+- Replaces only the bundled SF2 official-output template with the newly supplied workbook.
+- SF2 daily marking is now blank / X / T only.
+- Click cycle: Present -> Absent -> Tardy -> Present.
+- One whole-day mark per learner per school day; no AM/PM split.
+- Cutting Classes is no longer a selectable current attendance mark.
+- Existing legacy Late/Cutting data remains readable and is treated as Tardy where appropriate.
+
+Compatibility
+- Existing v1.1.0/v1.1.1 local JSON and backup data remain compatible.
+- v1.0.27-era data remains compatible.
+- ECR, GS, SF9, grading/transmutation, persistence, IPC, updater security, and official ECR/GS templates are unchanged.
+
+Bundled SF2 template SHA-256
+92ac54dc4b257dca27d68a7300966ea3c75a6a3c27bbeacbcba99ae97b28bec0
+
+Windows build
+Extract the complete source package and run BUILD_WINDOWS.bat.

@@ -1,3 +1,13 @@
+VERSION 1.1.2 — SIMPLIFIED SF2 X / T ATTENDANCE MARKING
+- Replaced the bundled SF2 template with the newly uploaded workbook without editing its static content or layout.
+- Changed the SF2 click cycle to Present (blank) → Absent (X) → Tardy (T) → Present.
+- Removed Cutting Classes from the current UI/keyboard marking workflow and removed half-cell attendance symbols.
+- Uses one whole-day mark per learner per day; no AM/PM split.
+- Official SF2 generation now writes uppercase X for Absent and T for Tardy into the daily cell.
+- Preserved the v1.1.x JSON schema by storing new tardy marks using the existing internal L code; legacy C records are normalized to Tardy when read.
+- Backup import remains compatible with v1.1.0/v1.1.1 SF2 attendance records.
+- No grading, ECR, GS, SF9, IPC allowlist, updater-signature, or persistence-architecture changes.
+
 VERSION 1.1.1 — SF2 INPUT / METADATA REGRESSION FIX
 - Fixed the v1.1.0 metadata validator regression that rejected sf2Enabled because it is a boolean.
 - Boolean metadata is now accepted by both SF2 and shared ECR/GS official-output payload validation.
