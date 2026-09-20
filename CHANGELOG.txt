@@ -1,3 +1,14 @@
+v1.0.7
+- Replaced the Class Record CSV score-import button with Import Official ECR (.xlsx).
+- Imports an already-filled workbook that uses the same official ECR template bundled with the app.
+- Reads the detected term, class/school metadata, HPS, weights, learner names/sex blocks, and raw WW/PT/EXAM scores directly from fixed template cells.
+- Works even when the current class roster is empty; imported learner names are added automatically.
+- Existing learners are matched by normalized name; raw scores in the detected term are replaced from the workbook while other terms remain untouched.
+- App grading logic recalculates PS, WS, Initial Grade, Term Grade and Descriptor from imported raw scores.
+- Cached Excel Term Grades, when available, are used only as a verification check and discrepancy count.
+- Rejects workbooks that do not match the official ECR layout and reports unresolved external-name-link cases clearly.
+- Removed the obsolete Class Record score-import CSV example from the project package.
+
 v1.0.6
 - Added Official ECR Print Preview using desktop Microsoft Excel on Windows.
 - The Class Record print action now generates the filled official template and opens Excel directly in Print Preview.

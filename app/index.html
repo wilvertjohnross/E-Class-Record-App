@@ -1656,6 +1656,174 @@ function showImportResult(stats, termKey){
 }
 
 
+/* ===== v1.0.7: Import a filled Official ECR .xlsx =========================
+   The source workbook uses the same fixed official template as our export.
+   No column mapping is required: names, sex blocks, HPS and raw-score cells
+   are read by the desktop process, then the app recalculates grades itself. */
+function officialImportTermKey(termNo){
+  return Number(termNo)===2 ? "term2" : Number(termNo)===3 ? "term3" : "term1";
+}
+
+function showOfficialEcrImportDialog(data,fileName,currentTermKey){
+  return new Promise(resolve=>{
+    const targetTermKey=officialImportTermKey(data.termNo);
+    const male=(data.students||[]).filter(s=>s.sex==="M").length;
+    const female=(data.students||[]).filter(s=>s.sex==="F").length;
+    const hps=d=>Array.isArray(d)?d.map(v=>v===""?"—":String(v)).join(", "):"";
+    const backdrop=document.createElement("div"); backdrop.className="app-modal-backdrop no-print";
+    const modal=document.createElement("div"); modal.className="app-modal import-modal"; modal.setAttribute("role","dialog"); modal.setAttribute("aria-modal","true");
+    const differentTerm=targetTermKey!==currentTermKey;
+    const warnings=(data.warnings||[]).slice(0,4);
+    modal.innerHTML=`
+      <h3>Import Filled Official ECR</h3>
+      <p><strong>${esc(fileName||"Official ECR workbook")}</strong> matches the official Class Record layout. Review the detected data before importing.</p>
+      <div class="import-summary">
+        <strong>Detected:</strong> ${esc(TERM_LABELS[targetTermKey])}
+        &nbsp;•&nbsp; <strong>Learners:</strong> ${data.students.length} (${male} male, ${female} female)
+        &nbsp;•&nbsp; <strong>Subject:</strong> ${esc((data.meta&&data.meta.subject)||"—")}
+        &nbsp;•&nbsp; <strong>Grade/Section:</strong> ${esc((data.meta&&data.meta.gradeLevel)||"—")} / ${esc((data.meta&&data.meta.section)||"—")}
+      </div>
+      ${differentTerm?`<div class="import-summary" style="border-color:var(--red-pen);"><strong>Term notice:</strong> You opened ${esc(TERM_LABELS[currentTermKey])}, but the workbook identifies itself as <strong>${esc(TERM_LABELS[targetTermKey])}</strong>. It will be imported into the detected term automatically.</div>`:""}
+      <div class="scroll-x" style="margin-top:10px;">
+        <table class="import-map-table">
+          <thead><tr><th>Component</th><th>Detected HPS</th><th>Weight</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Written / Oral Works</strong> (WW1–WW5)</td><td>${esc(hps(data.categories.WW.hps))}</td><td>${Math.round(Number(data.categories.WW.weight||0)*10000)/100}%</td></tr>
+            <tr><td><strong>Performance Tasks</strong> (PT1–PT3)</td><td>${esc(hps(data.categories.PT.hps))}</td><td>${Math.round(Number(data.categories.PT.weight||0)*10000)/100}%</td></tr>
+            <tr><td><strong>Examinations</strong> (ST1, ST2, TE)</td><td>${esc(hps(data.categories.EXAM.hps))}</td><td>${Math.round(Number(data.categories.EXAM.weight||0)*10000)/100}%</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p style="margin-top:12px;">The app will update the class information available in the workbook, match existing learners by name, add missing learners, copy the HPS/weights, and <strong>replace the raw scores for the detected term</strong>. Other terms are not changed.</p>
+      <div class="hint">PS, WS, Initial Grade, Term Grade and Descriptor are not blindly copied from Excel. They are recalculated using this app's grading logic from the imported raw scores. LRN and age remain unchanged because they are not fields in this official ECR template.</div>
+      ${warnings.length?`<div class="app-modal-error" style="margin-top:10px;">${warnings.map(w=>esc(w)).join("<br>")}</div>`:""}
+      <div class="app-modal-actions"><button type="button" class="cancel" id="offImpCancel">Cancel</button><button type="button" class="primary" id="offImpConfirm">Import Official ECR</button></div>`;
+    backdrop.appendChild(modal); document.body.appendChild(backdrop);
+    const finish=result=>{ document.removeEventListener("keydown",onKey,true); backdrop.remove(); resolve(result); };
+    const onKey=e=>{ if(e.key==="Escape"){ e.preventDefault(); finish(false); } };
+    document.addEventListener("keydown",onKey,true);
+    modal.querySelector("#offImpCancel").addEventListener("click",()=>finish(false));
+    modal.querySelector("#offImpConfirm").addEventListener("click",()=>finish(true));
+    backdrop.addEventListener("click",e=>{ if(e.target===backdrop) finish(false); });
+  });
+}
+
+function applyOfficialEcrImport(cls,data){
+  const targetTermKey=officialImportTermKey(data.termNo);
+  const ww=cls.categories&&cls.categories.WW, pt=cls.categories&&cls.categories.PT, ex=cls.categories&&cls.categories.EXAM;
+  if(!ww||!pt||!ex||ww.components.length!==5||pt.components.length!==3||ex.components.length!==3){
+    throw new Error("This official ECR importer requires the class setup to contain exactly 5 WW, 3 PT and 3 Examination components.");
+  }
+
+  // Import the metadata that actually exists on the official Class Record.
+  const m=data.meta||{};
+  ["region","division","schoolId","schoolName","schoolYear","gradeLevel","teacher","subject","section"].forEach(k=>{
+    if(m[k]!==undefined && m[k]!==null && String(m[k]).trim()!=="") cls.meta[k]=String(m[k]).trim();
+  });
+
+  // The official form is authoritative for HPS and component weighting.
+  const applyHps=(cat,vals)=>cat.components.forEach((c,i)=>{
+    const n=Number(vals&&vals[i]); if(Number.isFinite(n)&&n>=0) c.hps=n;
+  });
+  applyHps(ww,data.categories&&data.categories.WW&&data.categories.WW.hps);
+  applyHps(pt,data.categories&&data.categories.PT&&data.categories.PT.hps);
+  applyHps(ex,data.categories&&data.categories.EXAM&&data.categories.EXAM.hps);
+  const setWeight=(cat,v)=>{ const n=Number(v); if(Number.isFinite(n)&&n>=0) cat.weight=n; };
+  setWeight(ww,data.categories&&data.categories.WW&&data.categories.WW.weight);
+  setWeight(pt,data.categories&&data.categories.PT&&data.categories.PT.weight);
+  setWeight(ex,data.categories&&data.categories.EXAM&&data.categories.EXAM.weight);
+  const sw=data.categories&&data.categories.EXAM&&data.categories.EXAM.subWeights;
+  ex.components.forEach((c,i)=>{ const n=Number(sw&&sw[i]); if(Number.isFinite(n)&&n>=0) c.subWeight=n; });
+
+  if(!cls.scores[targetTermKey]) cls.scores[targetTermKey]={};
+  const idx=buildStudentImportIndexes(cls);
+  let matched=0,added=0,importedScores=0,invalid=0,gradeChecks=0,gradeMismatches=0;
+  const importedStudentIds=[];
+
+  for(const source of (data.students||[])){
+    const name=String(source.name||"").trim(); if(!name) continue;
+    let student=null;
+    const nk=normalizeLearnerName(name);
+    if(nk&&idx.byName.has(nk)) student=idx.byName.get(nk);
+    if(!student){
+      const tk=learnerTokenKey(name), list=tk?idx.byTokens.get(tk):null;
+      if(list&&list.length===1) student=list[0];
+    }
+    if(!student){
+      student={id:uid("s"),name,lrn:"",age:"",sex:source.sex==="F"?"F":"M"};
+      cls.students.push(student); ensureStudentExtras(cls,student.id); added++;
+      idx.byName.set(normalizeLearnerName(name),student);
+      const tk=learnerTokenKey(name); if(tk){ if(!idx.byTokens.has(tk)) idx.byTokens.set(tk,[]); idx.byTokens.get(tk).push(student); }
+    }else{
+      matched++;
+      student.name=name;
+      student.sex=source.sex==="F"?"F":"M";
+      ensureStudentExtras(cls,student.id);
+    }
+
+    // Replace this learner's raw scores in the imported term. Blank official
+    // cells intentionally clear old values in the same term.
+    const sm={WW:{},PT:{},EXAM:{}};
+    const importCat=(catKey,cat,values)=>{
+      (values||[]).forEach((raw,i)=>{
+        if(i>=cat.components.length||raw===""||raw===null||raw===undefined) return;
+        const n=Number(raw), h=Number(cat.components[i].hps||0);
+        if(!Number.isFinite(n)||n<0||(h>0&&n>h)){ invalid++; return; }
+        sm[catKey][cat.components[i].id]=n; importedScores++;
+      });
+    };
+    importCat("WW",ww,source.scores&&source.scores.WW);
+    importCat("PT",pt,source.scores&&source.scores.PT);
+    importCat("EXAM",ex,source.scores&&source.scores.EXAM);
+    cls.scores[targetTermKey][student.id]=sm;
+    importedStudentIds.push({student,source});
+  }
+
+  // When the workbook has a cached official term grade, compare it against
+  // the app's recomputation as a verification signal only; never overwrite.
+  importedStudentIds.forEach(({student,source})=>{
+    const official=Number(source.officialTermGrade);
+    if(!Number.isFinite(official)) return;
+    const computed=studentTermResult(cls,targetTermKey,student.id).term;
+    if(computed===null||computed===undefined) return;
+    gradeChecks++;
+    if(Number(computed)!==official) gradeMismatches++;
+  });
+
+  return {termKey:targetTermKey,matched,added,learners:importedStudentIds.length,importedScores,invalid,gradeChecks,gradeMismatches,warnings:(data.warnings||[]).length};
+}
+
+async function importOfficialEcrIntoClass(cls,currentTermKey){
+  if(!window.eclassAPI||typeof window.eclassAPI.importOfficialEcr!=="function"){
+    alert("Official ECR import is available in the installed desktop app."); return;
+  }
+  let result;
+  try{ result=await window.eclassAPI.importOfficialEcr(); }
+  catch(err){ alert("Could not open the Official ECR importer: "+(err&&err.message?err.message:String(err))); return; }
+  if(!result||result.cancelled) return;
+  if(!result.ok){ alert("Could not read that Official ECR workbook: "+(result.error||"Unknown error")); return; }
+  const proceed=await showOfficialEcrImportDialog(result.data,result.fileName,currentTermKey);
+  if(!proceed) return;
+  try{
+    const stats=applyOfficialEcrImport(cls,result.data);
+    saveState();
+    activeTab=stats.termKey;
+    render();
+    const parts=[
+      `${stats.learners} learner${stats.learners===1?"":"s"} read`,
+      `${stats.importedScores} raw score${stats.importedScores===1?"":"s"} imported`
+    ];
+    if(stats.matched) parts.push(`${stats.matched} existing learner${stats.matched===1?"":"s"} matched`);
+    if(stats.added) parts.push(`${stats.added} learner${stats.added===1?"":"s"} added to roster`);
+    if(stats.invalid) parts.push(`${stats.invalid} invalid/out-of-HPS score${stats.invalid===1?"":"s"} skipped`);
+    if(stats.gradeChecks) parts.push(stats.gradeMismatches?`${stats.gradeMismatches}/${stats.gradeChecks} cached Excel term grade${stats.gradeChecks===1?"":"s"} differed from the app's recalculation`:`${stats.gradeChecks} cached Excel term grade${stats.gradeChecks===1?"":"s"} verified against the app`);
+    if(stats.warnings) parts.push(`${stats.warnings} workbook warning${stats.warnings===1?"":"s"}`);
+    await showInfoDialog(`Official ECR Import Complete — ${TERM_LABELS[stats.termKey]}`,parts.join(" • "));
+  }catch(err){ alert("Could not import the Official ECR data: "+(err&&err.message?err.message:String(err))); }
+}
+
+
+
 /* ===== v1.0.5: Official Class Record template export =====================
    The bundled XLSX is the actual required Class Record form. The renderer
    sends already-computed values to Electron; the main process fills a copy of
@@ -1732,13 +1900,20 @@ async function exportOfficialEcr(cls,termKey,mode="save"){
 }
 
 function renderTerm(main, cls, termKey, termLabel){
-  if(!cls.students.length){
-    main.innerHTML = `<div class="empty-state"><h2>No learners yet</h2><p>Add learners in the Roster tab first.</p></div>`;
-    return;
-  }
   if(!cls.scores[termKey]) cls.scores[termKey] = {};
   const mode = TERM_VIEW_MODE[termKey];
   const m = cls.meta;
+  if(!cls.students.length){
+    main.innerHTML = `
+      <div class="card no-print">
+        <h2>${termLabel}</h2>
+        <div class="sub">You can build the class manually from Roster, or import an already-filled Excel Class Record that uses the official ECR template.</div>
+        <div class="toolbar"><button id="termImportOfficial" class="primary">Import Official ECR (.xlsx)</button></div>
+      </div>
+      <div class="empty-state"><h2>No learners yet</h2><p>Import your filled official ECR to bring in learner names, HPS and raw scores automatically, or add learners from the Roster tab.</p></div>`;
+    document.getElementById("termImportOfficial").addEventListener("click",()=>importOfficialEcrIntoClass(cls,termKey));
+    return;
+  }
 
   main.innerHTML = `
     <div class="card no-print">
@@ -1749,8 +1924,7 @@ function renderTerm(main, cls, termKey, termLabel){
           <button class="small viewbtn ${mode==="record"?"active":""}" data-mode="record">Class Record</button>
           <button class="small viewbtn ${mode==="gs"?"active":""}" data-mode="gs">Grading Sheet</button>
         </div>
-        <button id="termImportCsv" class="ghost-alt" style="background:var(--paper-deep);">Import Scores CSV</button>
-        <input type="file" id="termScoresCsvFile" accept=".csv,text/csv,.txt,text/plain" style="display:none;">
+        <button id="termImportOfficial" class="ghost-alt" style="background:var(--paper-deep);">Import Official ECR (.xlsx)</button>
         <button id="termExportOfficial" class="ghost-alt" style="background:var(--paper-deep);">Download Official ECR (.xlsx)</button>
         <button id="termPrint" class="ghost-alt" style="background:var(--paper-deep);">Print this view</button>
       </div>
@@ -1834,29 +2008,7 @@ function renderTerm(main, cls, termKey, termLabel){
       draw(); updateTermActions();
     });
   });
-  document.getElementById("termImportCsv").addEventListener("click", ()=>document.getElementById("termScoresCsvFile").click());
-  document.getElementById("termScoresCsvFile").addEventListener("change", e=>{
-    const file=e.target.files && e.target.files[0];
-    e.target.value="";
-    if(!file) return;
-    const reader=new FileReader();
-    reader.onload=async ()=>{
-      try{
-        const rows=parseCsv(String(reader.result||""));
-        const config=await showScoreImportDialog(cls,termKey,rows,file.name);
-        if(!config) return;
-        if(config.error){ alert(config.error); return; }
-        const stats=applyScoreCsvImport(cls,termKey,config);
-        saveState();
-        draw();
-        await showImportResult(stats,termKey);
-      }catch(err){
-        alert("Could not import that CSV: "+(err && err.message ? err.message : String(err)));
-      }
-    };
-    reader.onerror=()=>alert("Could not read that CSV file.");
-    reader.readAsText(file);
-  });
+  document.getElementById("termImportOfficial").addEventListener("click", ()=>importOfficialEcrIntoClass(cls,termKey));
   document.getElementById("termExportOfficial").addEventListener("click", ()=>exportOfficialEcr(cls,termKey,"save"));
   document.getElementById("termPrint").addEventListener("click", ()=>{
     if(TERM_VIEW_MODE[termKey]==="record") exportOfficialEcr(cls,termKey,"preview");

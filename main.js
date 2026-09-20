@@ -188,6 +188,231 @@ ipcMain.handle('data:location', async () => ensureDataFolders().root);
 
 
 
+/* ===== v1.0.7: Import an already-filled Official ECR workbook =============
+   The import source is the SAME official ECR .xlsx layout bundled with this
+   app. Because the layout is fixed, no CSV/header mapping is needed. We read
+   the known cells directly from the XLSX package, then return raw scores and
+   metadata to the renderer. The renderer applies those raw scores to the app's
+   own grading logic so PS/WS/Initial/Term grades are recalculated normally. */
+
+function xmlDecode(value) {
+  return String(value ?? '')
+    .replace(/&#x([0-9a-fA-F]+);/g, (_m, h) => String.fromCodePoint(parseInt(h, 16)))
+    .replace(/&#([0-9]+);/g, (_m, d) => String.fromCodePoint(parseInt(d, 10)))
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, '&');
+}
+
+function xlsxSharedStrings(zip) {
+  const entry = zip.getEntry('xl/sharedStrings.xml');
+  if (!entry) return [];
+  const xml = entry.getData().toString('utf8');
+  const out = [];
+  const siRe = /<si\b[^>]*>([\s\S]*?)<\/si>/g;
+  let m;
+  while ((m = siRe.exec(xml))) {
+    let text = '';
+    const tRe = /<t\b[^>]*>([\s\S]*?)<\/t>/g;
+    let tm;
+    while ((tm = tRe.exec(m[1]))) text += xmlDecode(tm[1]);
+    out.push(text);
+  }
+  return out;
+}
+
+function worksheetCellParts(xml, ref) {
+  const r = regexEscape(ref);
+  const selfRe = new RegExp(`<c\\b([^>]*\\br="${r}"[^>]*)\\/>`);
+  const self = xml.match(selfRe);
+  if (self) return { attrs: self[1] || '', body: '' };
+  const fullRe = new RegExp(`<c\\b([^>]*\\br="${r}"[^>]*)>([\\s\\S]*?)<\\/c>`);
+  const full = xml.match(fullRe);
+  if (full) return { attrs: full[1] || '', body: full[2] || '' };
+  return null;
+}
+
+function worksheetCellValue(xml, ref, sharedStrings) {
+  const cell = worksheetCellParts(xml, ref);
+  if (!cell) return '';
+  const type = ((cell.attrs.match(/\bt="([^"]+)"/) || [])[1] || '').toLowerCase();
+  if (type === 'inlinestr') {
+    let text = '';
+    const tRe = /<t\b[^>]*>([\s\S]*?)<\/t>/g;
+    let tm;
+    while ((tm = tRe.exec(cell.body))) text += xmlDecode(tm[1]);
+    return text;
+  }
+  const vMatch = cell.body.match(/<v\b[^>]*>([\s\S]*?)<\/v>/);
+  if (!vMatch) return '';
+  const raw = xmlDecode(vMatch[1]);
+  if (type === 's') {
+    const i = Number(raw);
+    return Number.isInteger(i) && i >= 0 && i < sharedStrings.length ? sharedStrings[i] : '';
+  }
+  if (type === 'str' || type === 'e') return raw;
+  if (type === 'b') return raw === '1';
+  if (raw.trim() === '') return '';
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : raw;
+}
+
+function xlsxCellText(xml, ref, sharedStrings) {
+  const v = worksheetCellValue(xml, ref, sharedStrings);
+  return v === null || v === undefined ? '' : String(v).trim();
+}
+
+function xlsxCellNumber(xml, ref, sharedStrings) {
+  const v = worksheetCellValue(xml, ref, sharedStrings);
+  if (v === '' || v === null || v === undefined) return '';
+  const n = typeof v === 'number' ? v : Number(String(v).replace(/,/g, '').trim());
+  return Number.isFinite(n) ? n : '';
+}
+
+function normalizeFractionWeight(value, fallback) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0) return fallback;
+  return n > 1.000001 ? n / 100 : n;
+}
+
+function normalizePercentWeight(value, fallback) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0) return fallback;
+  return n > 0 && n <= 1.000001 ? n * 100 : n;
+}
+
+function detectOfficialEcrTerm(headerText, workbookXml) {
+  const candidates = [String(headerText || ''), String(workbookXml || '')];
+  for (const text of candidates) {
+    let m = text.match(/TERM\s*([123])/i);
+    if (m) return Number(m[1]);
+    if (/FIRST\s+TERM/i.test(text)) return 1;
+    if (/SECOND\s+TERM/i.test(text)) return 2;
+    if (/THIRD\s+TERM/i.test(text)) return 3;
+  }
+  return 1;
+}
+
+function parseOfficialEcrWorkbook(filePath) {
+  const zip = new AdmZip(fs.readFileSync(filePath));
+  const sheetEntry = zip.getEntry('xl/worksheets/sheet1.xml');
+  if (!sheetEntry) throw new Error('This workbook does not contain the expected official ECR worksheet.');
+  const xml = sheetEntry.getData().toString('utf8');
+  const sharedStrings = xlsxSharedStrings(zip);
+  const workbookEntry = zip.getEntry('xl/workbook.xml');
+  const workbookXml = workbookEntry ? workbookEntry.getData().toString('utf8') : '';
+
+  const title = xlsxCellText(xml, 'B2', sharedStrings);
+  const hpsLabel = xlsxCellText(xml, 'B15', sharedStrings);
+  const learnersLabel = xlsxCellText(xml, 'B16', sharedStrings);
+  if (!/CLASS\s+RECORD/i.test(title) || !/HIGHEST\s+POSSIBLE\s+SCORE/i.test(hpsLabel) || !/LEARNERS/i.test(learnersLabel)) {
+    throw new Error('The selected workbook does not match the official ECR template used by this app.');
+  }
+
+  const termNo = detectOfficialEcrTerm(title, workbookXml);
+  const metaText = (ref, allowNumericZero = false) => {
+    const t = xlsxCellText(xml, ref, sharedStrings);
+    if (/^#(NAME\?|REF!|N\/A|VALUE!|DIV\/0!)/i.test(t)) return '';
+    if (!allowNumericZero && t === '0') return ''; // common unresolved external-link cache
+    return t;
+  };
+  const meta = {
+    region: metaText('F5'),
+    division: metaText('R5'),
+    schoolId: metaText('Z5', true),
+    schoolName: metaText('F7'),
+    schoolYear: metaText('Z7'),
+    gradeLevel: metaText('J10', true),
+    teacher: metaText('Q10'),
+    subject: metaText('AA10'),
+    section: metaText('J11')
+  };
+
+  const wwHps = ['F','G','H','I','J'].map(c => xlsxCellNumber(xml, `${c}15`, sharedStrings));
+  const ptHps = ['N','O','P'].map(c => xlsxCellNumber(xml, `${c}15`, sharedStrings));
+  const exHps = ['T','U','V'].map(c => xlsxCellNumber(xml, `${c}15`, sharedStrings));
+  const categories = {
+    WW: {
+      weight: normalizeFractionWeight(xlsxCellNumber(xml, 'M15', sharedStrings), 0.20),
+      hps: wwHps
+    },
+    PT: {
+      weight: normalizeFractionWeight(xlsxCellNumber(xml, 'S15', sharedStrings), 0.50),
+      hps: ptHps
+    },
+    EXAM: {
+      weight: normalizeFractionWeight(xlsxCellNumber(xml, 'AA15', sharedStrings), 0.30),
+      hps: exHps,
+      subWeights: ['W','X','Y'].map(c => normalizePercentWeight(xlsxCellNumber(xml, `${c}15`, sharedStrings), ''))
+    }
+  };
+
+  const students = [];
+  const warnings = [];
+  const scoreCols = {
+    WW: ['F','G','H','I','J'],
+    PT: ['N','O','P'],
+    EXAM: ['T','U','V']
+  };
+
+  function readStudentRow(row, sex) {
+    const name = xlsxCellText(xml, `C${row}`, sharedStrings);
+    const scores = {
+      WW: scoreCols.WW.map(c => xlsxCellNumber(xml, `${c}${row}`, sharedStrings)),
+      PT: scoreCols.PT.map(c => xlsxCellNumber(xml, `${c}${row}`, sharedStrings)),
+      EXAM: scoreCols.EXAM.map(c => xlsxCellNumber(xml, `${c}${row}`, sharedStrings))
+    };
+    const hasScores = [...scores.WW, ...scores.PT, ...scores.EXAM].some(v => v !== '');
+    const officialTermGrade = xlsxCellNumber(xml, `AC${row}`, sharedStrings);
+    const officialInitialGrade = xlsxCellNumber(xml, `AB${row}`, sharedStrings);
+    if (!name) {
+      if (hasScores) warnings.push(`Row ${row} contains scores but no learner name, so that row was skipped.`);
+      return;
+    }
+    if (/^#(NAME\?|REF!|N\/A|VALUE!|DIV\/0!)/i.test(name)) {
+      warnings.push(`Row ${row} has an unresolved Excel value instead of a learner name, so it was skipped.`);
+      return;
+    }
+    students.push({ name, sex, row, scores, officialInitialGrade, officialTermGrade });
+  }
+
+  for (let row = 18; row <= 67; row++) readStudentRow(row, 'M');
+  for (let row = 69; row <= 118; row++) readStudentRow(row, 'F');
+
+  if (!students.length) {
+    throw new Error('No learner names were found in the official ECR. If the names come from an external linked workbook, open the ECR in Excel with the links available, then Save the workbook before importing it here.');
+  }
+
+  return {
+    template: 'official-ecr',
+    termNo,
+    meta,
+    categories,
+    students,
+    warnings
+  };
+}
+
+ipcMain.handle('ecr:import-official', async () => {
+  try {
+    const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
+      title: 'Import Filled Official Class Record',
+      properties: ['openFile'],
+      filters: [{ name: 'Official ECR Excel Workbook', extensions: ['xlsx'] }]
+    });
+    if (canceled || !filePaths[0]) return { ok: false, cancelled: true };
+    const filePath = filePaths[0];
+    const data = parseOfficialEcrWorkbook(filePath);
+    return { ok: true, path: filePath, fileName: path.basename(filePath), data };
+  } catch (err) {
+    console.error('Official ECR import failed:', err);
+    return { ok: false, error: err.message };
+  }
+});
+
+
 /* ===== v1.0.5: Official ECR template export ==============================
    The official workbook is treated as a read-only master template. We patch
    only worksheet cell values inside a copy of the XLSX ZIP package, preserving

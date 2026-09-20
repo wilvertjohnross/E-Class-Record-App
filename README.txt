@@ -1,6 +1,38 @@
 E-Class Record App with GS and SF9
-Version 1.0.5
+Version 1.0.7
 
+
+VERSION 1.0.7 — IMPORT FILLED OFFICIAL ECR (.XLSX)
+The Class Record import workflow now accepts an already-filled Excel workbook
+that uses the SAME official ECR template bundled with this app. A separate CSV
+score file is no longer required for Class Record importing.
+
+In Term 1, Term 2, or Term 3, click:
+  Import Official ECR (.xlsx)
+
+The app reads the fixed official-template cells directly and imports:
+- Detected term
+- Region, Division, School ID, School Name, School Year
+- Grade Level, Section, Teacher and Subject
+- HPS and grading weights
+- Male/Female learner names from the official learner blocks
+- Raw WW1-WW5, PT1-PT3, ST1, ST2 and TE scores
+
+Existing learners are matched by normalized name and missing learners are added
+to the roster. Raw scores for matching learners in the detected term are
+replaced by the workbook values. Other terms are not changed. LRN and age are
+not imported because the official ECR template has no fields for them.
+
+PS, WS, Initial Grade, Term Grade and Descriptor are recalculated by the app
+from the imported raw scores rather than blindly copying potentially stale
+Excel formula results. If cached Excel Term Grades are available, the importer
+compares them with the app result and reports discrepancies as a verification
+check.
+
+The importer validates that the selected workbook matches the official ECR
+layout. If learner names are supplied only through unresolved external Excel
+links and no cached names are present, open the workbook in Excel with its
+source links available and save it once before importing.
 
 OFFICIAL CLASS RECORD TEMPLATE EXPORT IN v1.0.5
 The Class Record view now uses the supplied official Excel template for filing
@@ -29,10 +61,10 @@ copy. This makes each exported ECR standalone and avoids broken-link warnings.
 The original template formatting, merged cells, logos, page setup, margins and
 print area are preserved.
 
-VERSION 1.0.4 — IMPORT SCORES FROM CSV
-Open Term 1, Term 2, or Term 3 and click "Import Scores CSV". CSV values should
-be RAW SCORES. The mapping screen can match different CSV column headings to the
-app's WW/PT/EXAM components.
+VERSION 1.0.4 — LEGACY CSV SCORE IMPORT
+Earlier builds used a mapped CSV score importer in the Class Record. Starting
+with v1.0.7, the Class Record toolbar uses the filled official ECR .xlsx import
+instead.
 
 SCHOOL LOGO IN v1.0.3
 Setup includes Upload / Change School Logo for the app's Class Record, Grading
