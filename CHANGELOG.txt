@@ -1,3 +1,15 @@
+E-Class Record App with GS and SF9 — v1.0.4
+
+NEW
+- Added Import Scores CSV in every Term Class Record.
+- CSV importer auto-detects learner-name/LRN columns and common score headers such as WW1, PT1, ST1, and TE.
+- Added a mapping screen so CSV columns from different offline Excel class-record formats can be matched to the app's current WW/PT/EXAM components before importing.
+- Learners are matched by LRN first, then by normalized name.
+- Optional: add unmatched learners from the CSV to the roster.
+- Safe default preserves existing raw scores; optional overwrite can be enabled during import.
+- Invalid numeric values and values above the app component HPS are skipped and reported.
+- Imported raw scores automatically feed the existing PS, WS, Initial Grade, Term Grade, GS, and SF9 calculations.
+
 E-Class Record App with GS and SF9
 
 Version 1.0.3

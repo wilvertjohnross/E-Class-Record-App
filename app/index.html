@@ -379,6 +379,19 @@
   .app-modal-actions{display:flex;justify-content:flex-end;gap:9px;margin-top:16px;}
   .app-modal-actions .cancel{background:var(--paper-deep);color:var(--ink);border:1px solid var(--border);}
   .app-modal-error{min-height:17px;margin-top:7px;color:var(--red-pen);font-size:12px;font-weight:600;}
+  .app-modal.import-modal{width:min(920px,100%);max-height:90vh;overflow:auto;}
+  .import-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:10px 0 14px;}
+  .import-grid .field{margin:0;}
+  .import-grid select{width:100%;}
+  .import-map-table{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:8px;}
+  .import-map-table th,.import-map-table td{border:1px solid var(--border);padding:6px 7px;text-align:left;}
+  .import-map-table th{background:var(--paper-deep);}
+  .import-map-table select{width:100%;min-width:180px;}
+  .import-options{display:flex;gap:18px;flex-wrap:wrap;margin:12px 0 4px;font-size:12.5px;}
+  .import-options label{display:flex;align-items:center;gap:7px;font-weight:600;}
+  .import-options input[type=checkbox]{width:auto;}
+  .import-summary{background:#F5EFE0;border:1px solid var(--border);padding:9px 11px;border-radius:4px;font-size:12.5px;margin:8px 0;}
+  @media (max-width:720px){.import-grid{grid-template-columns:1fr;}}
   .badge-count{background:var(--paper-deep);border:1px solid var(--border);border-radius:10px;padding:1px 9px;font-size:11.5px;margin-left:6px;}
 </style>
 </head>
@@ -1435,6 +1448,213 @@ function gsInfoRowHtml(cls){
     </table>`;
 }
 
+
+/* ===== v1.0.4: Import raw Class Record scores from CSV =====================
+   The importer is intentionally mapping-based. It auto-detects familiar
+   headers (Name/LRN/WW1/PT1/ST1/TE etc.) but lets the teacher correct the
+   mapping before any data is changed. This keeps it usable with CSV files
+   exported from different offline Excel class-record formats. */
+function csvHeaderKey(value){
+  return String(value==null?"":value)
+    .replace(/^\uFEFF/,"")
+    .trim().toLowerCase()
+    .replace(/&/g,"and")
+    .replace(/[^a-z0-9]+/g,"");
+}
+function csvColumnLabel(header, i){
+  let n=i+1, letters="";
+  while(n){ n--; letters=String.fromCharCode(65+(n%26))+letters; n=Math.floor(n/26); }
+  const h=String(header==null?"":header).trim();
+  return `${letters}: ${h || "(blank header)"}`;
+}
+function detectCsvHeaderRow(rows, cls){
+  const candidates = rows.slice(0, Math.min(12, rows.length));
+  const scoreNames=[];
+  ["WW","PT","EXAM"].forEach(k=>cls.categories[k].components.forEach(c=>scoreNames.push(csvHeaderKey(c.name))));
+  let best={index:0,score:-1};
+  candidates.forEach((row,idx)=>{
+    const keys=row.map(csvHeaderKey);
+    let score=0;
+    if(keys.some(k=>["name","learnername","learnersname","studentname","studentsname","fullname"].includes(k))) score+=8;
+    if(keys.some(k=>k==="lrn" || k==="learnerreferencenumber")) score+=3;
+    scoreNames.forEach(k=>{ if(k && keys.includes(k)) score+=2; });
+    if(score>best.score) best={index:idx,score};
+  });
+  return best.index;
+}
+function findHeaderIndex(headers, aliases){
+  const keys=headers.map(csvHeaderKey);
+  const wanted=aliases.map(csvHeaderKey);
+  for(const w of wanted){ const i=keys.indexOf(w); if(i>=0) return i; }
+  return -1;
+}
+function componentHeaderAliases(catKey, comp, index){
+  const aliases=[comp.name, `${catKey}${index+1}`];
+  const n=(String(comp.name).match(/(\d+)/)||[])[1] || String(index+1);
+  if(catKey==="WW") aliases.push(`WW ${n}`,`Written Work ${n}`,`Written Works ${n}`,`Written/Oral Work ${n}`);
+  if(catKey==="PT") aliases.push(`PT ${n}`,`Performance Task ${n}`,`Product/Performance Task ${n}`);
+  if(catKey==="EXAM"){
+    aliases.push(`Exam ${n}`,`Examination ${n}`);
+    const ck=csvHeaderKey(comp.name);
+    if(ck==="te") aliases.push("Term Exam","Quarterly Exam","Term Examination","TE");
+    if(ck.startsWith("st")) aliases.push(`Summative Test ${n}`,`ST ${n}`);
+  }
+  return [...new Set(aliases)];
+}
+function normalizeLearnerName(name){
+  return String(name||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"")
+    .replace(/[^a-z0-9]+/g," ").trim().replace(/\s+/g," ");
+}
+function learnerTokenKey(name){
+  return normalizeLearnerName(name).split(" ").filter(Boolean).sort().join("|");
+}
+function buildStudentImportIndexes(cls){
+  const byLrn=new Map(), byName=new Map(), byTokens=new Map();
+  cls.students.forEach(s=>{
+    const l=String(s.lrn||"").replace(/\D/g,""); if(l) byLrn.set(l,s);
+    const n=normalizeLearnerName(s.name); if(n) byName.set(n,s);
+    const t=learnerTokenKey(s.name); if(t){
+      if(!byTokens.has(t)) byTokens.set(t,[]);
+      byTokens.get(t).push(s);
+    }
+  });
+  return {byLrn,byName,byTokens};
+}
+function importNumericScore(raw){
+  const s=String(raw==null?"":raw).trim();
+  if(!s) return null;
+  // Accept plain numbers and Excel-exported values such as "20.5".
+  const n=Number(s.replace(/,/g,""));
+  return Number.isFinite(n) ? n : NaN;
+}
+function showScoreImportDialog(cls, termKey, rows, fileName){
+  return new Promise(resolve=>{
+    if(!rows.length){ resolve(null); return; }
+    const headerRow=detectCsvHeaderRow(rows,cls);
+    const headers=rows[headerRow].map(x=>String(x||"").trim());
+    const dataRows=rows.slice(headerRow+1).filter(r=>r.some(v=>String(v||"").trim()!==""));
+    if(!headers.length || !dataRows.length){ resolve({error:"No usable header/data rows were found in the CSV."}); return; }
+
+    const autoName=findHeaderIndex(headers,["Name","Learner Name","Learner's Name","Student Name","Full Name"]);
+    const autoLrn=findHeaderIndex(headers,["LRN","Learner Reference Number"]);
+    const autoSex=findHeaderIndex(headers,["Sex","Gender"]);
+    const mappings=[];
+    ["WW","PT","EXAM"].forEach(catKey=>{
+      cls.categories[catKey].components.forEach((comp,index)=>{
+        const col=findHeaderIndex(headers,componentHeaderAliases(catKey,comp,index));
+        mappings.push({catKey,comp,index,col});
+      });
+    });
+
+    const backdrop=document.createElement("div"); backdrop.className="app-modal-backdrop no-print";
+    const modal=document.createElement("div"); modal.className="app-modal import-modal"; modal.setAttribute("role","dialog"); modal.setAttribute("aria-modal","true");
+    const optionHtml=(selected,allowNone=true)=>`${allowNone?'<option value="-1">— Not mapped —</option>':''}${headers.map((h,i)=>`<option value="${i}" ${i===selected?"selected":""}>${esc(csvColumnLabel(h,i))}</option>`).join("")}`;
+    const autoCount=mappings.filter(m=>m.col>=0).length;
+    modal.innerHTML=`
+      <h3>Import Scores CSV — ${esc(TERM_LABELS[termKey])}</h3>
+      <p><strong>${esc(fileName||"CSV file")}</strong> was read successfully. Confirm the column mapping below before importing. Nothing is changed until you click <strong>Import Scores</strong>.</p>
+      <div class="import-summary">Detected header row: <strong>${headerRow+1}</strong> &nbsp;•&nbsp; Data rows: <strong>${dataRows.length}</strong> &nbsp;•&nbsp; Score columns auto-mapped: <strong>${autoCount}/${mappings.length}</strong></div>
+      <div class="import-grid">
+        <div class="field"><label>Learner Name *</label><select id="impName">${optionHtml(autoName,true)}</select></div>
+        <div class="field"><label>LRN (optional)</label><select id="impLrn">${optionHtml(autoLrn,true)}</select></div>
+        <div class="field"><label>Sex/Gender (for new learners)</label><select id="impSex">${optionHtml(autoSex,true)}</select></div>
+      </div>
+      <div class="hint">The app matches existing learners by LRN first, then by name. Score values are imported as <strong>raw scores</strong>; the app will compute PS, WS, Initial Grade and Term Grade normally. Ensure the HPS/component setup in this app matches the Excel file.</div>
+      <div class="scroll-x" style="margin-top:10px;">
+        <table class="import-map-table">
+          <thead><tr><th>Component</th><th>HPS in App</th><th>CSV Column</th></tr></thead>
+          <tbody>${mappings.map((m,i)=>`<tr><td><strong>${esc(m.catKey)}</strong> — ${esc(m.comp.name)}</td><td>${esc(m.comp.hps)}</td><td><select class="imp-score-map" data-map-index="${i}">${optionHtml(m.col,true)}</select></td></tr>`).join("")}</tbody>
+        </table>
+      </div>
+      <div class="import-options">
+        <label><input type="checkbox" id="impAddLearners"> Add learners that are not yet in the roster</label>
+        <label><input type="checkbox" id="impOverwrite"> Overwrite existing raw scores</label>
+      </div>
+      <div class="hint">Safety default: existing scores are preserved. Turn on “Overwrite existing raw scores” only when the CSV should replace them.</div>
+      <div class="app-modal-error" id="impError"></div>
+      <div class="app-modal-actions"><button type="button" class="cancel" id="impCancel">Cancel</button><button type="button" class="primary" id="impConfirm">Import Scores</button></div>`;
+    backdrop.appendChild(modal); document.body.appendChild(backdrop);
+
+    const finish=result=>{ document.removeEventListener("keydown",onKey,true); backdrop.remove(); resolve(result); };
+    const onKey=e=>{ if(e.key==="Escape"){ e.preventDefault(); finish(null); } };
+    document.addEventListener("keydown",onKey,true);
+    modal.querySelector("#impCancel").addEventListener("click",()=>finish(null));
+    backdrop.addEventListener("click",e=>{ if(e.target===backdrop) finish(null); });
+    modal.querySelector("#impConfirm").addEventListener("click",()=>{
+      const nameCol=Number(modal.querySelector("#impName").value);
+      if(nameCol<0){ modal.querySelector("#impError").textContent="Please select the learner-name column."; return; }
+      const scoreMappings=mappings.map((m,i)=>({...m,col:Number(modal.querySelector(`.imp-score-map[data-map-index="${i}"]`).value)})).filter(m=>m.col>=0);
+      if(!scoreMappings.length){ modal.querySelector("#impError").textContent="Map at least one score component to a CSV column."; return; }
+      finish({
+        headerRow,dataRows,headers,nameCol,
+        lrnCol:Number(modal.querySelector("#impLrn").value),
+        sexCol:Number(modal.querySelector("#impSex").value),
+        scoreMappings,
+        addLearners:modal.querySelector("#impAddLearners").checked,
+        overwrite:modal.querySelector("#impOverwrite").checked
+      });
+    });
+  });
+}
+function applyScoreCsvImport(cls, termKey, config){
+  const idx=buildStudentImportIndexes(cls);
+  let matched=0, added=0, imported=0, preserved=0, invalid=0, unmatched=0;
+  const seenStudents=new Set();
+  for(const row of config.dataRows){
+    const name=String(row[config.nameCol]||"").trim(); if(!name) continue;
+    const lrn=config.lrnCol>=0 ? String(row[config.lrnCol]||"").replace(/\D/g,"") : "";
+    let student=null;
+    if(lrn && idx.byLrn.has(lrn)) student=idx.byLrn.get(lrn);
+    if(!student){ const nk=normalizeLearnerName(name); if(nk && idx.byName.has(nk)) student=idx.byName.get(nk); }
+    if(!student){ const tk=learnerTokenKey(name), list=tk?idx.byTokens.get(tk):null; if(list && list.length===1) student=list[0]; }
+    if(!student && config.addLearners){
+      let sex="M";
+      if(config.sexCol>=0){ const sr=String(row[config.sexCol]||"").trim().toLowerCase(); if(sr.startsWith("f")) sex="F"; else if(sr.startsWith("m")) sex="M"; }
+      student={id:uid("s"),name,lrn,age:"",sex}; cls.students.push(student); added++;
+      if(lrn) idx.byLrn.set(lrn,student);
+      idx.byName.set(normalizeLearnerName(name),student);
+      const tk=learnerTokenKey(name); if(tk){ if(!idx.byTokens.has(tk)) idx.byTokens.set(tk,[]); idx.byTokens.get(tk).push(student); }
+    }
+    if(!student){ unmatched++; continue; }
+    if(!seenStudents.has(student.id)){ matched++; seenStudents.add(student.id); }
+    const sm=cls.scores[termKey][student.id] || (cls.scores[termKey][student.id]={WW:{},PT:{},EXAM:{}});
+    for(const map of config.scoreMappings){
+      const raw=row[map.col]; const n=importNumericScore(raw); if(n===null) continue;
+      const hps=Number(map.comp.hps);
+      if(Number.isNaN(n) || n<0 || (Number.isFinite(hps) && hps>0 && n>hps)){ invalid++; continue; }
+      if(!sm[map.catKey]) sm[map.catKey]={};
+      const old=sm[map.catKey][map.comp.id];
+      if(!config.overwrite && old!==undefined && old!==null && old!==""){ preserved++; continue; }
+      sm[map.catKey][map.comp.id]=n; imported++;
+    }
+  }
+  return {matched,added,imported,preserved,invalid,unmatched};
+}
+function showInfoDialog(title, message){
+  return new Promise(resolve=>{
+    const backdrop=document.createElement("div"); backdrop.className="app-modal-backdrop no-print";
+    const modal=document.createElement("div"); modal.className="app-modal"; modal.setAttribute("role","dialog"); modal.setAttribute("aria-modal","true");
+    modal.innerHTML=`<h3>${esc(title||"Information")}</h3><p>${esc(message||"")}</p><div class="app-modal-actions"><button type="button" class="primary">Close</button></div>`;
+    backdrop.appendChild(modal); document.body.appendChild(backdrop);
+    const close=()=>{ document.removeEventListener("keydown",onKey,true); backdrop.remove(); resolve(); };
+    const onKey=e=>{ if(e.key==="Escape" || e.key==="Enter"){ e.preventDefault(); close(); } };
+    document.addEventListener("keydown",onKey,true);
+    modal.querySelector("button").addEventListener("click",close);
+    backdrop.addEventListener("click",e=>{ if(e.target===backdrop) close(); });
+  });
+}
+function showImportResult(stats, termKey){
+  const parts=[
+    `${stats.imported} raw score${stats.imported===1?"":"s"} imported`,
+    `${stats.matched} learner${stats.matched===1?"":"s"} matched`
+  ];
+  if(stats.added) parts.push(`${stats.added} learner${stats.added===1?"":"s"} added to roster`);
+  if(stats.preserved) parts.push(`${stats.preserved} existing score${stats.preserved===1?"":"s"} preserved`);
+  if(stats.unmatched) parts.push(`${stats.unmatched} CSV row${stats.unmatched===1?"":"s"} not matched`);
+  if(stats.invalid) parts.push(`${stats.invalid} invalid/out-of-HPS value${stats.invalid===1?"":"s"} skipped`);
+  return showInfoDialog(`CSV Import Complete — ${TERM_LABELS[termKey]}`,parts.join(" • "));
+}
+
 function renderTerm(main, cls, termKey, termLabel){
   if(!cls.students.length){
     main.innerHTML = `<div class="empty-state"><h2>No learners yet</h2><p>Add learners in the Roster tab first.</p></div>`;
@@ -1453,6 +1673,8 @@ function renderTerm(main, cls, termKey, termLabel){
           <button class="small viewbtn ${mode==="record"?"active":""}" data-mode="record">Class Record</button>
           <button class="small viewbtn ${mode==="gs"?"active":""}" data-mode="gs">Grading Sheet</button>
         </div>
+        <button id="termImportCsv" class="ghost-alt" style="background:var(--paper-deep);">Import Scores CSV</button>
+        <input type="file" id="termScoresCsvFile" accept=".csv,text/csv,.txt,text/plain" style="display:none;">
         <button id="termPrint" class="ghost-alt" style="background:var(--paper-deep);">Print this view</button>
       </div>
     </div>
@@ -1527,6 +1749,29 @@ function renderTerm(main, cls, termKey, termLabel){
       document.querySelectorAll(".viewbtn").forEach(x=>x.classList.toggle("active", x===b));
       draw();
     });
+  });
+  document.getElementById("termImportCsv").addEventListener("click", ()=>document.getElementById("termScoresCsvFile").click());
+  document.getElementById("termScoresCsvFile").addEventListener("change", e=>{
+    const file=e.target.files && e.target.files[0];
+    e.target.value="";
+    if(!file) return;
+    const reader=new FileReader();
+    reader.onload=async ()=>{
+      try{
+        const rows=parseCsv(String(reader.result||""));
+        const config=await showScoreImportDialog(cls,termKey,rows,file.name);
+        if(!config) return;
+        if(config.error){ alert(config.error); return; }
+        const stats=applyScoreCsvImport(cls,termKey,config);
+        saveState();
+        draw();
+        await showImportResult(stats,termKey);
+      }catch(err){
+        alert("Could not import that CSV: "+(err && err.message ? err.message : String(err)));
+      }
+    };
+    reader.onerror=()=>alert("Could not read that CSV file.");
+    reader.readAsText(file);
   });
   document.getElementById("termPrint").addEventListener("click", ()=>printCurrentView());
   draw();
