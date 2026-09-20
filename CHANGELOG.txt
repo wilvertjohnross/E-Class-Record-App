@@ -1,3 +1,18 @@
+Version 1.0.20 — Stability & Security Gate
+- Consolidated v1.0.19 clean-slate ECR runtime into full bootstrap.
+- Reliable save acknowledgement + recovery copy + revision-aware local recovery.
+- Raw-score/HPS/weight validation and official-output release gate.
+- Exact official-ECR custom-component rounding architecture.
+- CSP, navigation lockdown, trusted-main-renderer IPC checks, backup validation.
+- Added 25 MB safety caps to official SF1/ECR imports and 10 MB to roster CSV import.
+- Removed the retired bootstrap ECR export fallback; one runtime official-output engine is authoritative.
+- Signed Ed25519 .ecrupdate verification and strict package integrity checks.
+- adm-zip 0.6.0.
+- Preview cache signature validation and duplicate-click suppression.
+- Roster CSV imports are transactional and bounded; oversized/unterminated CSV data is rejected without partially modifying the roster.
+- Backup validation now rejects malformed or injected school-logo data URIs.
+- SF1/score-import learner-cap checks hardened.
+
 v1.0.9
 - Added local Downloads-folder development auto-update channel (.ecrupdate).
 - Updates stage automatically without interrupting the running app and activate on the next normal launch.

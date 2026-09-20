@@ -1,0 +1,46 @@
+E-Class Record App with GS and SF9
+v1.0.20 — Five-Pass Stability & Security Release Gate
+
+PASS 1 — PACKAGE / TEMPLATE INTEGRITY: PASSED
+- All application JavaScript entry points passed Node syntax validation.
+- Clean official ECR template: ZIP/CRC valid, 0 formulas, 0 external links, 0 calc chain.
+- Official GS master remains structurally original; its formula-bearing data cells are replaced by app-computed values in generated official output.
+
+PASS 2 — ELECTRON / UPDATER SECURITY: PASSED
+- Ed25519-signed .ecrupdate verification enabled.
+- Tampered manifests rejected.
+- No private signing key in source tree.
+- adm-zip pinned to 0.6.0.
+- contextIsolation=true, nodeIntegration=false, sandbox=true.
+- Main-window navigation blocked outside trusted local app page.
+- Runtime IPC uses sender and action allowlists.
+- Content Security Policy enabled.
+- Preview windows block unexpected navigation.
+- ZIP/path-traversal and unsigned-payload checks passed.
+
+PASS 3 — GRADING / DATA-INTEGRITY STRESS TEST: PASSED
+- 10,001 transmutation points (0.00–100.00 by 0.01): matched.
+- 20,000 randomized simple-category calculations: matched.
+- 20,000 randomized custom-category calculations: matched.
+- Whole-number term/final averaging: passed.
+- Invalid weight totals, custom totals, HPS, negative scores, over-HPS scores, and official component counts are rejected.
+
+PASS 4 — OFFICIAL ECR/GS OUTPUT & PREVIEW PATH: PASSED
+- ECR direct-fill mapping: 2,635 mapped cells present; 128 merge ranges preserved.
+- GS direct-fill mapping: 2,631 mapped cells present; 131 merge ranges preserved.
+- Generated test outputs: 0 formulas, 0 external links.
+- Both generated test workbooks rendered successfully to valid PDFs using an independent spreadsheet renderer.
+- Excel is used as render/view/print infrastructure, not as the grading logic engine.
+- Preview cache validates file signatures and keys cache entries to template + payload.
+- Retired ECR preview/fallback logic is absent.
+
+PASS 5 — IMPORT / RUNTIME / EDGE CASES: PASSED
+- Roster CSV quoting/newline handling, size limits, and transactional rejection passed.
+- Summary CSV BOM/quoting/row/column limits passed.
+- Backup schema, unsafe IDs, prototype-pollution keys, and unsafe logo data rejected.
+- Official SF1 regression test: 35 learners (17 Male / 18 Female), 12-digit LRNs extracted correctly.
+- Malformed/truncated SF1 rejected.
+- Main CSP, no inline event handlers, isolated renderer, and runtime sender/action gates passed.
+
+RELEASE DECISION: PASS
+No new feature work was included in this gate beyond stability/security fixes. Existing Documents-based user data remains the persistent data location and is not intentionally deleted by installation.

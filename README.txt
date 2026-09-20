@@ -1,44 +1,59 @@
 E-Class Record App with GS and SF9
-Version 1.0.9
+Version 1.0.20
 
 
-VERSION 1.0.9 — LOCAL THREAD-DOWNLOAD AUTO UPDATE CHANNEL
-This is the one-time bootstrap update intended to remove the repeated
-extract / rebuild / reinstall cycle during development.
+VERSION 1.0.20 — STABILITY & SECURITY GATE
+This is a one-time full bootstrap update. It consolidates the v1.0.19 clean-slate
+ECR runtime into the installed application and hardens the desktop shell before
+new school-record modules are added. Existing data in Documents\E-Class Record
+App with GS and SF9 is preserved.
 
-After v1.0.9 is installed, ordinary future development updates can be
-delivered as a single file ending in:
-  .ecrupdate
+Key changes:
+- Official ECR remains formula-free and external-link-free. The app is the logic engine.
+- Disk saves are acknowledged only after the main process writes and verifies the JSON file.
+- A rolling eclass-record-data.previous.json recovery copy is maintained.
+- Local browser recovery data carries a revision/timestamp so a newer unsaved-to-disk copy
+  can win over an older desktop file on the next launch.
+- Raw score entry is constrained to 0..HPS; lowering HPS below an existing score is blocked.
+- Official ECR/GS creation is blocked when category weights, HPS, custom item weights, or
+  stored raw scores are invalid.
+- Custom Examination PS follows the official ECR architecture: each item contribution is
+  rounded to two decimals before the contributions are summed.
+- Main-window navigation is locked to the trusted local application page.
+- Renderer JavaScript is externalized and protected by a Content Security Policy.
+- Backup JSON is structurally validated, bounded, and checked for prototype-pollution keys.
+- Summary import is size-bounded. Cached preview files are checked for PDF/XLSX signatures.
+- New identifiers use crypto.randomUUID() where available.
+- adm-zip is upgraded to 0.6.0.
+- Roster CSV import is transactional: a rejected oversized file cannot leave a partially modified roster.
+- Backup school-logo data is format-checked before it can re-enter the renderer.
 
-When that file is downloaded from the ChatGPT development thread into the
-Windows Downloads folder, the installed app automatically detects and stages
-it. The app is NOT forcibly restarted. The downloaded version becomes active
-the next time the teacher normally closes and opens the app. If the update was
-downloaded while the app was closed, it can become active on the very next
-launch.
+SIGNED DEVELOPMENT UPDATES
+Starting with bootstrap v1.0.20, .ecrupdate files must carry an Ed25519 signature made
+with the project development signing key. The installed app contains ONLY the public key.
+The private signing key must never be copied into the app source tree, installer, school
+computer deployment folder, or a distributed .ecrupdate file.
 
-The footer displays the effective version and indicates when a newer version
-is staged. Help > Check Downloaded Updates can also scan the Downloads folder
-manually, and Help > About shows both the effective runtime version and the
-installed bootstrap version.
+Future runtime updates created with tools\make-thread-update.js require:
+  set ECLASS_UPDATE_SIGNING_KEY=C:\secure\ECR_UPDATE_SIGNING_PRIVATE_KEY.pem
+  node tools\make-thread-update.js <version> <payload-folder> <output.ecrupdate>
 
-This development updater does not contact or read the ChatGPT conversation
-directly. It watches the local Downloads folder for .ecrupdate packages that
-the user explicitly downloads. The app's class/learner/grade data remains in
-the separate Documents data folder and is not replaced by an update package.
+Unsigned old development updates are intentionally rejected by v1.0.20.
 
-IMPORTANT DEVELOPMENT SECURITY NOTE:
-The local thread updater is intended only for this private build/test phase.
-It validates app identity, version compatibility, safe ZIP paths and file
-hashes for corruption detection, but these local packages are not publisher
-code-signed. Before broad distribution to other teachers, move to signed
-releases / a trusted hosted update channel.
+WINDOWS BUILD
+1. Keep your existing Documents data folder; do not delete it.
+2. Install Node.js LTS if needed.
+3. Double-click BUILD_WINDOWS.bat.
+4. Run the generated v1.0.20 installer.
+5. Existing class/learner/grade data remains under Documents and is reused.
 
-A rare future change to the Electron bootstrap itself, preload security bridge,
-or native dependency set may still require one full installer update. Normal
-UI, template, form-mapping and feature iterations should be deliverable through
-.ecrupdate packages using the stable runtime extension bridge introduced here.
-
+DESKTOP DATA
+Working file:
+  Documents\E-Class Record App with GS and SF9\eclass-record-data.json
+Recovery copy:
+  Documents\E-Class Record App with GS and SF9\eclass-record-data.previous.json
+Daily backups:
+  Documents\E-Class Record App with GS and SF9\Backups\
 
 VERSION 1.0.8 — IMPORT OFFICIAL SF1 (.XLS)
 The Roster tab now accepts the official School Form 1 (SF1) Excel 97-2004

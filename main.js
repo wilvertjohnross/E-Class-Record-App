@@ -1,7 +1,8 @@
 const { app, BrowserWindow, dialog, ipcMain, Menu, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
-const { execFile, spawn } = require('child_process');
+const { pathToFileURL } = require('url');
+const crypto = require('crypto');
 const AdmZip = require('adm-zip');
 const { parseOfficialSf1Xls } = require('./sf1-parser');
 const { ThreadUpdater } = require('./thread-updater');
@@ -11,12 +12,26 @@ const APP_ID = 'ph.edu.eclassrecord.gs.sf9';
 let mainWindow;
 let threadUpdater = null;
 let runtimeExtension = null;
+const SAFE_ID_RE = /^[A-Za-z0-9_.:-]{1,160}$/;
+const MAX_OFFICIAL_IMPORT_BYTES = 25 * 1024 * 1024;
+const MAX_XLSX_UNCOMPRESSED_BYTES = 128 * 1024 * 1024;
+const MAX_XLSX_ENTRY_BYTES = 32 * 1024 * 1024;
+const MAX_XLSX_ENTRIES = 1000;
+
+function isTrustedMainSender(event) {
+  return !!(mainWindow && !mainWindow.isDestroyed() && event && event.sender === mainWindow.webContents);
+}
+
+function rejectUntrustedInvoke(event) {
+  return isTrustedMainSender(event) ? null : { ok: false, error: 'Request rejected from an untrusted window.' };
+}
 
 function dataPaths() {
   const root = path.join(app.getPath('documents'), PRODUCT_NAME);
   return {
     root,
     dataFile: path.join(root, 'eclass-record-data.json'),
+    recoveryFile: path.join(root, 'eclass-record-data.previous.json'),
     backupDir: path.join(root, 'Backups')
   };
 }
@@ -28,18 +43,115 @@ function ensureDataFolders() {
   return p;
 }
 
-function safeWriteJsonText(filePath, text) {
-  JSON.parse(text); // validate before touching the existing file
-  const tmp = `${filePath}.tmp`;
-  fs.writeFileSync(tmp, text, 'utf8');
-  fs.renameSync(tmp, filePath);
+function isPlainObject(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
+function sanitizeJsonValue(value, depth = 0, counter = { nodes: 0 }) {
+  if (++counter.nodes > 500000) throw new Error('The data file is too complex to process safely.');
+  if (depth > 24) throw new Error('The data file is nested too deeply.');
+  if (value === null || typeof value === 'boolean') return value;
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) throw new Error('The data file contains an invalid number.');
+    return value;
+  }
+  if (typeof value === 'string') {
+    if (value.length > 16 * 1024 * 1024) throw new Error('The data file contains an unexpectedly large text value.');
+    return value;
+  }
+  if (Array.isArray(value)) {
+    if (value.length > 100000) throw new Error('The data file contains an unexpectedly large array.');
+    return value.map(v => sanitizeJsonValue(v, depth + 1, counter));
+  }
+  if (!isPlainObject(value)) throw new Error('The data file contains an unsupported object type.');
+  const out = {};
+  for (const [key, child] of Object.entries(value)) {
+    if (key === '__proto__' || key === 'prototype' || key === 'constructor') {
+      throw new Error('The data file contains a prohibited object key.');
+    }
+    if (key.length > 256) throw new Error('The data file contains an invalid property name.');
+    out[key] = sanitizeJsonValue(child, depth + 1, counter);
+  }
+  return out;
+}
+
+function parseAndValidateAppState(text) {
+  if (typeof text !== 'string') throw new Error('Application data must be JSON text.');
+  if (Buffer.byteLength(text, 'utf8') > 64 * 1024 * 1024) throw new Error('Application data exceeds the 64 MB safety limit.');
+  const parsed = JSON.parse(text);
+  const safe = sanitizeJsonValue(parsed);
+  if (!safe || !isPlainObject(safe.classes) || !Object.keys(safe.classes).length) {
+    throw new Error('This is not a valid E-Class Record data file.');
+  }
+  if (Object.keys(safe.classes).length > 2000) throw new Error('The data file contains too many classes.');
+  for (const [classId, cls] of Object.entries(safe.classes)) {
+    if (!SAFE_ID_RE.test(classId)) throw new Error('The data file contains an invalid class identifier.');
+    if (!isPlainObject(cls)) throw new Error(`Class ${classId} has an invalid structure.`);
+    if (!Array.isArray(cls.students)) cls.students = [];
+    if (cls.students.length > 1000) throw new Error(`Class ${classId} contains too many learners.`);
+    for (const student of cls.students) {
+      if (!isPlainObject(student)) throw new Error(`Class ${classId} contains an invalid learner record.`);
+      if (student.id !== undefined && !SAFE_ID_RE.test(String(student.id))) throw new Error('The data file contains an invalid learner identifier.');
+    }
+    if (cls.categories !== undefined) {
+      if (!isPlainObject(cls.categories)) throw new Error(`Class ${classId} has an invalid grading-category structure.`);
+      for (const [categoryKey, category] of Object.entries(cls.categories)) {
+        if (!SAFE_ID_RE.test(String(categoryKey))) throw new Error('The data file contains an invalid grading-category identifier.');
+        if (!isPlainObject(category)) throw new Error(`Class ${classId} contains an invalid grading category.`);
+        if (category.components !== undefined) {
+          if (!Array.isArray(category.components) || category.components.length > 200) throw new Error(`Class ${classId} contains an invalid component list.`);
+          for (const component of category.components) {
+            if (!isPlainObject(component)) throw new Error(`Class ${classId} contains an invalid assessment component.`);
+            if (!component.id || !SAFE_ID_RE.test(String(component.id))) throw new Error('The data file contains an invalid assessment-component identifier.');
+          }
+        }
+      }
+    }
+  }
+  if (safe.activeId !== undefined && safe.activeId !== null && safe.activeId !== '') {
+    if (!SAFE_ID_RE.test(String(safe.activeId))) throw new Error('The data file contains an invalid active class identifier.');
+    if (!Object.prototype.hasOwnProperty.call(safe.classes, String(safe.activeId))) throw new Error('The active class identifier does not exist in the class collection.');
+  }
+  return safe;
+}
+
+function safeWriteJsonText(filePath, text, { recoveryPath = null } = {}) {
+  const safeObject = parseAndValidateAppState(text);
+  const normalized = JSON.stringify(safeObject);
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  const tmp = `${filePath}.tmp-${process.pid}-${Date.now()}`;
+  try {
+    if (recoveryPath && fs.existsSync(filePath)) {
+      try {
+        // Never overwrite a known-good recovery copy with a corrupt primary file.
+        parseAndValidateAppState(fs.readFileSync(filePath, 'utf8'));
+        fs.copyFileSync(filePath, recoveryPath);
+      } catch (err) { console.warn('Primary data file was not eligible to refresh the recovery copy:', err.message); }
+    }
+    const fd = fs.openSync(tmp, 'w');
+    try {
+      fs.writeFileSync(fd, normalized, 'utf8');
+      fs.fsyncSync(fd);
+    } finally { fs.closeSync(fd); }
+    fs.renameSync(tmp, filePath);
+    const verify = fs.readFileSync(filePath);
+    if (crypto.createHash('sha256').update(verify).digest('hex') !== crypto.createHash('sha256').update(Buffer.from(normalized)).digest('hex')) {
+      throw new Error('Saved data failed the disk verification check.');
+    }
+    parseAndValidateAppState(verify.toString('utf8'));
+    return normalized;
+  } finally {
+    try { if (fs.existsSync(tmp)) fs.unlinkSync(tmp); } catch {}
+  }
 }
 
 function makeDailyBackup(text) {
   const p = ensureDataFolders();
   const date = new Date().toISOString().slice(0, 10);
   const backup = path.join(p.backupDir, `auto-backup-${date}.json`);
-  if (!fs.existsSync(backup)) fs.writeFileSync(backup, text, 'utf8');
+  if (!fs.existsSync(backup)) safeWriteJsonText(backup, text);
 }
 
 function createWindow() {
@@ -60,11 +172,20 @@ function createWindow() {
     }
   });
 
-  mainWindow.loadFile(threadUpdater ? threadUpdater.resolveResource('app/index.html') : path.join(__dirname, 'app', 'index.html'));
+  const mainFile = threadUpdater ? threadUpdater.resolveResource('app/index.html') : path.join(__dirname, 'app', 'index.html');
+  const allowedMainUrl = pathToFileURL(mainFile).href;
+  mainWindow.loadFile(mainFile);
   mainWindow.once('ready-to-show', () => mainWindow.show());
 
+  const blockUnexpectedNavigation = (event, url) => {
+    if (url === allowedMainUrl || url.startsWith(allowedMainUrl + '#')) return;
+    event.preventDefault();
+    if (/^https:\/\//i.test(url)) shell.openExternal(url);
+  };
+  mainWindow.webContents.on('will-navigate', blockUnexpectedNavigation);
+  mainWindow.webContents.on('will-redirect', blockUnexpectedNavigation);
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    if (/^https?:/i.test(url)) shell.openExternal(url);
+    if (/^https:\/\//i.test(url)) shell.openExternal(url);
     return { action: 'deny' };
   });
 }
@@ -184,30 +305,40 @@ function buildMenu() {
 }
 
 ipcMain.on('data:load-sync', (event) => {
-  try {
-    const p = ensureDataFolders();
-    event.returnValue = fs.existsSync(p.dataFile) ? fs.readFileSync(p.dataFile, 'utf8') : null;
-  } catch (err) {
-    console.error('Load failed:', err);
-    event.returnValue = null;
+  if (!isTrustedMainSender(event)) { event.returnValue = null; return; }
+  const p = ensureDataFolders();
+  for (const candidate of [p.dataFile, p.recoveryFile]) {
+    try {
+      if (!fs.existsSync(candidate)) continue;
+      const raw = fs.readFileSync(candidate, 'utf8');
+      const safe = parseAndValidateAppState(raw);
+      event.returnValue = JSON.stringify(safe);
+      if (candidate === p.recoveryFile) console.warn('Loaded previous verified recovery copy because the primary data file was unavailable or invalid.');
+      return;
+    } catch (err) {
+      console.error(`Could not load ${candidate}:`, err.message);
+    }
   }
+  event.returnValue = null;
 });
 
-ipcMain.handle('data:save', async (_event, text) => {
+ipcMain.handle('data:save', async (event, text) => {
+  const rejected = rejectUntrustedInvoke(event); if (rejected) return rejected;
   try {
     const p = ensureDataFolders();
-    safeWriteJsonText(p.dataFile, text);
-    makeDailyBackup(text);
-    return { ok: true, path: p.dataFile };
+    const normalized = safeWriteJsonText(p.dataFile, text, { recoveryPath: p.recoveryFile });
+    makeDailyBackup(normalized);
+    return { ok: true, path: p.dataFile, bytes: Buffer.byteLength(normalized, 'utf8') };
   } catch (err) {
     console.error('Save failed:', err);
     return { ok: false, error: err.message };
   }
 });
 
-ipcMain.handle('backup:export', async (_event, text) => {
+ipcMain.handle('backup:export', async (event, text) => {
+  const rejected = rejectUntrustedInvoke(event); if (rejected) return rejected;
   try {
-    JSON.parse(text);
+    const normalized = JSON.stringify(parseAndValidateAppState(text), null, 2);
     const date = new Date().toISOString().slice(0, 10);
     const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
       title: 'Export Gradebook Backup',
@@ -215,32 +346,43 @@ ipcMain.handle('backup:export', async (_event, text) => {
       filters: [{ name: 'JSON Backup', extensions: ['json'] }]
     });
     if (canceled || !filePath) return { ok: false, cancelled: true };
-    safeWriteJsonText(filePath, text);
+    safeWriteJsonText(filePath, normalized);
     return { ok: true, path: filePath };
   } catch (err) {
     return { ok: false, error: err.message };
   }
 });
 
-ipcMain.handle('backup:import', async () => {
-  const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
-    title: 'Import Gradebook Backup',
-    properties: ['openFile'],
-    filters: [{ name: 'JSON Backup', extensions: ['json'] }]
-  });
-  if (canceled || !filePaths[0]) return { cancelled: true };
-  const text = fs.readFileSync(filePaths[0], 'utf8');
-  JSON.parse(text);
-  return { cancelled: false, text, path: filePaths[0] };
+ipcMain.handle('backup:import', async (event) => {
+  const rejected = rejectUntrustedInvoke(event); if (rejected) return rejected;
+  try {
+    const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
+      title: 'Import Gradebook Backup',
+      properties: ['openFile'],
+      filters: [{ name: 'JSON Backup', extensions: ['json'] }]
+    });
+    if (canceled || !filePaths[0]) return { cancelled: true };
+    const backupStat = fs.statSync(filePaths[0]);
+    if (!backupStat.isFile() || backupStat.size > 64 * 1024 * 1024) return { ok: false, error: 'Backup exceeds the 64 MB safety limit.' };
+    const raw = fs.readFileSync(filePaths[0], 'utf8');
+    const safe = parseAndValidateAppState(raw);
+    const text = JSON.stringify(safe);
+    return { ok: true, cancelled: false, text, path: filePaths[0] };
+  } catch (err) {
+    console.error('Backup import failed:', err);
+    return { ok: false, error: err.message };
+  }
 });
 
 ipcMain.handle('print:current', async (event) => {
+  const rejected = rejectUntrustedInvoke(event); if (rejected) return rejected;
   return printCurrentContents(event.sender);
 });
 
-ipcMain.handle('data:location', async () => ensureDataFolders().root);
+ipcMain.handle('data:location', async (event) => isTrustedMainSender(event) ? ensureDataFolders().root : null);
 
-ipcMain.handle('sf1:import-official', async () => {
+ipcMain.handle('sf1:import-official', async (event) => {
+  const rejected = rejectUntrustedInvoke(event); if (rejected) return rejected;
   try {
     const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
       title: 'Import Official School Form 1 (SF1)',
@@ -249,6 +391,8 @@ ipcMain.handle('sf1:import-official', async () => {
     });
     if (canceled || !filePaths[0]) return { ok: false, cancelled: true };
     const filePath = filePaths[0];
+    const sf1Stat = fs.statSync(filePath);
+    if (!sf1Stat.isFile() || sf1Stat.size > MAX_OFFICIAL_IMPORT_BYTES) throw new Error('The SF1 workbook exceeds the 25 MB safety limit.');
     const data = parseOfficialSf1Xls(filePath);
     return { ok: true, path: filePath, fileName: path.basename(filePath), data };
   } catch (err) {
@@ -258,6 +402,20 @@ ipcMain.handle('sf1:import-official', async () => {
 });
 
 
+
+function assertSafeXlsxArchive(zip, label = 'Excel workbook') {
+  const entries = zip.getEntries();
+  if (entries.length > MAX_XLSX_ENTRIES) throw new Error(`${label} contains too many ZIP entries.`);
+  let total = 0;
+  for (const entry of entries) {
+    const size = Number(entry && entry.header && entry.header.size || 0);
+    if (!Number.isFinite(size) || size < 0 || size > MAX_XLSX_ENTRY_BYTES) throw new Error(`${label} contains an unexpectedly large internal file.`);
+    total += size;
+    if (total > MAX_XLSX_UNCOMPRESSED_BYTES) throw new Error(`${label} expands beyond the 128 MB safety limit.`);
+    const name = String(entry.entryName || '').replace(/\\/g, '/');
+    if (!name || name.startsWith('/') || /^[A-Za-z]:/.test(name) || name.split('/').includes('..')) throw new Error(`${label} contains an unsafe internal path.`);
+  }
+}
 
 /* ===== v1.0.7: Import an already-filled Official ECR workbook =============
    The import source is the SAME official ECR .xlsx layout bundled with this
@@ -368,6 +526,7 @@ function detectOfficialEcrTerm(headerText, workbookXml) {
 
 function parseOfficialEcrWorkbook(filePath) {
   const zip = new AdmZip(fs.readFileSync(filePath));
+  assertSafeXlsxArchive(zip, 'The ECR workbook');
   const sheetEntry = zip.getEntry('xl/worksheets/sheet1.xml');
   if (!sheetEntry) throw new Error('This workbook does not contain the expected official ECR worksheet.');
   const xml = sheetEntry.getData().toString('utf8');
@@ -466,7 +625,8 @@ function parseOfficialEcrWorkbook(filePath) {
   };
 }
 
-ipcMain.handle('ecr:import-official', async () => {
+ipcMain.handle('ecr:import-official', async (event) => {
+  const rejected = rejectUntrustedInvoke(event); if (rejected) return rejected;
   try {
     const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
       title: 'Import Filled Official Class Record',
@@ -475,6 +635,8 @@ ipcMain.handle('ecr:import-official', async () => {
     });
     if (canceled || !filePaths[0]) return { ok: false, cancelled: true };
     const filePath = filePaths[0];
+    const ecrStat = fs.statSync(filePath);
+    if (!ecrStat.isFile() || ecrStat.size > MAX_OFFICIAL_IMPORT_BYTES) throw new Error('The ECR workbook exceeds the 25 MB safety limit.');
     const data = parseOfficialEcrWorkbook(filePath);
     return { ok: true, path: filePath, fileName: path.basename(filePath), data };
   } catch (err) {
@@ -484,340 +646,23 @@ ipcMain.handle('ecr:import-official', async () => {
 });
 
 
-/* ===== v1.0.5: Official ECR template export ==============================
-   The official workbook is treated as a read-only master template. We patch
-   only worksheet cell values inside a copy of the XLSX ZIP package, preserving
-   the template's styles, merged cells, drawings, page setup, margins and print
-   layout exactly. The exported workbook contains static values, so it does not
-   depend on the template's original external INPUT DATA / HELPER workbook. */
-function officialEcrTemplatePath() {
-  return threadUpdater ? threadUpdater.resolveResource('templates/ECR official Template.xlsx') : path.join(__dirname, 'templates', 'ECR official Template.xlsx');
-}
+/* ===== v1.0.20: Official output is handled only by main-extension.js. ===== */
 
-function xmlEscape(value) {
-  return String(value ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&apos;');
-}
-
-function regexEscape(value) {
-  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-function setWorksheetCell(xml, ref, value, type = 'auto') {
-  const r = regexEscape(ref);
-  const fullRe = new RegExp(`<c\\b([^>]*\\br="${r}"[^>]*)>([\\s\\S]*?)<\\/c>`);
-  const selfRe = new RegExp(`<c\\b([^>]*\\br="${r}"[^>]*)\\/>`);
-  // Check self-closing cells first. A self-closing <c .../> would otherwise
-  // be mistaken for the opening tag of a later cell by the full-cell regex.
-  let m = xml.match(selfRe);
-  let attrs = m ? m[1] : null;
-  let matched = m ? m[0] : null;
-  if (!m) {
-    m = xml.match(fullRe);
-    attrs = m ? m[1] : null;
-    matched = m ? m[0] : null;
-  }
-  if (!matched) throw new Error(`Official ECR template cell ${ref} was not found.`);
-
-  const style = (attrs.match(/\bs="([^"]+)"/) || [])[1];
-  const styleAttr = style ? ` s="${style}"` : '';
-  let replacement;
-  const isBlank = value === '' || value === null || value === undefined;
-  if (isBlank) {
-    replacement = `<c r="${ref}"${styleAttr}/>`;
-  } else {
-    const numeric = type === 'number' || (type === 'auto' && typeof value === 'number' && Number.isFinite(value));
-    if (numeric) {
-      const n = Number(value);
-      replacement = `<c r="${ref}"${styleAttr}><v>${Number.isFinite(n) ? n : 0}</v></c>`;
-    } else {
-      replacement = `<c r="${ref}"${styleAttr} t="inlineStr"><is><t xml:space="preserve">${xmlEscape(value)}</t></is></c>`;
-    }
-  }
-  return xml.replace(matched, replacement);
-}
-
-function cleanFileName(value) {
-  return String(value || 'Class Record')
-    .replace(/[<>:"/\\|?*\x00-\x1F]/g, '-')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 100) || 'Class Record';
-}
-
-function officialTermNumber(termKey) {
-  return termKey === 'term2' ? 2 : termKey === 'term3' ? 3 : 1;
-}
-
-function buildOfficialEcrBuffer(payload) {
-  const officialTemplate = officialEcrTemplatePath();
-  if (!fs.existsSync(officialTemplate)) throw new Error('The bundled Official ECR template is missing.');
-  if (!payload || !payload.meta || !payload.categories || !Array.isArray(payload.students)) {
-    throw new Error('The Class Record data sent to the exporter is incomplete.');
-  }
-
-  const male = payload.students.filter(s => s.sex === 'M');
-  const female = payload.students.filter(s => s.sex === 'F');
-  if (male.length > 50 || female.length > 50) {
-    throw new Error('The official template supports up to 50 male and 50 female learners.');
-  }
-  const ww = payload.categories.WW || {};
-  const pt = payload.categories.PT || {};
-  const ex = payload.categories.EXAM || {};
-  if ((ww.components || []).length !== 5 || (pt.components || []).length !== 3 || (ex.components || []).length !== 3) {
-    throw new Error('The official template requires exactly 5 WW, 3 PT and 3 Examination components.');
-  }
-
-  const zip = new AdmZip(fs.readFileSync(officialTemplate));
-  const entry = zip.getEntry('xl/worksheets/sheet1.xml');
-  if (!entry) throw new Error('The official ECR worksheet was not found in the template.');
-  let xml = entry.getData().toString('utf8');
-  const meta = payload.meta;
-  const termNo = officialTermNumber(payload.termKey);
-  const termWords = ['FIRST TERM', 'SECOND TERM', 'THIRD TERM'][termNo - 1];
-
-  // Header and class metadata.
-  const headerValues = {
-    B2: `CLASS RECORD - TERM ${termNo}`,
-    F5: meta.region || '', R5: meta.division || '', Z5: meta.schoolId || '',
-    F7: meta.schoolName || '', Z7: meta.schoolYear || '',
-    B10: termWords, J10: meta.gradeLevel || '', Q10: meta.teacher || '',
-    AA10: meta.subject || '', J11: meta.section || ''
-  };
-  for (const [ref, value] of Object.entries(headerValues)) xml = setWorksheetCell(xml, ref, value, 'string');
-
-  // Highest Possible Scores and weights from the app's current Class Record setup.
-  const hpsMap = {};
-  ['F','G','H','I','J'].forEach((c,i)=>hpsMap[`${c}15`] = Number(ww.components[i].hps || 0));
-  hpsMap.K15 = ww.components.reduce((a,c)=>a+Number(c.hps||0),0);
-  hpsMap.L15 = 100; hpsMap.M15 = Number(ww.weight || 0);
-  ['N','O','P'].forEach((c,i)=>hpsMap[`${c}15`] = Number(pt.components[i].hps || 0));
-  hpsMap.Q15 = pt.components.reduce((a,c)=>a+Number(c.hps||0),0);
-  hpsMap.R15 = 100; hpsMap.S15 = Number(pt.weight || 0);
-  ['T','U','V'].forEach((c,i)=>hpsMap[`${c}15`] = Number(ex.components[i].hps || 0));
-  ['W','X','Y'].forEach((c,i)=>hpsMap[`${c}15`] = Number(ex.components[i].subWeight || 0));
-  hpsMap.Z15 = 100; hpsMap.AA15 = Number(ex.weight || 0);
-  for (const [ref, value] of Object.entries(hpsMap)) xml = setWorksheetCell(xml, ref, value, 'number');
-
-  // Clear all learner rows first. This removes the template's external-link
-  // formulas and stale cached values so the exported file is fully standalone.
-  const valueCols = ['C','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z','AA','AB','AC','AD'];
-  const rows = [...Array.from({length:50},(_,i)=>18+i), ...Array.from({length:50},(_,i)=>69+i)];
-  for (const row of rows) {
-    for (const col of valueCols) xml = setWorksheetCell(xml, `${col}${row}`, '', 'string');
-  }
-
-  function writeStudent(row, s) {
-    xml = setWorksheetCell(xml, `C${row}`, s.name || '', 'string');
-    const wwScores = (s.WW && s.WW.scores) || [];
-    const ptScores = (s.PT && s.PT.scores) || [];
-    const exScores = (s.EXAM && s.EXAM.scores) || [];
-    ['F','G','H','I','J'].forEach((c,i)=>{ xml = setWorksheetCell(xml, `${c}${row}`, wwScores[i], 'number'); });
-    xml = setWorksheetCell(xml, `K${row}`, s.WW ? s.WW.total : '', 'number');
-    xml = setWorksheetCell(xml, `L${row}`, s.WW ? s.WW.ps : '', 'number');
-    xml = setWorksheetCell(xml, `M${row}`, s.WW ? s.WW.ws : '', 'number');
-    ['N','O','P'].forEach((c,i)=>{ xml = setWorksheetCell(xml, `${c}${row}`, ptScores[i], 'number'); });
-    xml = setWorksheetCell(xml, `Q${row}`, s.PT ? s.PT.total : '', 'number');
-    xml = setWorksheetCell(xml, `R${row}`, s.PT ? s.PT.ps : '', 'number');
-    xml = setWorksheetCell(xml, `S${row}`, s.PT ? s.PT.ws : '', 'number');
-    ['T','U','V'].forEach((c,i)=>{ xml = setWorksheetCell(xml, `${c}${row}`, exScores[i], 'number'); });
-    ['W','X','Y'].forEach((c,i)=>{ xml = setWorksheetCell(xml, `${c}${row}`, s.EXAM && s.EXAM.componentPs ? s.EXAM.componentPs[i] : '', 'number'); });
-    xml = setWorksheetCell(xml, `Z${row}`, s.EXAM ? s.EXAM.ps : '', 'number');
-    xml = setWorksheetCell(xml, `AA${row}`, s.EXAM ? s.EXAM.ws : '', 'number');
-    xml = setWorksheetCell(xml, `AB${row}`, s.initial, 'number');
-    xml = setWorksheetCell(xml, `AC${row}`, s.term, 'number');
-    xml = setWorksheetCell(xml, `AD${row}`, s.descriptor || '', 'string');
-  }
-
-  male.forEach((s,i)=>writeStudent(18+i,s));
-  female.forEach((s,i)=>writeStudent(69+i,s));
-
-  // There should be no formulas left. Keeping this static is intentional for
-  // an official export: what the app calculated is exactly what is filed.
-  zip.updateFile('xl/worksheets/sheet1.xml', Buffer.from(xml, 'utf8'));
-
-  // Rename the worksheet to the selected term and remove the source workbook's
-  // external-link/calc-chain metadata. This prevents Excel link warnings.
-  const wbEntry = zip.getEntry('xl/workbook.xml');
-  if (wbEntry) {
-    let wbXml = wbEntry.getData().toString('utf8');
-    wbXml = wbXml.replace(/TERM 1/g, `TERM ${termNo}`);
-    wbXml = wbXml.replace(/<externalReferences>[\s\S]*?<\/externalReferences>/g, '');
-    zip.updateFile('xl/workbook.xml', Buffer.from(wbXml, 'utf8'));
-  }
-  const appPropsEntry = zip.getEntry('docProps/app.xml');
-  if (appPropsEntry) {
-    let appXml = appPropsEntry.getData().toString('utf8');
-    appXml = appXml.replace(/TERM 1/g, `TERM ${termNo}`);
-    zip.updateFile('docProps/app.xml', Buffer.from(appXml, 'utf8'));
-  }
-  const relEntry = zip.getEntry('xl/_rels/workbook.xml.rels');
-  if (relEntry) {
-    let relXml = relEntry.getData().toString('utf8');
-    relXml = relXml.replace(/<Relationship\b[^>]*Type="[^"]*\/externalLink"[^>]*\/>/g, '');
-    relXml = relXml.replace(/<Relationship\b[^>]*Type="[^"]*\/calcChain"[^>]*\/>/g, '');
-    zip.updateFile('xl/_rels/workbook.xml.rels', Buffer.from(relXml, 'utf8'));
-  }
-  const ctEntry = zip.getEntry('[Content_Types].xml');
-  if (ctEntry) {
-    let ctXml = ctEntry.getData().toString('utf8');
-    ctXml = ctXml.replace(/<Override\b[^>]*PartName="\/xl\/externalLinks\/externalLink1.xml"[^>]*\/>/g, '');
-    ctXml = ctXml.replace(/<Override\b[^>]*PartName="\/xl\/calcChain.xml"[^>]*\/>/g, '');
-    zip.updateFile('[Content_Types].xml', Buffer.from(ctXml, 'utf8'));
-  }
-  zip.deleteFile('xl/externalLinks/externalLink1.xml');
-  zip.deleteFile('xl/externalLinks/_rels/externalLink1.xml.rels');
-  zip.deleteFile('xl/calcChain.xml');
-
-  return zip.toBuffer();
-}
-
-function quotePowerShellLiteral(value) {
-  return "'" + String(value).replace(/'/g, "''") + "'";
-}
-
-function canUseExcelPrintPreview() {
-  return new Promise((resolve) => {
-    if (process.platform !== 'win32') {
-      resolve({ ok: false, error: 'Official ECR Print Preview requires Windows and desktop Microsoft Excel.' });
-      return;
-    }
-    const checkScript = [
-      "$ErrorActionPreference='Stop'",
-      '$excel=$null',
-      'try {',
-      '  $excel=New-Object -ComObject Excel.Application',
-      '  $excel.Quit()',
-      '  [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($excel)',
-      '  exit 0',
-      '} catch {',
-      '  if ($excel -ne $null) { try { $excel.Quit() } catch {} }',
-      '  Write-Error $_.Exception.Message',
-      '  exit 1',
-      '}'
-    ].join('; ');
-    execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', checkScript],
-      { windowsHide: true, timeout: 15000 },
-      (err, _stdout, stderr) => {
-        if (err) resolve({ ok: false, error: (stderr || '').trim() || 'Microsoft Excel could not be started.' });
-        else resolve({ ok: true });
-      });
-  });
-}
-
-async function openExcelPrintPreview(filePath) {
-  const availability = await canUseExcelPrintPreview();
-  if (!availability.ok) return availability;
-
-  const scriptPath = path.join(app.getPath('temp'), `eclass-ecr-preview-${Date.now()}.ps1`);
-  const psFile = quotePowerShellLiteral(filePath);
-  const psScript = [
-    "$ErrorActionPreference = 'Stop'",
-    '$excel = $null',
-    '$workbook = $null',
-    '$sheet = $null',
-    'try {',
-    '  $excel = New-Object -ComObject Excel.Application',
-    '  $excel.Visible = $true',
-    '  $excel.DisplayAlerts = $false',
-    `  $workbook = $excel.Workbooks.Open(${psFile}, 0, $true)`,
-    '  $sheet = $workbook.Worksheets.Item(1)',
-    '  $sheet.Activate()',
-    '  $excel.DisplayAlerts = $true',
-    '  $sheet.PrintPreview()',
-    '}',
-    'catch {',
-    '  Add-Type -AssemblyName PresentationFramework -ErrorAction SilentlyContinue',
-    '  try { [System.Windows.MessageBox]::Show("Could not open the Official ECR Print Preview.\n\n" + $_.Exception.Message, "E-Class Record App") | Out-Null } catch {}',
-    '}',
-    'finally {',
-    '  if ($workbook -ne $null) { try { $workbook.Close($false) } catch {} }',
-    '  if ($excel -ne $null) { try { $excel.Quit() } catch {} }',
-    '  if ($sheet -ne $null) { try { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($sheet) } catch {} }',
-    '  if ($workbook -ne $null) { try { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($workbook) } catch {} }',
-    '  if ($excel -ne $null) { try { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($excel) } catch {} }',
-    '  [GC]::Collect()',
-    '  [GC]::WaitForPendingFinalizers()',
-    '  try { Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue } catch {}',
-    '}'
-  ].join('\r\n');
-  fs.writeFileSync(scriptPath, psScript, 'utf8');
-
-  try {
-    const child = spawn('powershell.exe', ['-NoProfile', '-STA', '-ExecutionPolicy', 'Bypass', '-File', scriptPath], {
-      detached: true,
-      stdio: 'ignore',
-      windowsHide: false
-    });
-    child.unref();
-    return { ok: true, path: filePath, preview: true };
-  } catch (err) {
-    try { fs.unlinkSync(scriptPath); } catch {}
-    return { ok: false, error: err.message };
-  }
-}
-
-async function saveOfficialEcr(payload, mode = 'save') {
-  const buffer = buildOfficialEcrBuffer(payload);
-  const termNo = officialTermNumber(payload.termKey);
-  const classPart = cleanFileName(payload.meta.className || `${payload.meta.gradeLevel || ''} ${payload.meta.section || ''}`);
-  const filename = `${classPart} - Term ${termNo} - Official ECR.xlsx`;
-
-  if (mode === 'preview' || mode === 'open') {
-    const p = ensureDataFolders();
-    const exportDir = path.join(p.root, 'Official ECR Exports');
-    fs.mkdirSync(exportDir, { recursive: true });
-    const filePath = path.join(exportDir, filename);
-    fs.writeFileSync(filePath, buffer);
-
-    if (mode === 'preview') {
-      const previewResult = await openExcelPrintPreview(filePath);
-      if (previewResult.ok) return previewResult;
-      const openError = await shell.openPath(filePath);
-      return {
-        ok: false,
-        previewUnavailable: true,
-        openedFallback: !openError,
-        path: filePath,
-        error: previewResult.error || openError || 'Microsoft Excel Print Preview is unavailable.'
-      };
-    }
-
-    const error = await shell.openPath(filePath);
-    if (error) return { ok: false, error };
-    return { ok: true, path: filePath, opened: true };
-  }
-
-  const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
-    title: 'Save Official Class Record',
-    defaultPath: path.join(app.getPath('documents'), filename),
-    filters: [{ name: 'Excel Workbook', extensions: ['xlsx'] }]
-  });
-  if (canceled || !filePath) return { ok: false, cancelled: true };
-  fs.writeFileSync(filePath, buffer);
-  return { ok: true, path: filePath };
-}
-
-
-ipcMain.handle('ecr:export-official', async (_event, payload, mode) => {
-  try { return await saveOfficialEcr(payload, mode || 'save'); }
-  catch (err) { console.error('Official ECR export failed:', err); return { ok: false, error: err.message }; }
-});
-
-ipcMain.handle('update:info', async () => threadUpdater ? threadUpdater.info() : {
+ipcMain.handle('update:info', async (event) => {
+  const rejected = rejectUntrustedInvoke(event); if (rejected) return rejected;
+  return threadUpdater ? threadUpdater.info() : {
   bootstrapVersion: app.getVersion(), effectiveVersion: app.getVersion(), stagedVersion: null
+  };
 });
 
-ipcMain.handle('update:scan', async () => {
+ipcMain.handle('update:scan', async (event) => {
+  const rejected = rejectUntrustedInvoke(event); if (rejected) return rejected;
   if (!threadUpdater) return { ok: false, error: 'Update service is not ready.' };
   return threadUpdater.scanDownloadedUpdates({ quiet: false });
 });
 
-ipcMain.handle('update:choose-file', async () => {
+ipcMain.handle('update:choose-file', async (event) => {
+  const rejected = rejectUntrustedInvoke(event); if (rejected) return rejected;
   if (!threadUpdater) return { ok: false, error: 'Update service is not ready.' };
   const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
     title: 'Select E-Class Record Update',
@@ -828,7 +673,26 @@ ipcMain.handle('update:choose-file', async () => {
   return threadUpdater.stagePackage(filePaths[0], { quiet: false });
 });
 
-ipcMain.handle('runtime:invoke', async (_event, action, payload) => {
+const ALLOWED_RUNTIME_ACTIONS = new Set([
+  'ecr:official-pdf-preview','ecr:official-popup-preview','ecr:official-save',
+  'gs:official-pdf-preview','gs:official-popup-preview','gs:official-save',
+  'summary:import-file','sf9:preview-html','window:fullscreen-state','window:exit-fullscreen',
+  'ecr:preview-engine-status','official:preview-engine-status'
+]);
+
+ipcMain.handle('runtime:invoke', async (event, action, payload) => {
+  if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) {
+    return { ok: false, error: 'Runtime request rejected from an untrusted window.' };
+  }
+  if (typeof action !== 'string' || !ALLOWED_RUNTIME_ACTIONS.has(action)) {
+    return { ok: false, unsupported: true, error: 'Runtime action is not permitted.' };
+  }
+  if (payload !== undefined) {
+    try {
+      const payloadBytes = Buffer.byteLength(JSON.stringify(payload), 'utf8');
+      if (payloadBytes > 20 * 1024 * 1024) return { ok: false, error: 'Runtime request exceeds the 20 MB safety limit.' };
+    } catch { return { ok: false, error: 'Runtime request payload is not serializable.' }; }
+  }
   if (!runtimeExtension || typeof runtimeExtension.invoke !== 'function') {
     return { ok: false, unsupported: true, error: `Runtime action is not available: ${action}` };
   }

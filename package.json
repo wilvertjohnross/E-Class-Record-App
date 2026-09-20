@@ -1,7 +1,7 @@
 {
   "name": "e-class-record-app-gs-sf9",
-  "version": "1.0.9",
-  "description": "Offline-first E-Class Record App with Grading Sheets, SF9, official SF1/ECR import, and local development auto-updates",
+  "version": "1.0.20",
+  "description": "Offline-first E-Class Record App with Grading Sheets, SF9, official SF1/ECR import, signed local development updates, and stability/data-integrity hardening",
   "main": "main.js",
   "author": "",
   "license": "UNLICENSED",
@@ -27,6 +27,7 @@
       "preload.js",
       "sf1-parser.js",
       "thread-updater.js",
+      "main-extension.js",
       "app/**/*",
       "assets/**/*",
       "templates/**/*"
@@ -52,6 +53,6 @@
     }
   },
   "dependencies": {
-    "adm-zip": "0.5.16"
+    "adm-zip": "0.6.0"
   }
 }

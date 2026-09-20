@@ -8,7 +8,6 @@ contextBridge.exposeInMainWorld('eclassAPI', {
   getDataLocation: () => ipcRenderer.invoke('data:location'),
   printCurrent: () => ipcRenderer.invoke('print:current'),
   importOfficialSf1: () => ipcRenderer.invoke('sf1:import-official'),
-  exportOfficialEcr: (payload, mode) => ipcRenderer.invoke('ecr:export-official', payload, mode),
   importOfficialEcr: () => ipcRenderer.invoke('ecr:import-official'),
 
   // Stable local update bridge introduced in v1.0.9. Future .ecrupdate

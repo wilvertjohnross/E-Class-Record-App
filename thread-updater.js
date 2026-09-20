@@ -6,7 +6,11 @@ const crypto = require('crypto');
 
 const UPDATE_EXT = '.ecrupdate';
 const MAX_PACKAGE_BYTES = 150 * 1024 * 1024;
-const MAX_UNCOMPRESSED_BYTES = 300 * 1024 * 1024;
+const MAX_UNCOMPRESSED_BYTES = 200 * 1024 * 1024;
+const MAX_ENTRY_BYTES = 64 * 1024 * 1024;
+const MAX_ENTRIES = 100;
+const UPDATE_KEY_ID = 'ecr-dev-2026-01';
+const UPDATE_PUBLIC_KEY_PEM = `-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAy69QpUdyeRiDgL5WOgRpke3GGs8u+j5esH0NO5JtWts=\n-----END PUBLIC KEY-----`;
 
 function versionParts(v) {
   return String(v || '0')
@@ -37,6 +41,8 @@ function sha256Buffer(buf) {
 function readJsonSafe(filePath) {
   try {
     if (!fs.existsSync(filePath)) return null;
+    const st = fs.statSync(filePath);
+    if (!st.isFile() || st.size > 2 * 1024 * 1024) return null;
     return JSON.parse(fs.readFileSync(filePath, 'utf8'));
   } catch {
     return null;
@@ -50,11 +56,56 @@ function writeJsonAtomic(filePath, value) {
   fs.renameSync(tmp, filePath);
 }
 
+
+function canonicalManifestBytes(manifest) {
+  const orderedFiles = {};
+  const files = manifest && manifest.files && typeof manifest.files === 'object' ? manifest.files : {};
+  for (const key of Object.keys(files).sort()) orderedFiles[key] = String(files[key]).toLowerCase();
+  const payload = {
+    format: manifest.format,
+    appId: manifest.appId,
+    productName: manifest.productName || '',
+    version: String(manifest.version || ''),
+    minBootstrapVersion: String(manifest.minBootstrapVersion || ''),
+    channel: String(manifest.channel || ''),
+    createdAt: String(manifest.createdAt || ''),
+    files: orderedFiles
+  };
+  return Buffer.from(JSON.stringify(payload), 'utf8');
+}
+
+function verifyManifestSignature(manifest) {
+  const sig = manifest && manifest.signature;
+  if (!sig || sig.algorithm !== 'ed25519' || sig.keyId !== UPDATE_KEY_ID || typeof sig.value !== 'string') {
+    throw new Error('This update is not signed by the trusted E-Class Record development key.');
+  }
+  let signature;
+  try { signature = Buffer.from(sig.value, 'base64'); } catch { throw new Error('The update signature is malformed.'); }
+  if (!signature.length || !crypto.verify(null, canonicalManifestBytes(manifest), UPDATE_PUBLIC_KEY_PEM, signature)) {
+    throw new Error('Update signature verification failed. Do not install this package.');
+  }
+}
+
+function validateManifestFileMap(manifest) {
+  if (!manifest.files || typeof manifest.files !== 'object' || Array.isArray(manifest.files)) {
+    throw new Error('The signed update manifest does not contain a valid file map.');
+  }
+  const keys = Object.keys(manifest.files);
+  if (!keys.length || keys.length > MAX_ENTRIES) throw new Error('The update manifest contains an invalid number of files.');
+  for (const name of keys) {
+    const safeName = safeZipRelativeName(name);
+    if (!safeName || safeName !== name || !safeName.startsWith('payload/')) throw new Error(`Unsafe manifest file path: ${name}`);
+    if (!/^[a-f0-9]{64}$/i.test(String(manifest.files[name] || ''))) throw new Error(`Invalid SHA-256 hash for ${name}.`);
+  }
+}
+
 function safeZipRelativeName(name) {
   const raw = String(name || '').replace(/\\/g, '/');
-  if (!raw || raw.startsWith('/') || /^[A-Za-z]:/.test(raw)) return null;
+  if (!raw || raw.includes('\0') || raw.startsWith('/') || raw.includes(':') || raw.includes('//')) return null;
+  const segments = raw.split('/');
+  if (segments.some(seg => !seg || seg === '.' || seg === '..')) return null;
   const normalized = path.posix.normalize(raw);
-  if (normalized === '..' || normalized.startsWith('../') || normalized.includes('/../')) return null;
+  if (normalized !== raw || normalized === '..' || normalized.startsWith('../') || normalized.includes('/../')) return null;
   return normalized;
 }
 
@@ -98,7 +149,7 @@ class ThreadUpdater {
       downloadsFolder: this.app.getPath('downloads'),
       updateExtension: UPDATE_EXT,
       developmentChannel: true,
-      note: 'Downloaded .ecrupdate packages are staged automatically and become active on the next normal app launch.'
+      note: 'Only Ed25519-signed .ecrupdate packages from the trusted development key are accepted; valid packages are staged and become active on the next normal app launch.'
     };
   }
 
@@ -137,7 +188,7 @@ class ThreadUpdater {
     }
     const versionDir = path.join(this.versionsDir, active.version);
     const manifest = readJsonSafe(path.join(versionDir, 'manifest.json'));
-    if (!manifest || manifest.appId !== this.appId || manifest.version !== active.version) {
+    if (!manifest || manifest.appId !== this.appId || manifest.version !== active.version || !this.verifyVersionDirectory(versionDir, manifest)) {
       this.active = null;
       return;
     }
@@ -149,7 +200,7 @@ class ThreadUpdater {
     if (!pending || !pending.version) return false;
     const versionDir = path.join(this.versionsDir, pending.version);
     const manifest = readJsonSafe(path.join(versionDir, 'manifest.json'));
-    if (!manifest || manifest.appId !== this.appId || manifest.version !== pending.version) {
+    if (!manifest || manifest.appId !== this.appId || manifest.version !== pending.version || !this.verifyVersionDirectory(versionDir, manifest)) {
       try { fs.unlinkSync(this.pendingFile); } catch {}
       this.pending = null;
       return false;
@@ -173,7 +224,8 @@ class ThreadUpdater {
   }
 
   resolveResource(relativePath) {
-    const rel = String(relativePath || '').replace(/\\/g, '/').replace(/^\/+/, '');
+    const rel = safeZipRelativeName(String(relativePath || '').replace(/\\/g, '/'));
+    if (!rel) throw new Error('Unsafe application resource path.');
     if (this.active && this.active.payloadDir) {
       const candidate = path.join(this.active.payloadDir, ...rel.split('/'));
       if (fs.existsSync(candidate)) return candidate;
@@ -182,9 +234,27 @@ class ThreadUpdater {
   }
 
   extensionPath() {
-    if (!this.active || !this.active.payloadDir) return null;
-    const p = path.join(this.active.payloadDir, 'main-extension.js');
-    return fs.existsSync(p) ? p : null;
+    if (this.active && this.active.payloadDir) {
+      const p = path.join(this.active.payloadDir, 'main-extension.js');
+      if (fs.existsSync(p)) return p;
+    }
+    const bundled = path.join(this.packagedRoot, 'main-extension.js');
+    return fs.existsSync(bundled) ? bundled : null;
+  }
+
+  verifyVersionDirectory(versionDir, manifest) {
+    try {
+      this.validateManifest(manifest);
+      for (const [safeName, expected] of Object.entries(manifest.files)) {
+        const rel = safeName.slice('payload/'.length);
+        const filePath = path.join(versionDir, 'payload', ...rel.split('/'));
+        const st = fs.statSync(filePath);
+        if (!st.isFile() || st.size > MAX_ENTRY_BYTES) return false;
+        const actual = sha256Buffer(fs.readFileSync(filePath));
+        if (actual.toLowerCase() !== String(expected).toLowerCase()) return false;
+      }
+      return true;
+    } catch { return false; }
   }
 
   processedMap() {
@@ -222,6 +292,8 @@ class ThreadUpdater {
     if (manifest.minBootstrapVersion && compareVersions(this.bootstrapVersion, manifest.minBootstrapVersion) < 0) {
       throw new Error(`This update needs bootstrap ${manifest.minBootstrapVersion} or newer. Install a newer full setup once.`);
     }
+    validateManifestFileMap(manifest);
+    verifyManifestSignature(manifest);
   }
 
   async stagePackage(filePath, { quiet = false } = {}) {
@@ -239,6 +311,8 @@ class ThreadUpdater {
       const zip = new this.AdmZip(filePath);
       const manifestEntry = zip.getEntry('manifest.json');
       if (!manifestEntry) throw new Error('manifest.json is missing from the update package.');
+      const manifestSize=Number(manifestEntry.header && manifestEntry.header.size || 0);
+      if(!Number.isFinite(manifestSize)||manifestSize<=0||manifestSize>1024*1024) throw new Error('Update manifest exceeds the 1 MB safety limit.');
       const manifest = JSON.parse(manifestEntry.getData().toString('utf8'));
       this.validateManifest(manifest);
 
@@ -253,18 +327,27 @@ class ThreadUpdater {
       }
 
       const entries = zip.getEntries();
+      if (entries.length > MAX_ENTRIES + 10) throw new Error('Update package contains too many entries.');
       let totalUncompressed = 0;
       const payloadEntries = [];
       for (const entry of entries) {
         const safeName = safeZipRelativeName(entry.entryName);
         if (!safeName) throw new Error('Unsafe file path found inside update package.');
-        totalUncompressed += Number(entry.header && entry.header.size || 0);
+        const declaredSize = Number(entry.header && entry.header.size || 0);
+        if (!Number.isFinite(declaredSize) || declaredSize < 0 || declaredSize > MAX_ENTRY_BYTES) throw new Error(`Update entry is too large: ${safeName}`);
+        totalUncompressed += declaredSize;
         if (totalUncompressed > MAX_UNCOMPRESSED_BYTES) throw new Error('Update package expands beyond the allowed size.');
         if (safeName === 'manifest.json' || entry.isDirectory) continue;
         if (!safeName.startsWith('payload/')) throw new Error(`Unexpected file in update package: ${safeName}`);
+        if (!Object.prototype.hasOwnProperty.call(manifest.files, safeName)) throw new Error(`Unsigned payload file found: ${safeName}`);
         payloadEntries.push({ entry, safeName });
       }
       if (!payloadEntries.length) throw new Error('The update package has no payload files.');
+      const actualNames = payloadEntries.map(x => x.safeName).sort();
+      const signedNames = Object.keys(manifest.files).sort();
+      if (actualNames.length !== signedNames.length || actualNames.some((n, i) => n !== signedNames[i])) {
+        throw new Error('Update payload does not exactly match the signed manifest.');
+      }
 
       const tempDir = path.join(this.versionsDir, `.staging-${manifest.version}-${Date.now()}`);
       fs.mkdirSync(tempDir, { recursive: true });
@@ -275,8 +358,8 @@ class ThreadUpdater {
           const dest = path.join(tempDir, 'payload', ...rel.split('/'));
           fs.mkdirSync(path.dirname(dest), { recursive: true });
           const buf = entry.getData();
-          const expected = manifest.files && manifest.files[safeName];
-          if (expected && sha256Buffer(buf).toLowerCase() !== String(expected).toLowerCase()) {
+          const expected = manifest.files[safeName];
+          if (sha256Buffer(buf).toLowerCase() !== String(expected).toLowerCase()) {
             throw new Error(`Integrity check failed for ${safeName}.`);
           }
           fs.writeFileSync(dest, buf);

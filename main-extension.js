@@ -1,6 +1,6 @@
 'use strict';
 
-// v1.0.19 runtime extension
+// v1.0.20 bundled runtime extension
 // Official ECR preview pipeline:
 // official template -> direct XLSX fill -> persistent hidden Excel renderer -> cached PDF -> in-app popup.
 // Excel is pre-warmed once in the background and reused. Preview PDFs are content-addressed,
@@ -99,73 +99,6 @@ function compactUnusedLearnerRows(xml, payload) {
   return xml;
 }
 
-
-function ensureMergedRange(xml, ref) {
-  if (new RegExp(`<mergeCell\\s+ref="${regexEscape(ref)}"\\s*/>`).test(xml)) return xml;
-  const re = /<mergeCells count="(\d+)">([\s\S]*?)<\/mergeCells>/;
-  const hit = xml.match(re);
-  if (hit) {
-    const count = Number(hit[1] || 0);
-    return xml.replace(hit[0], `<mergeCells count="${count + 1}">${hit[2]}<mergeCell ref="${ref}"/></mergeCells>`);
-  }
-  return xml.replace(/<pageMargins\b/, `<mergeCells count="1"><mergeCell ref="${ref}"/></mergeCells><pageMargins`);
-}
-
-function addEcrSignatureStyles(zip) {
-  const entry = zip.getEntry('xl/styles.xml');
-  if (!entry) throw new Error('The official ECR style table was not found.');
-  let styles = entry.getData().toString('utf8');
-  const borders = styles.match(/<borders count="(\d+)">([\s\S]*?)<\/borders>/);
-  const xfs = styles.match(/<cellXfs count="(\d+)">([\s\S]*?)<\/cellXfs>/);
-  if (!borders || !xfs) throw new Error('The official ECR styles could not be extended for the Subject Teacher signatory.');
-  const borderId = Number(borders[1]);
-  const borderXml = '<border><left/><right/><top/><bottom style="thin"><color rgb="FF000000"/></bottom><diagonal/></border>';
-  styles = styles.replace(borders[0], `<borders count="${borderId + 1}">${borders[2]}${borderXml}</borders>`);
-
-  const firstStyle = Number(xfs[1]);
-  const nameStyle = firstStyle;
-  const titleStyle = firstStyle + 1;
-  const nameXf = `<xf numFmtId="0" fontId="3" fillId="0" borderId="${borderId}" xfId="0" applyFont="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>`;
-  const titleXf = '<xf numFmtId="0" fontId="3" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>';
-  styles = styles.replace(xfs[0], `<cellXfs count="${firstStyle + 2}">${xfs[2]}${nameXf}${titleXf}</cellXfs>`);
-  zip.updateFile('xl/styles.xml', Buffer.from(styles, 'utf8'));
-  return { nameStyle, titleStyle };
-}
-
-function setWorksheetCellStyle(xml, ref, styleId) {
-  const r = regexEscape(ref);
-  const re = new RegExp(`<c\\b([^>]*\\br="${r}"[^>]*)`);
-  const hit = xml.match(re);
-  if (!hit) throw new Error(`Template cell ${ref} was not found while formatting a signatory.`);
-  let attrs = hit[1].replace(/\s+s="[^"]*"/g, '');
-  attrs += ` s="${styleId}"`;
-  return xml.replace(hit[0], `<c${attrs}`);
-}
-
-function addEcrSubjectTeacherSignatory(buffer, payload, ctx) {
-  const AdmZip = resolveAdmZip();
-  const zip = new AdmZip(buffer);
-  const sheetEntry = zip.getEntry('xl/worksheets/sheet1.xml');
-  if (!sheetEntry) throw new Error('The official ECR worksheet was not found while adding the Subject Teacher signatory.');
-  let xml = sheetEntry.getData().toString('utf8');
-  const meta = payload.meta || {};
-  const preparedName = meta.preparedByName || meta.teacher || '';
-  const preparedTitle = meta.preparedByTitle || 'Subject Teacher';
-
-  // The official template already merges C119:E119 and C120:E120.
-  // Keep the master workbook's style table untouched. Reuse existing template styles:
-  // style 59 = centered/bold with a thin bottom signature line; style 85 = plain text.
-  // This avoids extending styles.xml, which some desktop Excel builds reject during COM open.
-  xml = ensureMergedRange(xml, 'C119:E119');
-  xml = ensureMergedRange(xml, 'C120:E120');
-  xml = setWorksheetCell(xml, 'B119', 'Prepared by:', 'string');
-  xml = setWorksheetCell(xml, 'C119', preparedName, 'string');
-  xml = setWorksheetCellStyle(xml, 'C119', 59);
-  xml = setWorksheetCell(xml, 'C120', preparedTitle, 'string');
-  xml = setWorksheetCellStyle(xml, 'C120', 85);
-  zip.updateFile('xl/worksheets/sheet1.xml', Buffer.from(xml, 'utf8'));
-  return zip.toBuffer();
-}
 
 function stripWorkbookExternalLinks(zip) {
   const wbEntry = zip.getEntry('xl/workbook.xml');
@@ -331,19 +264,72 @@ function buildOfficialDocumentBuffer(kind, payload, ctx) {
 }
 
 function validatePayload(payload) {
-  if (!payload || !payload.meta || !payload.categories || !Array.isArray(payload.students)) {
-    throw new Error('The Class Record data sent to the Official ECR preview is incomplete.');
+  if (!payload || typeof payload !== 'object' || !payload.meta || typeof payload.meta !== 'object' || !payload.categories || typeof payload.categories !== 'object' || !Array.isArray(payload.students)) {
+    throw new Error('The Class Record data sent to the official-output engine is incomplete.');
   }
-  const male = payload.students.filter(s => s.sex === 'M');
-  const female = payload.students.filter(s => s.sex === 'F');
-  if (male.length > 50 || female.length > 50) {
-    throw new Error('The official ECR template supports up to 50 male and 50 female learners.');
+  if (payload.students.length > 100) throw new Error('The official template supports at most 100 learners.');
+  const male = payload.students.filter(s => s && s.sex === 'M');
+  const female = payload.students.filter(s => s && s.sex === 'F');
+  if (male.length > 50 || female.length > 50 || male.length + female.length !== payload.students.length) {
+    throw new Error('Every learner must be identified as Male or Female, with at most 50 in each official-template section.');
   }
+  for (const [key, value] of Object.entries(payload.meta)) {
+    if (value !== null && value !== undefined && typeof value !== 'string' && typeof value !== 'number') throw new Error(`Invalid metadata field: ${key}.`);
+    if (String(value ?? '').length > 1000) throw new Error(`Metadata field is unexpectedly long: ${key}.`);
+  }
+  if (payload.schoolLogoDataUri && String(payload.schoolLogoDataUri).length > 8 * 1024 * 1024) throw new Error('The school logo data exceeds the safety limit.');
   const ww = payload.categories.WW || {};
   const pt = payload.categories.PT || {};
   const ex = payload.categories.EXAM || {};
   if ((ww.components || []).length !== 5 || (pt.components || []).length !== 3 || (ex.components || []).length !== 3) {
     throw new Error('The official ECR template requires exactly 5 WW, 3 PT and 3 Examination components.');
+  }
+  const cats = [['WW',ww],['PT',pt],['EXAM',ex]];
+  let totalWeight = 0;
+  for (const [key,cat] of cats) {
+    const weight = Number(cat.weight);
+    if (!Number.isFinite(weight) || weight < 0 || weight > 1) throw new Error(`${key} has an invalid category weight.`);
+    totalWeight += weight;
+    let customTotal = 0;
+    for (const c of cat.components) {
+      const h = Number(c && c.hps);
+      if (!Number.isFinite(h) || h <= 0 || h > 1000000) throw new Error(`${key} contains an invalid HPS.`);
+      if (String(c && c.name || '').length > 200) throw new Error(`${key} contains an unexpectedly long component name.`);
+      if (key === 'EXAM') {
+        const sw=Number(c && c.subWeight);
+        if (!Number.isFinite(sw) || sw < 0 || sw > 100) throw new Error('EXAM contains an invalid item weight.');
+        customTotal += sw;
+      }
+    }
+    if (key === 'EXAM' && Math.abs(customTotal - 100) > 0.001) throw new Error('EXAM item weights must total exactly 100%.');
+  }
+  if (Math.abs(totalWeight - 1) > 0.0001) throw new Error('Category weights must total exactly 100%.');
+  for (const st of payload.students) {
+    if (!st || typeof st !== 'object' || String(st.name || '').length > 500) throw new Error('A learner record in the official-output payload is invalid.');
+    for (const [key,expected] of [['WW',5],['PT',3],['EXAM',3]]) {
+      const scores = st[key] && Array.isArray(st[key].scores) ? st[key].scores : [];
+      if (scores.length > expected) throw new Error(`${key} contains too many scores for one learner.`);
+      const comps = payload.categories[key].components;
+      for (let i=0;i<scores.length;i++) {
+        const v=scores[i]; if (v === '' || v === null || v === undefined) continue;
+        const n=Number(v),h=Number(comps[i] && comps[i].hps);
+        if (!Number.isFinite(n) || n < 0 || n > h) throw new Error(`${key} contains a learner score outside 0..HPS.`);
+      }
+    }
+  }
+}
+
+function assertSafeImportedXlsx(zip, label = 'Excel workbook') {
+  const entries = zip.getEntries();
+  if (entries.length > 1000) throw new Error(`${label} contains too many ZIP entries.`);
+  let total = 0;
+  for (const entry of entries) {
+    const size = Number(entry && entry.header && entry.header.size || 0);
+    if (!Number.isFinite(size) || size < 0 || size > 32 * 1024 * 1024) throw new Error(`${label} contains an unexpectedly large internal file.`);
+    total += size;
+    if (total > 128 * 1024 * 1024) throw new Error(`${label} expands beyond the 128 MB safety limit.`);
+    const name = String(entry.entryName || '').replace(/\\/g, '/');
+    if (!name || name.startsWith('/') || /^[A-Za-z]:/.test(name) || name.split('/').includes('..')) throw new Error(`${label} contains an unsafe internal path.`);
   }
 }
 
@@ -988,7 +974,7 @@ function gsTemplateFingerprint(ctx) {
 function gsPreviewSignature(payload, ctx) {
   const crypto = require('crypto');
   return crypto.createHash('sha256')
-    .update('gs-preview-v1.0.16-official-template-setup-signatories-compact\n')
+    .update('gs-preview-v1.0.20-stability-gate\n')
     .update(gsTemplateFingerprint(ctx))
     .update('\n')
     .update(stableStringify(payload))
@@ -998,7 +984,7 @@ function gsPreviewSignature(payload, ctx) {
 function previewSignature(payload, ctx) {
   const crypto = require('crypto');
   return crypto.createHash('sha256')
-    .update('ecr-preview-v1.0.19-clean-slate-direct-fill\n')
+    .update('ecr-preview-v1.0.20-stability-gate\n')
     .update(templateFingerprint(ctx))
     .update('\n')
     .update(stableStringify(payload))
@@ -1007,8 +993,16 @@ function previewSignature(payload, ctx) {
 
 function isUsablePreviewFile(fs, filePath) {
   try {
-    const st = fs.statSync(filePath);
-    return st.isFile() && st.size > 500;
+    const st=fs.statSync(filePath);
+    if(!st.isFile() || st.size<=500) return false;
+    const fd=fs.openSync(filePath,'r');
+    try{
+      const head=Buffer.alloc(8);const n=fs.readSync(fd,head,0,head.length,0);
+      const ext=String(filePath).toLowerCase();
+      if(ext.endsWith('.pdf')) return n>=5 && head.subarray(0,5).toString('ascii')==='%PDF-';
+      if(ext.endsWith('.xlsx')) return n>=4 && head[0]===0x50 && head[1]===0x4b && (head[2]===0x03||head[2]===0x05||head[2]===0x07) && (head[3]===0x04||head[3]===0x06||head[3]===0x08);
+      return true;
+    }finally{fs.closeSync(fd);}
   } catch { return false; }
 }
 
@@ -1083,13 +1077,16 @@ function openPdfPopup(pdfPath, xlsxPath, payload, ctx) {
     win.setMenu(menu);
   }
 
+  const allowedPdfUrl = pathToFileURL(pdfPath).href;
+  win.webContents.on('will-navigate', (event, url) => { if (url !== allowedPdfUrl && !url.startsWith(allowedPdfUrl + '#')) event.preventDefault(); });
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('did-fail-load', (_event, code, desc) => {
     if (code === -3) return;
     console.error('Official ECR popup preview failed to load:', code, desc);
   });
   win.once('ready-to-show', () => win.show());
   win.on('closed', () => previewWindows.delete(win));
-  win.loadURL(pathToFileURL(pdfPath).href);
+  win.loadURL(allowedPdfUrl);
   return win;
 }
 
@@ -1212,13 +1209,16 @@ function openGsPdfPopup(pdfPath, xlsxPath, payload, ctx) {
     ]);
     win.setMenu(menu);
   }
+  const allowedPdfUrl = pathToFileURL(pdfPath).href;
+  win.webContents.on('will-navigate', (event, url) => { if (url !== allowedPdfUrl && !url.startsWith(allowedPdfUrl + '#')) event.preventDefault(); });
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('did-fail-load', (_event, code, desc) => {
     if (code === -3) return;
     console.error('Official GS popup preview failed to load:', code, desc);
   });
   win.once('ready-to-show', () => win.show());
   win.on('closed', () => previewWindows.delete(win));
-  win.loadURL(pathToFileURL(pdfPath).href);
+  win.loadURL(allowedPdfUrl);
   return win;
 }
 
@@ -1303,22 +1303,25 @@ function columnIndexFromRef(ref){
   const m=String(ref||'').match(/^([A-Z]+)/i);if(!m)return 0;let n=0;for(const ch of m[1].toUpperCase())n=n*26+(ch.charCodeAt(0)-64);return n-1;
 }
 function parseCsvMatrix(text){
-  const rows=[];let row=[],cell='',q=false;const src=String(text||'').replace(/^\uFEFF/,'');
-  for(let i=0;i<src.length;i++){const ch=src[i];if(q){if(ch==='"'&&src[i+1]==='"'){cell+='"';i++;}else if(ch==='"')q=false;else cell+=ch;}else{if(ch==='"')q=true;else if(ch===','){row.push(cell);cell='';}else if(ch==='\n'){row.push(cell.replace(/\r$/,''));rows.push(row);row=[];cell='';}else cell+=ch;}}
-  row.push(cell.replace(/\r$/,''));if(row.some(v=>v!==''))rows.push(row);return rows;
+  const rows=[];let row=[],cell='',q=false,cells=0;const src=String(text||'').replace(/^\uFEFF/,'');
+  const pushCell=(v)=>{if(++cells>500000)throw new Error('Summary table contains too many cells.');if(row.length>=500)throw new Error('Summary table contains more than 500 columns.');row.push(v);};
+  const pushRow=()=>{if(rows.length>=5000)throw new Error('Summary table contains more than 5,000 rows.');rows.push(row);row=[];};
+  for(let i=0;i<src.length;i++){const ch=src[i];if(q){if(ch==='"'&&src[i+1]==='"'){cell+='"';i++;}else if(ch==='"')q=false;else cell+=ch;}else{if(ch==='"')q=true;else if(ch===','){pushCell(cell);cell='';}else if(ch==='\n'){pushCell(cell.replace(/\r$/,''));pushRow();cell='';}else cell+=ch;}}
+  pushCell(cell.replace(/\r$/,''));if(row.some(v=>v!==''))pushRow();return rows;
 }
 function parseXlsxMatrix(filePath, ctx){
-  const AdmZip=resolveAdmZip();const zip=new AdmZip(ctx.fs.readFileSync(filePath));
+  const AdmZip=resolveAdmZip();const zip=new AdmZip(ctx.fs.readFileSync(filePath));assertSafeImportedXlsx(zip,'The summary workbook');
   const ss=[];const se=zip.getEntry('xl/sharedStrings.xml');if(se){const sx=se.getData().toString('utf8');let sm;const sir=/<si\b[^>]*>([\s\S]*?)<\/si>/g;while((sm=sir.exec(sx))){let t='',tm;const tr=/<t\b[^>]*>([\s\S]*?)<\/t>/g;while((tm=tr.exec(sm[1])))t+=xmlDecodeText(tm[1]);ss.push(t);}}
   let sheetEntry=zip.getEntry('xl/worksheets/sheet1.xml');if(!sheetEntry)throw new Error('The first worksheet could not be read.');const xml=sheetEntry.getData().toString('utf8');
   const rows=[];let rm;const rr=/<row\b[^>]*\br="(\d+)"[^>]*>([\s\S]*?)<\/row>/g;
-  while((rm=rr.exec(xml))){const out=[];let cm;const cr=/<c\b([^>]*\br="([A-Z]+\d+)"[^>]*)>([\s\S]*?)<\/c>|<c\b([^>]*\br="([A-Z]+\d+)"[^>]*)\/>/g;while((cm=cr.exec(rm[2]))){const attrs=cm[1]||cm[4]||'',ref=cm[2]||cm[5],body=cm[3]||'',i=columnIndexFromRef(ref),type=((attrs.match(/\bt="([^"]+)"/)||[])[1]||'').toLowerCase();let v='';if(type==='inlinestr'){let tm;const tr=/<t\b[^>]*>([\s\S]*?)<\/t>/g;while((tm=tr.exec(body)))v+=xmlDecodeText(tm[1]);}else{const vm=body.match(/<v\b[^>]*>([\s\S]*?)<\/v>/);if(vm){const raw=xmlDecodeText(vm[1]);if(type==='s'){const k=Number(raw);v=Number.isInteger(k)&&k>=0&&k<ss.length?ss[k]:'';}else{const n=Number(raw);v=raw.trim()!==''&&Number.isFinite(n)?n:raw;}}}out[i]=v;}rows.push(out);}
+  while((rm=rr.exec(xml))){if(rows.length>=5000)throw new Error('Summary workbook contains more than 5,000 rows.');const out=[];let cm;const cr=/<c\b([^>]*\br="([A-Z]+\d+)"[^>]*)>([\s\S]*?)<\/c>|<c\b([^>]*\br="([A-Z]+\d+)"[^>]*)\/>/g;while((cm=cr.exec(rm[2]))){const attrs=cm[1]||cm[4]||'',ref=cm[2]||cm[5],body=cm[3]||'',i=columnIndexFromRef(ref),type=((attrs.match(/\bt="([^"]+)"/)||[])[1]||'').toLowerCase();if(i<0||i>=500)throw new Error('Summary workbook contains a cell beyond the 500-column safety limit.');let v='';if(type==='inlinestr'){let tm;const tr=/<t\b[^>]*>([\s\S]*?)<\/t>/g;while((tm=tr.exec(body)))v+=xmlDecodeText(tm[1]);}else{const vm=body.match(/<v\b[^>]*>([\s\S]*?)<\/v>/);if(vm){const raw=xmlDecodeText(vm[1]);if(type==='s'){const k=Number(raw);v=Number.isInteger(k)&&k>=0&&k<ss.length?ss[k]:'';}else{const n=Number(raw);v=raw.trim()!==''&&Number.isFinite(n)?n:raw;}}}out[i]=v;}rows.push(out);}
   return rows;
 }
 async function importSummaryFile(context){
   const ctx={...(startupContext||{}),...(context||{})};const parent=typeof ctx.getMainWindow==='function'?ctx.getMainWindow():undefined;
   const r=await ctx.dialog.showOpenDialog(parent,{title:'Import Summary of Grades',properties:['openFile'],filters:[{name:'Summary Table',extensions:['xlsx','csv']}]});
   if(r.canceled||!r.filePaths||!r.filePaths[0])return{ok:false,cancelled:true};const filePath=r.filePaths[0];const ext=ctx.path.extname(filePath).toLowerCase();
+  const st=ctx.fs.statSync(filePath);if(!st.isFile()||st.size>25*1024*1024)throw new Error('Summary import file exceeds the 25 MB safety limit.');
   let rows;if(ext==='.csv')rows=parseCsvMatrix(ctx.fs.readFileSync(filePath,'utf8'));else rows=parseXlsxMatrix(filePath,ctx);
   rows=rows.filter(row=>(row||[]).some(v=>String(v??'').trim()!==''));
   return{ok:true,fileName:ctx.path.basename(filePath),rows};
@@ -1327,7 +1330,12 @@ function openSf9HtmlPreview(payload, context){
   const ctx={...(startupContext||{}),...(context||{})};if(!ctx.BrowserWindow)return{ok:false,error:'Preview window service is unavailable.'};
   const parent=typeof ctx.getMainWindow==='function'?ctx.getMainWindow():null;const win=new ctx.BrowserWindow({width:1200,height:880,minWidth:800,minHeight:600,parent:parent&&!parent.isDestroyed()?parent:undefined,modal:false,title:`SF9 Preview — ${String(payload&&payload.name||'Learner')}`,backgroundColor:'#525659',show:false,webPreferences:{contextIsolation:true,nodeIntegration:false,sandbox:true}});
   previewWindows.add(win);if(ctx.Menu){const doPrint=()=>{if(!win.isDestroyed())win.webContents.print({silent:false,printBackground:true,color:true,margins:{marginType:'default'}});};win.setMenu(ctx.Menu.buildFromTemplate([{label:'File',submenu:[{label:'Print...',accelerator:'CmdOrCtrl+P',click:doPrint},{type:'separator'},{label:'Close Preview',accelerator:'Esc',click:()=>{if(!win.isDestroyed())win.close();}}]},{label:'View',submenu:[{role:'zoomIn'},{role:'zoomOut'},{role:'resetZoom'},{type:'separator'},{role:'togglefullscreen'}]}]));}
-  win.once('ready-to-show',()=>win.show());win.on('closed',()=>previewWindows.delete(win));win.loadURL('data:text/html;charset=utf-8,'+encodeURIComponent(String(payload&&payload.html||'')));return{ok:true};
+  win.webContents.setWindowOpenHandler(()=>({action:'deny'}));
+  win.webContents.on('will-navigate',(event,url)=>{if(!String(url).startsWith('data:text/html'))event.preventDefault();});
+  const rawHtml=String(payload&&payload.html||'');
+  const csp=`<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">`;
+  const safeHtml=/<head[\s>]/i.test(rawHtml)?rawHtml.replace(/<head([^>]*)>/i,`<head$1>${csp}`):`<!doctype html><html><head>${csp}</head><body>${rawHtml}</body></html>`;
+  win.once('ready-to-show',()=>win.show());win.on('closed',()=>previewWindows.delete(win));win.loadURL('data:text/html;charset=utf-8,'+encodeURIComponent(safeHtml));return{ok:true};
 }
 
 module.exports = {
@@ -1376,7 +1384,7 @@ module.exports = {
     if (action === 'ecr:preview-engine-status' || action === 'official:preview-engine-status') {
       return { ok: true, warm: !!(excelEngine && excelEngine.ready) };
     }
-    return { ok: false, unsupported: true, error: `Runtime action is not available in v1.0.19: ${action}` };
+    return { ok: false, unsupported: true, error: `Runtime action is not available in v1.0.20: ${action}` };
   }
 };
 

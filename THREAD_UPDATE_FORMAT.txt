@@ -1,47 +1,45 @@
-E-CLASS RECORD APP — DEVELOPMENT THREAD UPDATE FORMAT
-Bootstrap introduced in v1.0.9
+E-CLASS RECORD APP — SIGNED DEVELOPMENT UPDATE FORMAT
+Bootstrap security baseline: v1.0.20
 
 PURPOSE
-After the user installs the v1.0.9 full Windows build one time, ordinary
-feature/UI/template iterations can be delivered in this ChatGPT thread as a
-single *.ecrupdate file. The installed app watches the user's Windows Downloads
-folder, stages the file automatically, and activates it on the next normal app
-launch. No manual extraction or reinstall is required for an ordinary runtime
-update.
+Ordinary runtime/UI/template iterations can still be delivered as *.ecrupdate files,
+but v1.0.20+ accepts only packages signed by the trusted Ed25519 development key.
+The private key is kept outside the application and is never distributed with builds.
 
 PACKAGE FORMAT
-.ecrupdate is a ZIP-compatible package with this layout:
-
+.ecrupdate is ZIP-compatible:
   manifest.json
   payload/
-    app/index.html              (normally include the complete current UI)
-    main-extension.js           (optional; new/overridden main-process actions)
-    templates/...               (official templates or mapping resources)
-    ...                         (other runtime JS/data used by the extension)
+    app/index.html
+    app/app.js
+    main-extension.js
+    templates/...
 
-manifest.json fields:
+manifest.json includes:
   format: 1
   appId: ph.edu.eclassrecord.gs.sf9
   productName: E-Class Record App with GS and SF9
-  version: semantic version newer than the effective installed version
-  minBootstrapVersion: normally 1.0.9
-  files: SHA-256 map keyed by payload/<relative-path>
+  version: semantic version newer than the effective version
+  minBootstrapVersion: 1.0.20 or newer
+  files: exact SHA-256 map for every payload file
+  signature.algorithm: ed25519
+  signature.keyId: ecr-dev-2026-01
+  signature.value: Base64 Ed25519 signature over the canonical manifest fields
 
-RUNTIME EXTENSION
-The v1.0.9 preload exposes:
-  window.eclassAPI.runtimeInvoke(action, payload)
+VALIDATION
+The updater verifies package size, manifest size, entry count, safe ZIP paths,
+per-entry size, total uncompressed size, exact signed file list, SHA-256 hashes,
+application identity, version compatibility, and Ed25519 signature. Staged files
+are re-hashed and the signed manifest is reverified before activation/loading.
 
-An update may provide payload/main-extension.js exporting:
-  async register(context) { ... }      // optional startup hook
-  async invoke(action, payload, context) { ... }
-
-This allows future SF2/SF10/form-import logic to be added without replacing the
-stable preload bridge. Existing packaged IPCs continue to work.
+CREATE A SIGNED UPDATE
+Keep the private key outside the project folder. On Windows:
+  set ECLASS_UPDATE_SIGNING_KEY=C:\secure\ECR_UPDATE_SIGNING_PRIVATE_KEY.pem
+  node tools\make-thread-update.js 1.0.21 path\to\payload update.ecrupdate
 
 IMPORTANT
-- Future .ecrupdate packages should be self-contained snapshots of the current
-  runtime files they depend on; do not assume an older update overlay remains.
-- A change to the Electron bootstrap/preload itself or a new native Node module
-  can still require a new full installer.
-- This local update channel is for private development/testing. Before broad
-  deployment, use publisher signing and a trusted hosted update channel.
+- Future update payloads should be self-contained snapshots of all runtime files they need.
+- Bootstrap/preload/native dependency changes still require a full installer.
+- Do not distribute the private signing key.
+- This remains a private development channel; eventual schoolwide releases should also use
+  normal Windows publisher/code signing and a trusted hosted release channel.
