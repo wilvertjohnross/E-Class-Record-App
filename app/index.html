@@ -182,6 +182,42 @@
   }
   .scroll-x{overflow-x:auto;}
 
+  /* ===== Subject Teacher Classes: two-column setup + independently scrolling roster ===== */
+  .class-setup-split{
+    display:grid;
+    grid-template-columns:minmax(0,1fr) minmax(480px,1.12fr);
+    gap:20px;
+    align-items:start;
+  }
+  .class-setup-split > .card{min-width:0;margin-bottom:20px;}
+  .class-setup-card{align-self:start;}
+  .class-roster-card{
+    display:flex;
+    flex-direction:column;
+    align-self:start;
+    position:sticky;
+    top:12px;
+    max-height:calc(100vh - 190px);
+    min-height:540px;
+  }
+  .class-roster-card .hub-title-row{flex:0 0 auto;}
+  .class-roster-card .toolbar,.class-roster-card .hint{flex:0 0 auto;}
+  .class-roster-scroll{
+    flex:1 1 auto;
+    min-height:0;
+    overflow:auto;
+    border:1px solid var(--border);
+    border-radius:4px;
+  }
+  .class-roster-scroll table.data{border-collapse:separate;border-spacing:0;}
+  .class-roster-scroll table.data th{top:0;z-index:4;}
+  .class-roster-scroll table.data tr.group-row td{position:sticky;top:32px;z-index:3;}
+  @media (max-width:1050px){
+    .class-setup-split{grid-template-columns:1fr;}
+    .class-roster-card{position:static;max-height:none;min-height:0;}
+    .class-roster-scroll{max-height:560px;}
+  }
+
   /* ===== SF1 preserved-template viewer ===== */
   .sf1-viewer-card{max-width:980px;margin:0 auto;}
   .sf1-viewer-panel{display:flex;align-items:center;gap:18px;padding:20px;border:1px solid var(--border);background:var(--paper-deep);border-radius:8px;}

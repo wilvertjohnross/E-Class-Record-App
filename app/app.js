@@ -917,7 +917,7 @@ function classRosterManagerHtml(cls){
     <td><select class="crs-sex"><option value="M" ${s.sex==="M"?"selected":""}>Male</option><option value="F" ${s.sex==="F"?"selected":""}>Female</option></select></td>
     <td><button class="small danger crs-remove">Remove</button></td>
   </tr>`;
-  return `<div class="card">
+  return `<div class="card class-roster-card">
     <div class="hub-title-row"><div><h2>Subject Teacher Learner Roster</h2><div class="sub">Enroll learners by typing names, pasting a list, or importing a CSV. This roster belongs only to this teaching class and never modifies the Adviser SF1 masterlist.</div></div><div class="hub-context">${males.length} Male • ${females.length} Female • ${cls.students.length} Total</div></div>
     <div class="toolbar no-print">
       <button id="classAddStudent" class="primary">+ Add learner</button>
@@ -927,7 +927,7 @@ function classRosterManagerHtml(cls){
       <input type="file" id="classCsvFile" accept=".csv,text/csv" style="display:none;">
     </div>
     <div class="hint" style="margin-bottom:10px;">Only learner names are required. Sex is retained because the official Class Record separates Male and Female learners.</div>
-    <div class="scroll-x"><table class="data" id="classRosterTable"><thead><tr><th style="text-align:left;">Learner Name</th><th>Sex</th><th></th></tr></thead><tbody>
+    <div class="scroll-x class-roster-scroll"><table class="data" id="classRosterTable"><thead><tr><th style="text-align:left;">Learner Name</th><th>Sex</th><th></th></tr></thead><tbody>
       <tr class="group-row"><td colspan="3">MALE (${males.length})</td></tr>${males.map(row).join("")}
       <tr class="group-row"><td colspan="3">FEMALE (${females.length})</td></tr>${females.map(row).join("")}
     </tbody></table></div>
@@ -975,7 +975,8 @@ function renderSetup(main, cls){
   const linkStatus=classRecordLinkStatus(cls);
   const electiveMode=m.classRecordSubjectId==="ELECTIVE";
   main.innerHTML = `
-    <div class="card">
+    <div class="class-setup-split">
+    <div class="card class-setup-card">
       <h2>Class Setup</h2>
       <div class="sub">This area defines an independent Subject Teacher class and the specific Class Record / Grading Sheet being built. Its roster and grades do not populate Adviser official forms.</div>
       <div class="field"><label>Class label (shown in the class switcher)</label>
@@ -1005,6 +1006,7 @@ function renderSetup(main, cls){
     </div>
 
     ${classRosterManagerHtml(cls)}
+    </div>
 
     <div class="card">
       <h2>School Logo</h2>
