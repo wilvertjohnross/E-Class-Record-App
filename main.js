@@ -62,12 +62,34 @@ function createWindow() {
   });
 }
 
+function printCurrentContents(webContents) {
+  return new Promise((resolve) => {
+    if (!webContents || webContents.isDestroyed()) {
+      resolve({ ok: false, error: 'The application window is not available.' });
+      return;
+    }
+
+    // Electron does not support Chromium's browser print-preview page.
+    // webContents.print() opens the native Windows print dialog instead.
+    webContents.print({
+      silent: false,
+      printBackground: true,
+      color: true,
+      margins: { marginType: 'default' }
+    }, (success, failureReason) => {
+      resolve(success
+        ? { ok: true }
+        : { ok: false, error: failureReason || 'Printing was cancelled or could not be started.' });
+    });
+  });
+}
+
 function buildMenu() {
   const template = [
     {
       label: 'File',
       submenu: [
-        { label: 'Print', accelerator: 'CmdOrCtrl+P', click: () => mainWindow?.webContents.print({ printBackground: true }) },
+        { label: 'Print', accelerator: 'CmdOrCtrl+P', click: () => { if (mainWindow) printCurrentContents(mainWindow.webContents); } },
         { type: 'separator' },
         { label: 'Open Data Folder', click: () => shell.openPath(ensureDataFolders().root) },
         { type: 'separator' },
@@ -154,6 +176,10 @@ ipcMain.handle('backup:import', async () => {
   const text = fs.readFileSync(filePaths[0], 'utf8');
   JSON.parse(text);
   return { cancelled: false, text, path: filePaths[0] };
+});
+
+ipcMain.handle('print:current', async (event) => {
+  return printCurrentContents(event.sender);
 });
 
 ipcMain.handle('data:location', async () => ensureDataFolders().root);

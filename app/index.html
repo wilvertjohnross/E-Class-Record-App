@@ -377,6 +377,28 @@
 </footer>
 
 <script>
+/* Desktop printing helper.
+   Electron does not provide Chromium's browser print-preview page, so the
+   installed app asks the main process to open the native Windows print dialog. */
+async function printCurrentView(){
+  // Give the DOM two paint frames to finish switching views/rendering all SF9s.
+  await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  if(window.eclassAPI && typeof window.eclassAPI.printCurrent === "function"){
+    try{
+      const result = await window.eclassAPI.printCurrent();
+      if(result && result.ok === false && result.error && !/cancel/i.test(result.error)){
+        alert("Unable to start printing: " + result.error);
+      }
+      return;
+    }catch(err){
+      alert("Unable to start printing: " + (err && err.message ? err.message : err));
+      return;
+    }
+  }
+  // Browser-only fallback when the HTML file is opened outside Electron.
+  window.print();
+}
+
 /* =========================================================================
    DATA: DepEd transmutation table (Initial Grade -> Transmuted Grade / Band)
    ========================================================================= */
@@ -1373,7 +1395,7 @@ function renderTerm(main, cls, termKey, termLabel){
       draw();
     });
   });
-  document.getElementById("termPrint").addEventListener("click", ()=>window.print());
+  document.getElementById("termPrint").addEventListener("click", ()=>printCurrentView());
   draw();
 }
 
@@ -1557,12 +1579,12 @@ function renderReport(main, cls){
     bindReportCardEvents(cls, container);
   }
   sel.addEventListener("change", draw);
-  document.getElementById("rcPrint").addEventListener("click", ()=>window.print());
+  document.getElementById("rcPrint").addEventListener("click", ()=>printCurrentView());
   document.getElementById("rcPrintAll").addEventListener("click", ()=>{
     const container = document.getElementById("rcContainer");
     container.innerHTML = cls.students.map(s=>reportCardHtml(cls,s)).join("");
     bindReportCardEvents(cls, container);
-    window.print();
+    printCurrentView();
   });
   draw();
 }

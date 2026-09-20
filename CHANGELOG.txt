@@ -1,0 +1,11 @@
+E-Class Record App with GS and SF9
+
+Version 1.0.1
+- Fixed "This app doesn't support print preview" when using in-app Print buttons.
+- Class Record and Grading Sheet now open the native Windows print dialog.
+- Single-learner and all-learners SF9 printing now use the same native print path.
+- Retained print backgrounds and the existing A4 print CSS/layout rules.
+- No changes to grade calculations or stored gradebook data format.
+
+Version 1.0.0
+- Initial standalone Electron release.
