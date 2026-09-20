@@ -819,9 +819,11 @@ function render(){
   const adviserCls=ensureAdviserWorkspace();
   const role=roleForTab(activeTab);
   document.querySelectorAll("nav.tabs .tab").forEach(b=>{
-    const roleHome=role==="adviser"?"adviserhome":"subjecthome";
-    b.classList.toggle("active", b.dataset.tab === roleHome);
+    b.classList.toggle("active", b.dataset.tab === activeTab);
   });
+  const activeSidebarTab=document.querySelector(`nav.tabs .tab[data-tab="${activeTab}"]`);
+  const activeSection=activeSidebarTab&&activeSidebarTab.closest("details.nav-disclosure");
+  if(activeSection) activeSection.open=true;
   const main = document.getElementById("main");
   main.innerHTML = "";
   if(activeTab==="subjecthome"){renderSubjectTeacherHome(main,subjectCls);return;}
