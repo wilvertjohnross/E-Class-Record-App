@@ -1,7 +1,18 @@
 E-Class Record App with GS and SF9
-Version 1.1.3
+Version 1.1.4
 
 
+
+VERSION 1.1.4 — SF2 DIAGONAL MARKS / SIGNATURE CENTERING
+- Keeps the official SF2 template byte-for-byte unchanged.
+- Preserves the template's existing dashed diagonal rising from bottom-left to top-right in every attendance box.
+- Absent now adds only the opposite solid diagonal from top-left to bottom-right, forming an X with the existing dashed diagonal.
+- Late Comer/Tardy shades the upper triangular half formed by the official diagonal.
+- Cutting Classes shades the lower triangular half formed by the official diagonal.
+- The SF2 working grid mirrors the same diagonal geometry.
+- Adviser and School Head/Principal names are centered across the existing AD:AI signature lines in generated SF2 copies.
+- Compact printing remains roster-sized: unused Male/Female learner rows stay hidden only in generated preview/print copies.
+- Attendance calculations, click cycle, SF2-to-SF9 feed, backup compatibility, ECR, GS, SF9, security, and local persistence are unchanged.
 
 VERSION 1.1.3 — SF2 DEPED-COMPLIANT MARKINGS / COMPACT PRINT ROWS
 - Restores the original SF2 official template from the v1.1.0/v1.1.1 integration line.

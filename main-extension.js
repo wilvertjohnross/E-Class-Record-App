@@ -165,33 +165,107 @@ function sf2AppendComplianceMarks(zip, worksheetXml, marks) {
   const anchor = (col,row,fromRowOff,toRow,toRowOff) =>
     `<xdr:from><xdr:col>${col}</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>${row}</xdr:row><xdr:rowOff>${fromRowOff}</xdr:rowOff></xdr:from>`+
     `<xdr:to><xdr:col>${col+1}</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>${toRow}</xdr:row><xdr:rowOff>${toRowOff}</xdr:rowOff></xdr:to>`;
-  const rectShape = (id,name,x,y,w,h) =>
+  const triangleShape = (id,name,x,y,w,h,upper) => {
+    // The official cells already contain a dashed diagonal from bottom-left to top-right.
+    // Shade one of the two triangles formed by that existing diagonal; do not introduce a
+    // horizontal half-cell split.
+    const pts = upper
+      ? ['0,0','21600,0','0,21600']
+      : ['0,21600','21600,0','21600,21600'];
+    const path = `<a:moveTo><a:pt x="${pts[0].split(',')[0]}" y="${pts[0].split(',')[1]}"/></a:moveTo>`+
+      pts.slice(1).map(pt=>{const [px,py]=pt.split(',');return `<a:lnTo><a:pt x="${px}" y="${py}"/></a:lnTo>`;}).join('')+
+      `<a:close/>`;
+    return `<xdr:sp macro="" textlink=""><xdr:nvSpPr><xdr:cNvPr id="${id}" name="${xmlEscape(name)}"/><xdr:cNvSpPr/></xdr:nvSpPr>`+
+      `<xdr:spPr><a:xfrm><a:off x="${x}" y="${y}"/><a:ext cx="${w}" cy="${h}"/></a:xfrm>`+
+      `<a:custGeom><a:avLst/><a:gdLst/><a:ahLst/><a:cxnLst/><a:rect l="0" t="0" r="r" b="b"/>`+
+      `<a:pathLst><a:path w="21600" h="21600">${path}</a:path></a:pathLst></a:custGeom>`+
+      `<a:solidFill><a:srgbClr val="000000"/></a:solidFill><a:ln><a:noFill/></a:ln></xdr:spPr></xdr:sp>`;
+  };
+  const lineShape = (id,name,x,y,w,h) =>
     `<xdr:sp macro="" textlink=""><xdr:nvSpPr><xdr:cNvPr id="${id}" name="${xmlEscape(name)}"/><xdr:cNvSpPr/></xdr:nvSpPr>`+
-    `<xdr:spPr><a:xfrm><a:off x="${x}" y="${y}"/><a:ext cx="${w}" cy="${h}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:solidFill><a:srgbClr val="000000"/></a:solidFill><a:ln><a:noFill/></a:ln></xdr:spPr></xdr:sp>`;
-  const lineShape = (id,name,x,y,w,h,flipV) =>
-    `<xdr:sp macro="" textlink=""><xdr:nvSpPr><xdr:cNvPr id="${id}" name="${xmlEscape(name)}"/><xdr:cNvSpPr/></xdr:nvSpPr>`+
-    `<xdr:spPr><a:xfrm${flipV?' flipV="1"':''}><a:off x="${x}" y="${y}"/><a:ext cx="${w}" cy="${h}"/></a:xfrm><a:prstGeom prst="line"><a:avLst/></a:prstGeom><a:noFill/><a:ln w="12700"><a:solidFill><a:srgbClr val="000000"/></a:solidFill><a:prstDash val="solid"/></a:ln></xdr:spPr></xdr:sp>`;
+    // DrawingML's unflipped line preset runs from top-left to bottom-right. That is the
+    // opposite of the template's existing dashed diagonal and therefore completes the X.
+    `<xdr:spPr><a:xfrm><a:off x="${x}" y="${y}"/><a:ext cx="${w}" cy="${h}"/></a:xfrm><a:prstGeom prst="line"><a:avLst/></a:prstGeom><a:noFill/><a:ln w="12700"><a:solidFill><a:srgbClr val="000000"/></a:solidFill><a:prstDash val="solid"/></a:ln></xdr:spPr></xdr:sp>`;
   const additions=[];
   for (const item of marks) {
     const ref=String(item.ref||''), mark=String(item.mark||'P').toUpperCase();
     const col=colToIndex(ref), r1=rowFromRef(ref), row=r1-1;
     if (col < 0 || r1 < 1 || !['A','L','C'].includes(mark)) continue;
-    const fullH = g.rawRowEmu[row] || 278765, half = Math.max(1, Math.round(fullH/2));
+    const fullH = g.rawRowEmu[row] || 278765;
     const x = xPos[col] || 0, y = yPos[row] || 0, w = g.colEmu[col] || 300000;
+    const a1=anchor(col,row,0,row+1,0);
     if (mark === 'A') {
-      const a1=anchor(col,row,0,row+1,0), id1=nextId++, id2=nextId++;
-      additions.push(`<xdr:twoCellAnchor editAs="twoCell">${a1}${lineShape(id1,`SF2 Absent ${ref} /`,x,y,w,fullH,false)}<xdr:clientData/></xdr:twoCellAnchor>`);
-      additions.push(`<xdr:twoCellAnchor editAs="twoCell">${a1}${lineShape(id2,`SF2 Absent ${ref} opposite`,x,y,w,fullH,true)}<xdr:clientData/></xdr:twoCellAnchor>`);
+      // Keep the official dashed bottom-left -> top-right diagonal already in the cell and
+      // add only the opposite top-left -> bottom-right stroke to form an X.
+      additions.push(`<xdr:twoCellAnchor editAs="twoCell">${a1}${lineShape(nextId++,`SF2 Absent ${ref} opposite diagonal`,x,y,w,fullH)}<xdr:clientData/></xdr:twoCellAnchor>`);
     } else if (mark === 'L') {
-      additions.push(`<xdr:twoCellAnchor editAs="twoCell">${anchor(col,row,0,row,half)}${rectShape(nextId++,`SF2 Late Comer ${ref}`,x,y,w,half)}<xdr:clientData/></xdr:twoCellAnchor>`);
+      // Upper triangular half, using the template's own diagonal as the dividing edge.
+      additions.push(`<xdr:twoCellAnchor editAs="twoCell">${a1}${triangleShape(nextId++,`SF2 Late Comer ${ref} upper diagonal half`,x,y,w,fullH,true)}<xdr:clientData/></xdr:twoCellAnchor>`);
     } else if (mark === 'C') {
-      additions.push(`<xdr:twoCellAnchor editAs="twoCell">${anchor(col,row,half,row+1,0)}${rectShape(nextId++,`SF2 Cutting Classes ${ref}`,x,y+half,w,Math.max(1,fullH-half))}<xdr:clientData/></xdr:twoCellAnchor>`);
+      // Lower triangular half, using the template's own diagonal as the dividing edge.
+      additions.push(`<xdr:twoCellAnchor editAs="twoCell">${a1}${triangleShape(nextId++,`SF2 Cutting Classes ${ref} lower diagonal half`,x,y,w,fullH,false)}<xdr:clientData/></xdr:twoCellAnchor>`);
     }
   }
   drawing = drawing.replace('</xdr:wsDr>', additions.join('') + '</xdr:wsDr>');
   zip.updateFile('xl/drawings/drawing1.xml', Buffer.from(drawing,'utf8'));
 }
 
+
+
+function setWorksheetCellStyle(xml, ref, styleIndex) {
+  const r = regexEscape(ref);
+  const re = new RegExp(`<c\\b([^>]*\\br="${r}"[^>]*)`);
+  const m = xml.match(re);
+  if (!m) throw new Error(`Official template cell ${ref} was not found.`);
+  let attrs = m[1];
+  if (/\bs="[^"]*"/.test(attrs)) attrs = attrs.replace(/\bs="[^"]*"/, ` s="${styleIndex}"`);
+  else attrs += ` s="${styleIndex}"`;
+  return xml.replace(m[0], `<c${attrs}`);
+}
+
+function sf2EnsureSignatureCenterStyle(zip, worksheetXml) {
+  // Build a generated-copy-only style based on the existing adviser/principal signature-line
+  // style. Center-across-selection keeps the official line geometry intact while centering the
+  // printed name over AD:AI.
+  const refMatch = worksheetXml.match(/<c\b([^>]*\br="AD88"[^>]*)/);
+  const baseStyle = refMatch ? Number((refMatch[1].match(/\bs="(\d+)"/) || [])[1]) : NaN;
+  if (!Number.isInteger(baseStyle) || baseStyle < 0) throw new Error('The official SF2 signature-line style was not found.');
+  const stylesEntry = zip.getEntry('xl/styles.xml');
+  if (!stylesEntry) throw new Error('The official SF2 styles table was not found.');
+  let styles = stylesEntry.getData().toString('utf8');
+  const section = styles.match(/<cellXfs\b([^>]*)>([\s\S]*?)<\/cellXfs>/);
+  if (!section) throw new Error('The official SF2 cell-style table is invalid.');
+  const xfs = [];
+  const xfStart = /<xf\b[^>]*(?:\/>|>)/g;
+  let xfMatch;
+  while ((xfMatch = xfStart.exec(section[2]))) {
+    let full = xfMatch[0];
+    if (!/\/>$/.test(full)) {
+      const end = section[2].indexOf('</xf>', xfStart.lastIndex);
+      if (end < 0) throw new Error('The official SF2 cell-style table contains an incomplete style.');
+      full = section[2].slice(xfMatch.index, end + 5);
+      xfStart.lastIndex = end + 5;
+    }
+    xfs.push(full);
+  }
+  if (!xfs[baseStyle]) throw new Error('The official SF2 signature-line style index is invalid.');
+  let xf = xfs[baseStyle];
+  const alignment = '<alignment horizontal="centerContinuous" vertical="center"/>';
+  if (/<alignment\b[^>]*\/>/.test(xf)) xf = xf.replace(/<alignment\b[^>]*\/>/, alignment);
+  else if (/<alignment\b[^>]*>[\s\S]*?<\/alignment>/.test(xf)) xf = xf.replace(/<alignment\b[^>]*>[\s\S]*?<\/alignment>/, alignment);
+  else if (/<\/xf>$/.test(xf)) xf = xf.replace(/<\/xf>$/, `${alignment}</xf>`);
+  else if (/\/>$/.test(xf)) xf = xf.replace(/\/>$/, `>${alignment}</xf>`);
+  else throw new Error('The official SF2 signature-line style could not be cloned.');
+  const oldCount = Number((section[1].match(/\bcount="(\d+)"/) || [])[1] || xfs.length);
+  if (!Number.isInteger(oldCount) || oldCount < xfs.length) throw new Error('The official SF2 cell-style count is invalid.');
+  const newIndex = oldCount;
+  let attrs = section[1];
+  if (/\bcount="\d+"/.test(attrs)) attrs = attrs.replace(/\bcount="\d+"/, `count="${oldCount + 1}"`);
+  else attrs += ` count="${oldCount + 1}"`;
+  styles = styles.replace(section[0], `<cellXfs${attrs}>${section[2]}${xf}</cellXfs>`);
+  zip.updateFile('xl/styles.xml', Buffer.from(styles, 'utf8'));
+  return newIndex;
+}
 
 function stripWorkbookExternalLinks(zip) {
   const wbEntry = zip.getEntry('xl/workbook.xml');
@@ -486,6 +560,12 @@ function buildOfficialSf2Buffer(payload, ctx) {
   }
 
   // Put printed names on the existing signature lines; the template's labels remain untouched.
+  // Center-across-selection is applied only to the generated copy so the bundled official
+  // workbook itself remains byte-identical.
+  if (payload.adviser || payload.schoolHead) {
+    const signatureStyle = sf2EnsureSignatureCenterStyle(zip, xml);
+    for (const row of [88,92]) for (const col of ['AD','AE','AF','AG','AH','AI']) xml = setWorksheetCellStyle(xml, `${col}${row}`, signatureStyle);
+  }
   if (payload.adviser) xml = setWorksheetCell(xml, 'AD88', payload.adviser, 'string');
   if (payload.schoolHead) xml = setWorksheetCell(xml, 'AD92', payload.schoolHead, 'string');
 
@@ -1234,7 +1314,7 @@ function sf2TemplateFingerprint(ctx) {
 function sf2PreviewSignature(payload, ctx) {
   const crypto = require('crypto');
   return crypto.createHash('sha256')
-    .update('sf2-preview-v1.1.3\n')
+    .update('sf2-preview-v1.1.4\n')
     .update(sf2TemplateFingerprint(ctx))
     .update('\n')
     .update(stableStringify(payload))

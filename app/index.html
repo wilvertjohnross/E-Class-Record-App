@@ -295,11 +295,14 @@
   .sf2-date-head span,.sf2-date-head small{display:block;}
   .sf2-date-head small{font-size:9px;color:var(--ink-soft);}
   .sf2-att-cell{padding:0 !important;min-width:34px;}
-  .sf2-mark{width:100%;height:31px;border:none;border-radius:0;background:transparent;color:var(--ink);font-size:18px;font-weight:900;padding:0;box-shadow:none;}
+  .sf2-mark{width:100%;height:31px;border:none;border-radius:0;background:transparent;color:var(--ink);font-size:18px;font-weight:900;padding:0;box-shadow:none;position:relative;overflow:hidden;}
   .sf2-mark:hover,.sf2-mark:focus{box-shadow:inset 0 0 0 2px var(--green-chalk);filter:none;}
-  .sf2-mark.absent{color:var(--ink);background:linear-gradient(45deg,transparent 46%,currentColor 47%,currentColor 53%,transparent 54%),linear-gradient(-45deg,transparent 46%,currentColor 47%,currentColor 53%,transparent 54%);}
-  .sf2-mark.late{color:var(--ink);background:linear-gradient(to bottom,currentColor 0 50%,transparent 50% 100%);}
-  .sf2-mark.cutting{color:var(--ink);background:linear-gradient(to bottom,transparent 0 50%,currentColor 50% 100%);}
+  /* Mirror the official SF2 convention in the working grid: every box is divided by a dashed
+     bottom-left -> top-right diagonal; state-specific marks are added on top of that divider. */
+  .sf2-mark::before{content:"";position:absolute;left:-22%;top:50%;width:144%;border-top:1px dashed currentColor;transform:rotate(-42deg);transform-origin:center;pointer-events:none;z-index:3;}
+  .sf2-mark.absent::after{content:"";position:absolute;left:-22%;top:50%;width:144%;border-top:2px solid currentColor;transform:rotate(42deg);transform-origin:center;pointer-events:none;z-index:4;}
+  .sf2-mark.late::after{content:"";position:absolute;inset:0;background:currentColor;clip-path:polygon(0 0,100% 0,0 100%);pointer-events:none;z-index:1;}
+  .sf2-mark.cutting::after{content:"";position:absolute;inset:0;background:currentColor;clip-path:polygon(0 100%,100% 0,100% 100%);pointer-events:none;z-index:1;}
   .sf2-total{font-weight:800;background:var(--paper-deep)!important;min-width:45px;}
   .sf2-remarks-head{min-width:230px;}
   .sf2-remarks{min-width:230px;}

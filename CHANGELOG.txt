@@ -1,3 +1,10 @@
+v1.1.4 — SF2 Diagonal Compliance Marks + Signature Centering
+- Late Comer/Tardy now shades the upper triangular half formed by the official dashed diagonal.
+- Cutting Classes now shades the lower triangular half formed by the official dashed diagonal.
+- Absent preserves the official dashed rising diagonal and adds only the opposite descending diagonal to form an X.
+- Adviser and School Head names are centered across their existing signature lines in generated SF2 copies.
+- SF2 row compaction, attendance calculations, SF9 feed, backup compatibility, ECR, GS, and official template files are unchanged.
+
 VERSION 1.1.3 — SF2 DEPED-COMPLIANT MARKINGS / COMPACT PRINT ROWS
 - Restored the original SF2 official template used in v1.1.0/v1.1.1 (SHA-256 2fe5668f6fd86ce7cb7a1cc2f76ac2e6e35bc20d3b80d779ce459000c0c9d4ba).
 - Restored the four-state attendance workflow: blank = Present, full-cell X = Absent, upper-half shaded = Late Comer/Tardy, lower-half shaded = Cutting Classes.

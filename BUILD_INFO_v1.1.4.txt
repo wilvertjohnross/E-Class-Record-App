@@ -1,0 +1,24 @@
+E-Class Record App with GS and SF9 — v1.1.4
+
+Release: SF2 Diagonal Compliance Marks / Signature Centering
+Base: v1.1.3
+
+Scope
+- Keeps the official SF2 workbook unchanged on disk.
+- Uses the official cell's existing dashed bottom-left-to-top-right diagonal as the attendance divider.
+- Absent: adds one solid top-left-to-bottom-right diagonal, creating an X with the official dashed diagonal.
+- Late Comer/Tardy: shades the upper triangular half of the diagonally divided cell.
+- Cutting Classes: shades the lower triangular half of the diagonally divided cell.
+- Generated SF2 places Adviser and School Head/Principal names centered across the existing AD:AI signature lines.
+- Existing roster-sized SF2 print compaction remains unchanged.
+
+Compatibility
+- v1.1.0-v1.1.3 SF2 data remains readable; legacy T continues to normalize to Late/Tardy.
+- v1.0.27-era data remains compatible.
+- Attendance calculations, SF2-to-SF9 synchronization, grading/transmutation, ECR, GS, SF9, persistence, IPC, and updater security are unchanged.
+
+Bundled SF2 template SHA-256
+2fe5668f6fd86ce7cb7a1cc2f76ac2e6e35bc20d3b80d779ce459000c0c9d4ba
+
+Windows build
+Extract the complete source package and run BUILD_WINDOWS.bat.
