@@ -202,6 +202,11 @@ function ensureSubjectConfig(cls){
   c.TLE=valid(SUBJECT_NAME_OPTIONS.TLE,c.TLE,"Technology and Livelihood Education (TLE)");
   c.ELEC1=valid(SUBJECT_NAME_OPTIONS.ELECTIVE,c.ELEC1,"Research I");
   c.ELEC2=valid(SUBJECT_NAME_OPTIONS.ELECTIVE,c.ELEC2,"Environmental Science");
+  if(c.classType==="Regular"){
+    c.MATH="Math";
+    c.SCI="Science";
+    c.TLE="Technology and Livelihood Education (TLE)";
+  }
   if(c.ELEC1===c.ELEC2){
     c.ELEC2=SUBJECT_NAME_OPTIONS.ELECTIVE.find(x=>x!==c.ELEC1)||"Environmental Science";
   }
@@ -662,14 +667,14 @@ function renderSetup(main, cls){
 
     <div class="card">
       <h2>SF9 Subject Configuration</h2>
-      <div class="sub">Choose the approved subject nomenclature for this advisory class. Special Science Class enables two elective learning areas; Regular hides them from SF9 and General Average.</div>
+      <div class="sub">Regular Class uses the standard subject names and locks the subject controls. Special Science Class unlocks the approved subject nomenclature and enables two elective learning areas.</div>
       <div class="grid3">
         <div class="field"><label>Class Type</label><select id="f_classType">${subjectOptionHtml(CLASS_TYPE_OPTIONS,sc.classType)}</select></div>
-        <div class="field"><label>Mathematics</label><select id="f_mathName">${subjectOptionHtml(SUBJECT_NAME_OPTIONS.MATH,sc.MATH)}</select></div>
-        <div class="field"><label>Science</label><select id="f_scienceName">${subjectOptionHtml(SUBJECT_NAME_OPTIONS.SCI,sc.SCI)}</select></div>
+        <div class="field"><label>Mathematics</label><select id="f_mathName" ${sc.classType==="Special Science Class"?"":"disabled"}>${subjectOptionHtml(SUBJECT_NAME_OPTIONS.MATH,sc.MATH)}</select></div>
+        <div class="field"><label>Science</label><select id="f_scienceName" ${sc.classType==="Special Science Class"?"":"disabled"}>${subjectOptionHtml(SUBJECT_NAME_OPTIONS.SCI,sc.SCI)}</select></div>
       </div>
       <div class="grid3">
-        <div class="field"><label>TLE / Special Subject</label><select id="f_tleName">${subjectOptionHtml(SUBJECT_NAME_OPTIONS.TLE,sc.TLE)}</select></div>
+        <div class="field"><label>TLE / Special Subject</label><select id="f_tleName" ${sc.classType==="Special Science Class"?"":"disabled"}>${subjectOptionHtml(SUBJECT_NAME_OPTIONS.TLE,sc.TLE)}</select></div>
         <div class="field"><label>Elective 1</label><select id="f_elective1" ${sc.classType==="Special Science Class"?"":"disabled"}>${subjectOptionHtml(SUBJECT_NAME_OPTIONS.ELECTIVE,sc.ELEC1,sc.ELEC2)}</select></div>
         <div class="field"><label>Elective 2</label><select id="f_elective2" ${sc.classType==="Special Science Class"?"":"disabled"}>${subjectOptionHtml(SUBJECT_NAME_OPTIONS.ELECTIVE,sc.ELEC2,sc.ELEC1)}</select></div>
       </div>
