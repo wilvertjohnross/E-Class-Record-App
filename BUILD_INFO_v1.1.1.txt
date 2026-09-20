@@ -1,0 +1,17 @@
+E-Class Record App with GS and SF9 — v1.1.1
+Build type: Patch release / complete installer source
+Base: v1.1.0 SF2 complete installer source
+
+Fix scope:
+- Accept boolean metadata values in the official-output validators.
+- sf2Enabled remains a boolean class metadata property and is no longer rejected.
+- This fixes Official SF2 generation and the related ECR/GS regression caused by spreading class metadata into official-output payloads.
+
+Compatibility:
+- Existing v1.1.0 SF2 data is preserved unchanged.
+- Existing v1.0.27-era data remains valid; classes without sf2Enabled continue to behave as SF2-disabled.
+- No saved-data migration is required.
+- No grading, transmutation, SF9, attendance-calculation, or official-template-layout changes.
+
+Data remains under:
+Documents\E-Class Record App with GS and SF9\eclass-record-data.json

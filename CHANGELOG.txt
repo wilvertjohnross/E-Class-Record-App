@@ -1,3 +1,11 @@
+VERSION 1.1.1 — SF2 INPUT / METADATA REGRESSION FIX
+- Fixed the v1.1.0 metadata validator regression that rejected sf2Enabled because it is a boolean.
+- Boolean metadata is now accepted by both SF2 and shared ECR/GS official-output payload validation.
+- Restores Official SF2 output and prevents sf2Enabled from breaking Official ECR/Grading Sheet generation.
+- Preserves v1.1.0 SF2 JSON data and v1.0.27-compatible data without migration.
+- No changes to grading/transmutation logic, attendance calculations, SF9 logic, or official template files.
+- Validation notices remain non-blocking.
+
 VERSION 1.1.0 — SF2 DAILY ATTENDANCE INTEGRATION
 - Added opt-in SF2 / Advisory Class setting.
 - Added SF2 Attendance tab with month selector, selectable school days, fast daily marking, learner remarks, and monthly summary.

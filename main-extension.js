@@ -279,7 +279,7 @@ function validateSf2Payload(payload) {
     for (const mark of st.marks) if (!['P','A','L','C'].includes(String(mark || 'P'))) throw new Error('SF2 contains an unsupported attendance code.');
   }
   for (const [key, value] of Object.entries(payload.meta)) {
-    if (value !== null && value !== undefined && typeof value !== 'string' && typeof value !== 'number') throw new Error(`Invalid SF2 metadata field: ${key}.`);
+    if (value !== null && value !== undefined && typeof value !== 'string' && typeof value !== 'number' && !(key === 'sf2Enabled' && typeof value === 'boolean')) throw new Error(`Invalid SF2 metadata field: ${key}.`);
     if (String(value ?? '').length > 1000) throw new Error(`SF2 metadata field is unexpectedly long: ${key}.`);
   }
 }
@@ -417,7 +417,7 @@ function validatePayload(payload) {
     throw new Error('Every learner must be identified as Male or Female, with at most 50 in each official-template section.');
   }
   for (const [key, value] of Object.entries(payload.meta)) {
-    if (value !== null && value !== undefined && typeof value !== 'string' && typeof value !== 'number') throw new Error(`Invalid metadata field: ${key}.`);
+    if (value !== null && value !== undefined && typeof value !== 'string' && typeof value !== 'number' && !(key === 'sf2Enabled' && typeof value === 'boolean')) throw new Error(`Invalid metadata field: ${key}.`);
     if (String(value ?? '').length > 1000) throw new Error(`Metadata field is unexpectedly long: ${key}.`);
   }
   if (payload.schoolLogoDataUri && String(payload.schoolLogoDataUri).length > 8 * 1024 * 1024) throw new Error('The school logo data exceeds the safety limit.');

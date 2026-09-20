@@ -1,5 +1,15 @@
 E-Class Record App with GS and SF9
-Version 1.1.0
+Version 1.1.1
+
+
+VERSION 1.1.1 — SF2 INPUT / METADATA REGRESSION FIX
+- Fixes the v1.1.0 official-output metadata validator so the boolean class property sf2Enabled is accepted as valid metadata.
+- Restores Official SF2 generation for SF2-enabled advisory classes.
+- Also prevents the same sf2Enabled property from breaking Official ECR / Grading Sheet output.
+- No grading, transmutation, attendance, SF9, template-layout, or saved-data schema changes.
+- Existing v1.1.0 SF2 data and v1.0.27-era data remain compatible.
+- Validation/input notices remain non-blocking; the fix does not add modal validation dialogs.
+- This is a patch release on the v1.1.x line.
 
 VERSION 1.1.0 — SF2 DAILY ATTENDANCE INTEGRATION
 - First feature-level release after the v1.0.x stabilization line.
