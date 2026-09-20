@@ -910,6 +910,49 @@ function renderComingSoon(main,code,title,message){
 /* =========================================================================
    RENDER: Setup tab
    ========================================================================= */
+function splitPastedLearnerNames(value){
+  return unicodeText(value)
+    .replace(/[\u2028\u2029]/g,"\n")
+    .split(/\r\n|\n|\r/)
+    .map(name=>unicodeText(name).trim())
+    .filter(Boolean);
+}
+
+/* v1.4.2 migration repair: v1.4.1 accidentally treated pasted line breaks as
+   literal "\\n" text, allowing an entire multiline roster to be saved as one
+   learner name. A learner name cannot validly contain a line break, so split
+   any such legacy record once while preserving the original record/id for the
+   first learner (and therefore preserving any data already attached to it). */
+function repairMultilineSubjectRoster(cls){
+  if(!cls||!Array.isArray(cls.students)) return 0;
+  const existing=new Set();
+  cls.students.forEach(s=>{
+    if(!/[\r\n\u2028\u2029]/.test(String(s&&s.name||""))){
+      const nk=normalizeLearnerName(s&&s.name); if(nk) existing.add(nk);
+    }
+  });
+  const additions=[];
+  let repaired=0;
+  for(const s of cls.students){
+    const raw=String(s&&s.name||"");
+    if(!/[\r\n\u2028\u2029]/.test(raw)) continue;
+    const parts=splitPastedLearnerNames(raw);
+    if(!parts.length){s.name="";repaired++;continue;}
+    s.name=parts[0];
+    const firstKey=normalizeLearnerName(parts[0]); if(firstKey) existing.add(firstKey);
+    for(const name of parts.slice(1)){
+      if(cls.students.length+additions.length>=1000) break;
+      const nk=normalizeLearnerName(name);
+      if(!nk||existing.has(nk)) continue;
+      existing.add(nk);
+      additions.push({id:uid("s"),name,lrn:"",age:"",sex:s.sex==="F"?"F":"M",birthDate:"",sf1Profile:cleanSf1Profile()});
+    }
+    repaired++;
+  }
+  if(additions.length) cls.students.push(...additions);
+  return repaired+additions.length;
+}
+
 function classRosterManagerHtml(cls){
   const males=cls.students.filter(s=>s.sex==="M"), females=cls.students.filter(s=>s.sex==="F");
   const row=s=>`<tr data-class-roster-sid="${esc(s.id)}">
@@ -923,10 +966,10 @@ function classRosterManagerHtml(cls){
       <button id="classAddStudent" class="primary">+ Add learner</button>
       <button id="classPasteNames" class="ghost-alt" style="background:var(--paper-deep);">Paste names</button>
       <button id="classImportCsv" class="ghost-alt" style="background:var(--paper-deep);">Import Names CSV</button>
-      <button id="classDownloadRosterTemplate" class="ghost-alt" style="background:var(--paper-deep);">Download Names CSV template</button>
+      <button id="classDownloadRosterTemplate" class="ghost-alt" style="background:var(--paper-deep);">Download Names CSV Template</button>
       <input type="file" id="classCsvFile" accept=".csv,text/csv" style="display:none;">
     </div>
-    <div class="hint" style="margin-bottom:10px;">Only learner names are required. Sex is retained because the official Class Record separates Male and Female learners.</div>
+    <div class="hint" style="margin-bottom:10px;">Only learner names are required. The downloadable CSV has a <strong>Learner Name (Required)</strong> column and an optional <strong>Sex (M/F)</strong> column. If Sex is left blank, the learner is placed in the Male group temporarily and can be changed afterward.</div>
     <div class="scroll-x class-roster-scroll"><table class="data" id="classRosterTable"><thead><tr><th style="text-align:left;">Learner Name</th><th>Sex</th><th></th></tr></thead><tbody>
       <tr class="group-row"><td colspan="3">MALE (${males.length})</td></tr>${males.map(row).join("")}
       <tr class="group-row"><td colspan="3">FEMALE (${females.length})</td></tr>${females.map(row).join("")}
@@ -945,15 +988,19 @@ function bindClassRosterManager(cls){
     if(!value)return;
     const existing=new Set((cls.students||[]).map(s=>normalizeLearnerName(s.name)).filter(Boolean));
     const seen=new Set();
-    const names=value.split("\\n").map(t=>unicodeText(t).trim()).filter(Boolean).filter(name=>{const nk=normalizeLearnerName(name);if(!nk||existing.has(nk)||seen.has(nk))return false;seen.add(nk);return true;});
+    const names=splitPastedLearnerNames(value).filter(name=>{const nk=normalizeLearnerName(name);if(!nk||existing.has(nk)||seen.has(nk))return false;seen.add(nk);return true;});
     if(cls.students.length+names.length>1000){alert("That paste would exceed the 1,000-learner safety limit for one class.");return;}
+    if(!names.length){alert("No new learner names were found. Blank lines and names already in this class are ignored.");return;}
     names.forEach(name=>cls.students.push({id:uid("s"),name,lrn:"",age:"",sex:"M",birthDate:"",sf1Profile:cleanSf1Profile()}));
-    saveState();render();
+    saveState();render();alert("Added "+names.length+" learner"+(names.length===1?"":"s")+" to this class.");
   });
   document.getElementById("classDownloadRosterTemplate").addEventListener("click",()=>{
-    const csv='Name\\n"Dela Cruz, Juan"\\n"Santos, Maria"\\n';
-    const blob=new Blob([csv],{type:"text/csv"}),url=URL.createObjectURL(blob),a=document.createElement("a");
-    a.href=url;a.download="subject-teacher-roster-template.csv";a.click();URL.revokeObjectURL(url);
+    // Keep the roster template intentionally simple: one required learner-name
+    // column and one optional Sex column. UTF-8 BOM lets Excel display Ñ/ñ
+    // and other Unicode names correctly when the CSV is opened directly.
+    const csv="\uFEFFLearner Name (Required),Sex (M/F - Optional; blank = M until changed)\r\n";
+    const blob=new Blob([csv],{type:"text/csv;charset=utf-8"}),url=URL.createObjectURL(blob),a=document.createElement("a");
+    a.href=url;a.download="Subject Teacher Learner Names Template.csv";a.click();URL.revokeObjectURL(url);
   });
   document.getElementById("classImportCsv").addEventListener("click",()=>document.getElementById("classCsvFile").click());
   document.getElementById("classCsvFile").addEventListener("change",e=>{
@@ -971,6 +1018,8 @@ function bindClassRosterManager(cls){
 }
 
 function renderSetup(main, cls){
+  const repairedRosterEntries=repairMultilineSubjectRoster(cls);
+  if(repairedRosterEntries) saveState();
   const m = ensureClassRecordSubject(cls);
   const linkStatus=classRecordLinkStatus(cls);
   const electiveMode=m.classRecordSubjectId==="ELECTIVE";
@@ -1615,6 +1664,7 @@ async function exportOfficialSf2(cls,mode="preview"){
 /* Minimal CSV parser: handles quoted fields containing commas/newlines,
    without needing an external library (this app has to work offline). */
 function parseCsv(text){
+  text=String(text||"").replace(/^\uFEFF/,"");
   const rows = [];
   let row = [], field = "", inQuotes = false, cells = 0;
   const pushField=()=>{
@@ -1636,8 +1686,8 @@ function parseCsv(text){
     } else {
       if(c === '"') inQuotes = true;
       else if(c === ','){ pushField(); }
+      else if(c === '\r'){ pushField(); pushRow(); if(text[i+1] === '\n') i++; }
       else if(c === '\n'){ pushField(); pushRow(); }
-      else if(c === '\r'){ /* skip; newline is handled by \n */ }
       else field += c;
     }
   }
@@ -1650,8 +1700,8 @@ function importRosterCsv(cls, text){
   const rows = parseCsv(text);
   if(!rows.length) throw new Error("The file appears to be empty.");
   let startIdx = 0;
-  const headerGuess = rows[0].map(h=>String(h||"").trim().toLowerCase());
-  const looksLikeHeader = headerGuess.some(h=>["name","lrn","age","sex"].includes(h));
+  const headerGuess = rows[0].map(h=>String(h||"").replace(/^\uFEFF/,"").trim().toLowerCase());
+  const looksLikeHeader = headerGuess.some(h=>h.includes("name")||h.includes("lrn")||h.includes("age")||h.includes("sex")||h.includes("gender"));
   let colMap = {name:0, lrn:1, age:2, sex:3};
   if(looksLikeHeader){
     startIdx = 1; colMap = {};
