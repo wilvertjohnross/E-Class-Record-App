@@ -1,6 +1,6 @@
 'use strict';
 
-// v1.0.13 runtime extension
+// v1.0.14 runtime extension
 // Official ECR preview pipeline:
 // official template -> direct XLSX fill -> persistent hidden Excel renderer -> cached PDF -> in-app popup.
 // Excel is pre-warmed once in the background and reused. Preview PDFs are content-addressed,
@@ -66,6 +66,37 @@ function setWorksheetCell(xml, ref, value, type = 'auto') {
     }
   }
   return xml.replace(matched, replacement);
+}
+
+function setWorksheetRowHidden(xml, rowNumber, hidden) {
+  const rowRe = new RegExp(`<row\\b([^>]*\\br="${rowNumber}"[^>]*)>`);
+  const m = xml.match(rowRe);
+  if (!m) return xml;
+  let attrs = m[1];
+  attrs = attrs.replace(/\shidden="[^"]*"/g, '');
+  if (hidden) attrs += ' hidden="1"';
+  return xml.replace(m[0], `<row${attrs}>`);
+}
+
+function compactUnusedLearnerRows(xml, payload) {
+  // The official ECR has fixed learner blocks:
+  // Male = rows 18-67, Female separator = row 68, Female = rows 69-118.
+  // For the official preview/print copy, hide unused rows so the Female block follows the
+  // last populated Male learner immediately and trailing empty Female rows are skipped.
+  const maleCount = payload.students.filter(s => s.sex === 'M').length;
+  const femaleCount = payload.students.filter(s => s.sex === 'F').length;
+
+  for (let row = 18; row <= 67; row++) {
+    const used = row < 18 + maleCount;
+    xml = setWorksheetRowHidden(xml, row, !used);
+  }
+  for (let row = 69; row <= 118; row++) {
+    const used = row < 69 + femaleCount;
+    xml = setWorksheetRowHidden(xml, row, !used);
+  }
+  // Never hide the official Female section divider/header row.
+  xml = setWorksheetRowHidden(xml, 68, false);
+  return xml;
 }
 
 function validatePayload(payload) {
@@ -162,6 +193,11 @@ function buildOfficialEcrBuffer(payload, ctx) {
 
   payload.students.filter(s=>s.sex==='M').forEach((s,i)=>writeStudent(18+i,s));
   payload.students.filter(s=>s.sex==='F').forEach((s,i)=>writeStudent(69+i,s));
+
+  // Compact the official preview/print copy by hiding only unused learner rows.
+  // Hidden rows retain their original cells/formulas/formatting, so the official
+  // template itself is not structurally rewritten.
+  xml = compactUnusedLearnerRows(xml, payload);
 
   zip.updateFile('xl/worksheets/sheet1.xml', Buffer.from(xml, 'utf8'));
 
@@ -534,7 +570,7 @@ function templateFingerprint(ctx) {
 function previewSignature(payload, ctx) {
   const crypto = require('crypto');
   return crypto.createHash('sha256')
-    .update('ecr-preview-v1.0.13\n')
+    .update('ecr-preview-v1.0.14-compact-learner-rows\n')
     .update(templateFingerprint(ctx))
     .update('\n')
     .update(stableStringify(payload))
@@ -740,7 +776,7 @@ module.exports = {
     if (action === 'ecr:preview-engine-status') {
       return { ok: true, warm: !!(excelEngine && excelEngine.ready) };
     }
-    return { ok: false, unsupported: true, error: `Runtime action is not available in v1.0.13: ${action}` };
+    return { ok: false, unsupported: true, error: `Runtime action is not available in v1.0.14: ${action}` };
   }
 };
 
