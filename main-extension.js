@@ -1,6 +1,6 @@
 'use strict';
 
-// v1.0.15 runtime extension
+// v1.0.16 runtime extension
 // Official ECR preview pipeline:
 // official template -> direct XLSX fill -> persistent hidden Excel renderer -> cached PDF -> in-app popup.
 // Excel is pre-warmed once in the background and reused. Preview PDFs are content-addressed,
@@ -153,8 +153,10 @@ function addEcrSubjectTeacherSignatory(buffer, payload, ctx) {
   const preparedName = meta.preparedByName || meta.teacher || '';
   const preparedTitle = meta.preparedByTitle || 'Subject Teacher';
 
-  xml = ensureMergedRange(xml, 'C119:H119');
-  xml = ensureMergedRange(xml, 'C120:H120');
+  // The official template already merges C119:E119 and C120:E120.
+  // Never create wider overlapping merges here: Excel rejects overlapping merged ranges.
+  xml = ensureMergedRange(xml, 'C119:E119');
+  xml = ensureMergedRange(xml, 'C120:E120');
   xml = setWorksheetCell(xml, 'B119', 'Prepared by:', 'string');
   xml = setWorksheetCell(xml, 'C119', preparedName, 'string');
   xml = setWorksheetCellStyle(xml, 'C119', styles.nameStyle);
@@ -497,7 +499,14 @@ try {
   $excel.DisplayAlerts = $false
   try { $excel.AskToUpdateLinks = $false } catch {}
 
-  $workbook = $excel.Workbooks.Open($xlsx, 0, $true)
+  if (-not (Test-Path -LiteralPath $xlsx)) { throw ('Generated official workbook was not found: ' + $xlsx) }
+  if ((Get-Item -LiteralPath $xlsx).Length -lt 1024) { throw 'Generated official workbook is incomplete.' }
+  $openError = $null
+  for ($attempt = 1; $attempt -le 3 -and $workbook -eq $null; $attempt++) {
+    try { $workbook = $excel.Workbooks.Open($xlsx, 0, $true, 5, '', '', $true) }
+    catch { $openError = $_.Exception; Start-Sleep -Milliseconds (250 * $attempt) }
+  }
+  if ($workbook -eq $null) { if ($openError) { throw $openError }; throw 'Microsoft Excel could not open the generated official workbook.' }
   $sheet = $workbook.Worksheets.Item(1)
   [void]$sheet.ExportAsFixedFormat(0, $pdf)
 
@@ -564,7 +573,13 @@ try {
           $xlsx = [string]$req.xlsxPath
           $pdf = [string]$req.pdfPath
           if (Test-Path -LiteralPath $pdf) { Remove-Item -LiteralPath $pdf -Force -ErrorAction SilentlyContinue }
-          $workbook = $excel.Workbooks.Open($xlsx, 0, $true)
+          if (-not (Test-Path -LiteralPath $xlsx)) { throw ('Generated official workbook was not found: ' + $xlsx) }
+          $openError = $null
+          for ($attempt = 1; $attempt -le 3 -and $workbook -eq $null; $attempt++) {
+            try { $workbook = $excel.Workbooks.Open($xlsx, 0, $true, 5, '', '', $true) }
+            catch { $openError = $_.Exception; Start-Sleep -Milliseconds (200 * $attempt) }
+          }
+          if ($workbook -eq $null) { if ($openError) { throw $openError }; throw 'Microsoft Excel could not open the generated official workbook.' }
           $sheet = $workbook.Worksheets.Item(1)
           [void]$sheet.ExportAsFixedFormat(0, $pdf)
           $workbook.Close($false)
@@ -812,7 +827,7 @@ function gsTemplateFingerprint(ctx) {
 function gsPreviewSignature(payload, ctx) {
   const crypto = require('crypto');
   return crypto.createHash('sha256')
-    .update('gs-preview-v1.0.15-official-template-setup-signatories-compact\n')
+    .update('gs-preview-v1.0.16-official-template-setup-signatories-compact\n')
     .update(gsTemplateFingerprint(ctx))
     .update('\n')
     .update(stableStringify(payload))
@@ -822,7 +837,7 @@ function gsPreviewSignature(payload, ctx) {
 function previewSignature(payload, ctx) {
   const crypto = require('crypto');
   return crypto.createHash('sha256')
-    .update('ecr-preview-v1.0.15-subject-teacher-signatory\n')
+    .update('ecr-preview-v1.0.16-safe-signatory-no-overlap\n')
     .update(templateFingerprint(ctx))
     .update('\n')
     .update(stableStringify(payload))
@@ -953,8 +968,11 @@ async function createOfficialPopupPreview(payload, context) {
     await excelEngine.render(xlsxPath, pdfPath);
   } catch (err) {
     renderError = err;
-    // Keep a conservative one-shot fallback so preview still works if the
-    // persistent worker was blocked by local Excel/PowerShell state.
+    // Stop the failed hidden worker before starting a fresh one-shot Excel COM instance.
+    // This avoids two automation instances competing for Workbooks.Open.
+    try { if (excelEngine) excelEngine.stop(); } catch {}
+    excelEngine = null;
+    await new Promise(r => setTimeout(r, 350));
     const fallback = await fallbackOneShotRender(xlsxPath, pdfPath, ctx);
     if (!fallback.ok) {
       return {
@@ -1073,6 +1091,9 @@ async function createOfficialGsPopupPreview(payload, context) {
     await excelEngine.render(xlsxPath, pdfPath);
   } catch (err) {
     renderError = err;
+    try { if (excelEngine) excelEngine.stop(); } catch {}
+    excelEngine = null;
+    await new Promise(r => setTimeout(r, 350));
     const fallback = await fallbackOneShotRender(xlsxPath, pdfPath, ctx);
     if (!fallback.ok) return { ok: false, previewUnavailable: true, openedFallback: false, xlsxPath, pdfPath, error: fallback.error || (renderError && renderError.message) || 'Microsoft Excel did not create the official Grading Sheet PDF preview.' };
   }
@@ -1112,6 +1133,43 @@ async function saveOfficialDocument(kind, payload, context) {
 }
 
 
+
+function xmlDecodeText(value) {
+  return String(value ?? '').replace(/&#x([0-9a-fA-F]+);/g,(_m,h)=>String.fromCodePoint(parseInt(h,16)))
+    .replace(/&#([0-9]+);/g,(_m,d)=>String.fromCodePoint(parseInt(d,10)))
+    .replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').replace(/&apos;/g,"'").replace(/&amp;/g,'&');
+}
+function columnIndexFromRef(ref){
+  const m=String(ref||'').match(/^([A-Z]+)/i);if(!m)return 0;let n=0;for(const ch of m[1].toUpperCase())n=n*26+(ch.charCodeAt(0)-64);return n-1;
+}
+function parseCsvMatrix(text){
+  const rows=[];let row=[],cell='',q=false;const src=String(text||'').replace(/^\uFEFF/,'');
+  for(let i=0;i<src.length;i++){const ch=src[i];if(q){if(ch==='"'&&src[i+1]==='"'){cell+='"';i++;}else if(ch==='"')q=false;else cell+=ch;}else{if(ch==='"')q=true;else if(ch===','){row.push(cell);cell='';}else if(ch==='\n'){row.push(cell.replace(/\r$/,''));rows.push(row);row=[];cell='';}else cell+=ch;}}
+  row.push(cell.replace(/\r$/,''));if(row.some(v=>v!==''))rows.push(row);return rows;
+}
+function parseXlsxMatrix(filePath, ctx){
+  const AdmZip=resolveAdmZip();const zip=new AdmZip(ctx.fs.readFileSync(filePath));
+  const ss=[];const se=zip.getEntry('xl/sharedStrings.xml');if(se){const sx=se.getData().toString('utf8');let sm;const sir=/<si\b[^>]*>([\s\S]*?)<\/si>/g;while((sm=sir.exec(sx))){let t='',tm;const tr=/<t\b[^>]*>([\s\S]*?)<\/t>/g;while((tm=tr.exec(sm[1])))t+=xmlDecodeText(tm[1]);ss.push(t);}}
+  let sheetEntry=zip.getEntry('xl/worksheets/sheet1.xml');if(!sheetEntry)throw new Error('The first worksheet could not be read.');const xml=sheetEntry.getData().toString('utf8');
+  const rows=[];let rm;const rr=/<row\b[^>]*\br="(\d+)"[^>]*>([\s\S]*?)<\/row>/g;
+  while((rm=rr.exec(xml))){const out=[];let cm;const cr=/<c\b([^>]*\br="([A-Z]+\d+)"[^>]*)>([\s\S]*?)<\/c>|<c\b([^>]*\br="([A-Z]+\d+)"[^>]*)\/>/g;while((cm=cr.exec(rm[2]))){const attrs=cm[1]||cm[4]||'',ref=cm[2]||cm[5],body=cm[3]||'',i=columnIndexFromRef(ref),type=((attrs.match(/\bt="([^"]+)"/)||[])[1]||'').toLowerCase();let v='';if(type==='inlinestr'){let tm;const tr=/<t\b[^>]*>([\s\S]*?)<\/t>/g;while((tm=tr.exec(body)))v+=xmlDecodeText(tm[1]);}else{const vm=body.match(/<v\b[^>]*>([\s\S]*?)<\/v>/);if(vm){const raw=xmlDecodeText(vm[1]);if(type==='s'){const k=Number(raw);v=Number.isInteger(k)&&k>=0&&k<ss.length?ss[k]:'';}else{const n=Number(raw);v=raw.trim()!==''&&Number.isFinite(n)?n:raw;}}}out[i]=v;}rows.push(out);}
+  return rows;
+}
+async function importSummaryFile(context){
+  const ctx={...(startupContext||{}),...(context||{})};const parent=typeof ctx.getMainWindow==='function'?ctx.getMainWindow():undefined;
+  const r=await ctx.dialog.showOpenDialog(parent,{title:'Import Summary of Grades',properties:['openFile'],filters:[{name:'Summary Table',extensions:['xlsx','csv']}]});
+  if(r.canceled||!r.filePaths||!r.filePaths[0])return{ok:false,cancelled:true};const filePath=r.filePaths[0];const ext=ctx.path.extname(filePath).toLowerCase();
+  let rows;if(ext==='.csv')rows=parseCsvMatrix(ctx.fs.readFileSync(filePath,'utf8'));else rows=parseXlsxMatrix(filePath,ctx);
+  rows=rows.filter(row=>(row||[]).some(v=>String(v??'').trim()!==''));
+  return{ok:true,fileName:ctx.path.basename(filePath),rows};
+}
+function openSf9HtmlPreview(payload, context){
+  const ctx={...(startupContext||{}),...(context||{})};if(!ctx.BrowserWindow)return{ok:false,error:'Preview window service is unavailable.'};
+  const parent=typeof ctx.getMainWindow==='function'?ctx.getMainWindow():null;const win=new ctx.BrowserWindow({width:1200,height:880,minWidth:800,minHeight:600,parent:parent&&!parent.isDestroyed()?parent:undefined,modal:false,title:`SF9 Preview — ${String(payload&&payload.name||'Learner')}`,backgroundColor:'#525659',show:false,webPreferences:{contextIsolation:true,nodeIntegration:false,sandbox:true}});
+  previewWindows.add(win);if(ctx.Menu){const doPrint=()=>{if(!win.isDestroyed())win.webContents.print({silent:false,printBackground:true,color:true,margins:{marginType:'default'}});};win.setMenu(ctx.Menu.buildFromTemplate([{label:'File',submenu:[{label:'Print...',accelerator:'CmdOrCtrl+P',click:doPrint},{type:'separator'},{label:'Close Preview',accelerator:'Esc',click:()=>{if(!win.isDestroyed())win.close();}}]},{label:'View',submenu:[{role:'zoomIn'},{role:'zoomOut'},{role:'resetZoom'},{type:'separator'},{role:'togglefullscreen'}]}]));}
+  win.once('ready-to-show',()=>win.show());win.on('closed',()=>previewWindows.delete(win));win.loadURL('data:text/html;charset=utf-8,'+encodeURIComponent(String(payload&&payload.html||'')));return{ok:true};
+}
+
 module.exports = {
   async register(context) {
     startupContext = context;
@@ -1144,10 +1202,21 @@ module.exports = {
       return createOfficialGsPopupPreview(payload, context);
     }
     if (action === 'gs:official-save') return saveOfficialDocument('gs', payload, context);
+    if (action === 'summary:import-file') return importSummaryFile(context);
+    if (action === 'sf9:preview-html') return openSf9HtmlPreview(payload, context);
+    if (action === 'window:fullscreen-state') {
+      const w = startupContext && typeof startupContext.getMainWindow === 'function' ? startupContext.getMainWindow() : null;
+      return { ok: true, fullscreen: !!(w && !w.isDestroyed() && w.isFullScreen()) };
+    }
+    if (action === 'window:exit-fullscreen') {
+      const w = startupContext && typeof startupContext.getMainWindow === 'function' ? startupContext.getMainWindow() : null;
+      if (w && !w.isDestroyed()) { w.setFullScreen(false); if (w.isMaximized()) w.unmaximize(); w.show(); w.focus(); }
+      return { ok: true };
+    }
     if (action === 'ecr:preview-engine-status' || action === 'official:preview-engine-status') {
       return { ok: true, warm: !!(excelEngine && excelEngine.ready) };
     }
-    return { ok: false, unsupported: true, error: `Runtime action is not available in v1.0.15: ${action}` };
+    return { ok: false, unsupported: true, error: `Runtime action is not available in v1.0.16: ${action}` };
   }
 };
 

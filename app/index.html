@@ -393,6 +393,81 @@
   .import-summary{background:#F5EFE0;border:1px solid var(--border);padding:9px 11px;border-radius:4px;font-size:12.5px;margin:8px 0;}
   @media (max-width:720px){.import-grid{grid-template-columns:1fr;}}
   .badge-count{background:var(--paper-deep);border:1px solid var(--border);border-radius:10px;padding:1px 9px;font-size:11.5px;margin-left:6px;}
+
+
+  /* ===== v1.0.16 usability polish ===== */
+  .old-english{
+    font-family:"Old English Text MT","Engravers Old English","Lucida Blackletter",Georgia,serif;
+    letter-spacing:.2px;
+  }
+  .cr-head-center{flex:1;text-align:center;min-width:280px;}
+  .cr-head-center .gov-line{font-size:14px;line-height:1.05;}
+  .cr-head-center .dep-line{font-size:17px;line-height:1.15;margin:1px 0 3px;}
+  .gs-headtext .republic-script,
+  .gs-headtext .deped-script,
+  .rc-headtext .l1.old-english{font-family:"Old English Text MT","Engravers Old English","Lucida Blackletter",Georgia,serif;}
+  .gs-headtext .republic-script{font-size:12.5px;font-weight:700;}
+
+  /* Freeze learner identity while horizontally scrolling the Class Record. */
+  table.cr-table tbody tr[data-sid] > td.sticky-learner{
+    position:sticky;left:0;z-index:6;
+    background:var(--white);
+    box-shadow:2px 0 0 var(--border), 4px 0 8px rgba(31,42,60,.08);
+    min-width:190px;max-width:260px;
+  }
+  table.cr-table tbody tr[data-sid]:hover > td.sticky-learner{background:var(--paper-deep);}
+
+  .theme-toggle{min-width:88px;}
+  #restoreWindowBtn{
+    display:none;position:fixed;left:50%;bottom:18px;transform:translateX(-50%);
+    z-index:12000;padding:10px 16px;border-radius:22px;
+    background:var(--green-chalk);color:var(--white);border:1px solid var(--border);
+    box-shadow:0 6px 22px rgba(0,0,0,.28);font-weight:700;
+  }
+  #restoreWindowBtn.visible{display:block;}
+  #restoreWindowBtn:hover{transform:translateX(-50%) translateY(-1px);}
+
+  /* Dark mode changes only the working UI. Official-template exports remain unchanged. */
+  html[data-theme="dark"]{
+    color-scheme:dark;
+    --paper:#151A21;
+    --paper-deep:#202731;
+    --ink:#E7EDF4;
+    --ink-soft:#AAB4C0;
+    --manila:#B79A69;
+    --manila-deep:#9A7E50;
+    --red-pen:#E07A6D;
+    --green-chalk:#76B58C;
+    --border:#465362;
+    --white:#1B222B;
+    --shadow:rgba(0,0,0,.42);
+  }
+  html[data-theme="dark"] .school-logo-preview{background:#fff;}
+  html[data-theme="dark"] table.data td.computed,
+  html[data-theme="dark"] table.data td.grade-final,
+  html[data-theme="dark"] table.cr-table td.computed,
+  html[data-theme="dark"] table.cr-table td.grade-final,
+  html[data-theme="dark"] .import-summary{background:#242D38;}
+  html[data-theme="dark"] table.cr-table thead tr.cr-hps td,
+  html[data-theme="dark"] table.cr-table thead tr.cr-hps th{background:#29323D;}
+  html[data-theme="dark"] table.cr-master thead tr.cr-sub th{background:#2D3A48;color:var(--ink);}
+  html[data-theme="dark"] table.cr-master td.meta-value,
+  html[data-theme="dark"] table.gs-inforow td.val{background:#202731;color:var(--green-chalk);}
+  html[data-theme="dark"] .app-modal input,
+  html[data-theme="dark"] .app-modal textarea,
+  html[data-theme="dark"] select,
+  html[data-theme="dark"] input[type=text],
+  html[data-theme="dark"] input[type=number]{background:#11161C;color:var(--ink);}
+  html[data-theme="dark"] .rc-sheet,
+  html[data-theme="dark"] .cr-page,
+  html[data-theme="dark"] .gs-page{background:#1B222B;}
+  html[data-theme="dark"] table.rc-grades th,
+  html[data-theme="dark"] table.rc-att th{background:#29323D;}
+
+  @media print{
+    #restoreWindowBtn{display:none !important;}
+  }
+
 </style>
 </head>
 <body>
@@ -401,6 +476,7 @@
   <h1>E-Class Record App <span>with GS and SF9</span></h1>
   <div class="class-picker no-print">
     <select id="classSelect"></select>
+    <button id="btnTheme" class="ghost theme-toggle" title="Toggle light/dark working view">🌙 Dark</button>
     <button id="btnNewClass" class="ghost">+ New Class</button>
     <button id="btnDupClass" class="ghost">Duplicate</button>
     <button id="btnDelClass" class="ghost">Delete</button>
@@ -422,6 +498,7 @@
 </nav>
 
 <main id="main"></main>
+<button type="button" id="restoreWindowBtn" class="no-print" title="Leave full screen and restore a regular window">↙ Restore Window</button>
 
 <footer class="status no-print">
   <span id="statusLeft">Ready.</span>
@@ -1346,7 +1423,7 @@ function termStudentRow(cls, termKey, s){
   }).join("");
   const bandHtml = result.band ? `<span class="desc-band band-${result.band}">${result.band}</span>` : "—";
   return `<tr data-sid="${s.id}">
-      <td class="left">${esc(s.name)||"(unnamed)"}</td>
+      <td class="left sticky-learner">${esc(s.name)||"(unnamed)"}</td>
       ${cells}
       <td class="computed">${result.initial===null?"—":result.initial}</td>
       <td class="grade-final">${result.term===null?"—":result.term}</td>
@@ -2025,7 +2102,7 @@ async function exportOfficialEcr(cls,termKey,mode="save"){
   try{
     const payload=officialEcrPayload(cls,termKey);
 
-    // v1.0.15+: both preview and download go through the runtime template engine
+    // v1.0.16+: both preview and download go through the runtime template engine
     // so the Subject Teacher signatory and all current Setup values are present
     // in the actual official workbook, not only in the on-screen HTML view.
     if(window.eclassAPI && typeof window.eclassAPI.runtimeInvoke==="function"){
@@ -2119,7 +2196,11 @@ function renderTerm(main, cls, termKey, termLabel){
       <div class="cr-page">
         <div class="cr-topbar">
           <div class="cr-seal"><img src="${schoolLogoDataUri()}" alt="School Seal"></div>
-          <div class="cr-title">CLASS RECORD - ${esc(TERM_LABELS[termKey])}</div>
+          <div class="cr-head-center">
+            <div class="gov-line old-english">Republic of the Philippines</div>
+            <div class="dep-line old-english">Department of Education</div>
+            <div class="cr-title">CLASS RECORD - ${esc(TERM_LABELS[termKey])}</div>
+          </div>
           <div class="cr-seal wordmark"><img src="${DEPED_WORDMARK_DATA_URI}" alt="DepEd"></div>
         </div>
         <div class="cr-fieldrow">
@@ -2155,7 +2236,8 @@ function renderTerm(main, cls, termKey, termLabel){
         <div class="gs-topbar">
           <div class="cr-seal"><img src="${schoolLogoDataUri()}" alt="School Seal"></div>
           <div class="gs-headtext">
-            <div class="deped-script">Department of Education</div>
+            <div class="republic-script old-english">Republic of the Philippines</div>
+            <div class="deped-script old-english">Department of Education</div>
             <div class="region">${esc((m.region||"").toUpperCase())}</div>
             <div class="division">DIVISION OF ${esc((m.division||"").toUpperCase())}</div>
             <div class="schoolname">${esc(m.schoolName)}</div>
@@ -2315,6 +2397,106 @@ function summaryTableHtml(cls, termKey){
     </table>`;
 }
 
+
+const SUMMARY_SUBJECT_ALIASES = {
+  FIL:["filipino","fil"], ENG:["english","eng"], MATH:["mathematics","math"],
+  SCI:["science","sci"], AP:["araling panlipunan","ap"],
+  VAL:["values education","values","esp","edukasyon sa pagpapakatao","gmrc"],
+  TLE:["tle","technology and livelihood education"],
+  MUS:["music and arts","music & arts","music arts","music"],
+  PE:["physical education and health","pe and health","pe & health","pe","p.e."]
+};
+function summaryHeaderNorm(v){ return String(v||"").toLowerCase().replace(/[^a-z0-9]+/g," ").trim(); }
+function detectSummaryHeaderRow(rows){
+  let best=0,bestScore=-1;
+  for(let r=0;r<Math.min(rows.length,25);r++){
+    const vals=(rows[r]||[]).map(summaryHeaderNorm); let score=0;
+    if(vals.some(v=>["name","learner name","learners name","student name","full name"].includes(v))) score+=6;
+    if(vals.some(v=>v==="lrn"||v.includes("learner reference"))) score+=2;
+    for(const aliases of Object.values(SUMMARY_SUBJECT_ALIASES)) if(vals.some(v=>aliases.includes(v))) score++;
+    if(score>bestScore){bestScore=score;best=r;}
+  }
+  return best;
+}
+function findSummaryHeader(headers, aliases){
+  const norms=headers.map(summaryHeaderNorm), wanted=aliases.map(summaryHeaderNorm);
+  let i=norms.findIndex(v=>wanted.includes(v));
+  if(i>=0) return i;
+  return norms.findIndex(v=>wanted.some(a=>a.length>2 && (v.includes(a)||a.includes(v))));
+}
+function showSummaryImportDialog(cls, rows, fileName, termKey){
+  return new Promise(resolve=>{
+    if(!Array.isArray(rows)||!rows.length){resolve({error:"No rows were found in that summary file."});return;}
+    const headerRow=detectSummaryHeaderRow(rows);
+    const headers=(rows[headerRow]||[]).map(v=>String(v??"").trim());
+    const dataRows=rows.slice(headerRow+1).filter(r=>(r||[]).some(v=>String(v??"").trim()!==""));
+    const autoName=findSummaryHeader(headers,["Name","Learner Name","Learners Name","Learner's Name","Student Name","Full Name"]);
+    const autoLrn=findSummaryHeader(headers,["LRN","Learner Reference Number"]);
+    const maps=STANDARD_AREAS.map(a=>({area:a,col:findSummaryHeader(headers,SUMMARY_SUBJECT_ALIASES[a.key]||[a.label,a.key])}));
+    const optionHtml=(selected,none=true)=>`${none?'<option value="-1">— Not mapped —</option>':''}${headers.map((h,i)=>`<option value="${i}" ${i===selected?"selected":""}>${esc(csvColumnLabel(h,i))}</option>`).join("")}`;
+    const backdrop=document.createElement("div");backdrop.className="app-modal-backdrop no-print";
+    const modal=document.createElement("div");modal.className="app-modal import-modal";
+    modal.innerHTML=`
+      <h3>Import Summary Table — ${esc(SUMMARY_TERM_LABELS[termKey])}</h3>
+      <p><strong>${esc(fileName||"Summary file")}</strong> was read. Map the learner and subject columns below. Imported grades are written directly to the same learner records used by SF9.</p>
+      <div class="import-summary">Header row: <strong>${headerRow+1}</strong> • Data rows: <strong>${dataRows.length}</strong> • Auto-mapped subjects: <strong>${maps.filter(m=>m.col>=0).length}/${maps.length}</strong></div>
+      <div class="import-grid">
+        <div class="field"><label>Learner Name *</label><select id="sumName">${optionHtml(autoName)}</select></div>
+        <div class="field"><label>LRN (optional)</label><select id="sumLrn">${optionHtml(autoLrn)}</select></div>
+        <div class="field"><label>Import Into</label><select id="sumTerm">${["term1","term2","term3"].map(t=>`<option value="${t}" ${t===termKey?"selected":""}>${SUMMARY_TERM_LABELS[t]}</option>`).join("")}</select></div>
+      </div>
+      <div class="scroll-x"><table class="import-map-table"><thead><tr><th>SF9 Learning Area</th><th>Summary Column</th></tr></thead><tbody>
+      ${maps.map((m,i)=>`<tr><td>${esc(m.area.label)}</td><td><select class="sum-map" data-i="${i}">${optionHtml(m.col)}</select></td></tr>`).join("")}
+      </tbody></table></div>
+      <div class="hint" style="margin-top:10px;">The subject represented by this Class Record remains authoritative and is not overwritten by a summary import. Learners are matched by LRN first, then by normalized name.</div>
+      <div class="app-modal-error" id="sumErr"></div>
+      <div class="app-modal-actions"><button class="cancel" id="sumCancel">Cancel</button><button class="primary" id="sumConfirm">Import Grades</button></div>`;
+    backdrop.appendChild(modal);document.body.appendChild(backdrop);
+    const finish=v=>{document.removeEventListener("keydown",onKey,true);backdrop.remove();resolve(v);};
+    const onKey=e=>{if(e.key==="Escape"){e.preventDefault();finish(null);}};document.addEventListener("keydown",onKey,true);
+    modal.querySelector("#sumCancel").onclick=()=>finish(null);backdrop.addEventListener("click",e=>{if(e.target===backdrop)finish(null);});
+    modal.querySelector("#sumConfirm").onclick=()=>{
+      const nameCol=Number(modal.querySelector("#sumName").value);
+      if(nameCol<0){modal.querySelector("#sumErr").textContent="Select the learner-name column.";return;}
+      const mappings=maps.map((m,i)=>({...m,col:Number(modal.querySelector(`.sum-map[data-i="${i}"]`).value)})).filter(m=>m.col>=0);
+      if(!mappings.length){modal.querySelector("#sumErr").textContent="Map at least one subject column.";return;}
+      finish({dataRows,nameCol,lrnCol:Number(modal.querySelector("#sumLrn").value),termKey:modal.querySelector("#sumTerm").value,mappings});
+    };
+  });
+}
+function applySummaryImport(cls, config){
+  const idx=buildStudentImportIndexes(cls);let matched=0,unmatched=0,imported=0,invalid=0,lockedSkipped=0;
+  const seen=new Set();
+  for(const row of config.dataRows){
+    const name=String((row||[])[config.nameCol]??"").trim();
+    const lrn=config.lrnCol>=0?String((row||[])[config.lrnCol]??"").replace(/\D/g,""):"";
+    if(!name&&!lrn)continue;
+    let st=lrn?idx.byLrn.get(lrn):null;
+    if(!st&&name){const nk=normalizeLearnerName(name);st=idx.byName.get(nk)||null;}
+    if(!st&&name){const tk=learnerTokenKey(name),list=tk?idx.byTokens.get(tk):null;if(list&&list.length===1)st=list[0];}
+    if(!st){unmatched++;continue;}
+    if(!seen.has(st.id)){seen.add(st.id);matched++;}
+    ensureStudentExtras(cls,st.id);
+    for(const m of config.mappings){
+      if(areaMatchesSubject(cls,m.area)){lockedSkipped++;continue;}
+      const raw=(row||[])[m.col];if(raw===undefined||raw===null||String(raw).trim()==="")continue;
+      const n=Number(String(raw).replace(/,/g,"").trim());
+      if(!Number.isFinite(n)||n<60||n>100){invalid++;continue;}
+      cls.otherGrades[st.id][m.area.key][config.termKey]=Math.round(n);
+      imported++;
+    }
+  }
+  return {matched,unmatched,imported,invalid,lockedSkipped,termKey:config.termKey};
+}
+async function importSummaryTable(cls){
+  if(!window.eclassAPI||typeof window.eclassAPI.runtimeInvoke!=="function"){alert("Summary import is available in the installed desktop app.");return;}
+  let result;try{result=await window.eclassAPI.runtimeInvoke("summary:import-file",{});}catch(err){alert("Could not open the summary importer: "+(err.message||err));return;}
+  if(!result||result.cancelled)return;if(!result.ok){alert("Could not read that summary file: "+(result.error||"Unknown error"));return;}
+  const cfg=await showSummaryImportDialog(cls,result.rows,result.fileName,SUMMARY_TERM.current);if(!cfg)return;if(cfg.error){alert(cfg.error);return;}
+  const stats=applySummaryImport(cls,cfg);SUMMARY_TERM.current=cfg.termKey;saveState();render();
+  await showInfoDialog("Summary Import Complete",`${stats.imported} grade value${stats.imported===1?"":"s"} imported for ${stats.matched} matched learner${stats.matched===1?"":"s"}.`+(stats.unmatched?` ${stats.unmatched} learner row${stats.unmatched===1?"":"s"} could not be matched.`:"")+(stats.invalid?` ${stats.invalid} invalid grade value${stats.invalid===1?"":"s"} skipped.`:"")+(stats.lockedSkipped?` ${stats.lockedSkipped} value${stats.lockedSkipped===1?"":"s"} for the Class Record subject were left unchanged.`:""));
+}
+
 function renderSummary(main, cls){
   if(!cls.students.length){
     main.innerHTML = `<div class="empty-state"><h2>No learners yet</h2><p>Add learners in the Roster tab first.</p></div>`;
@@ -2329,6 +2511,7 @@ function renderSummary(main, cls){
         <div class="cr-viewtoggle">
           ${["term1","term2","term3"].map(t=>`<button class="small summary-termbtn ${SUMMARY_TERM.current===t?"active":""}" data-term="${t}">${SUMMARY_TERM_LABELS[t]}</button>`).join("")}
         </div>
+        <button id="summaryImport" class="primary">Import Summary Table (.xlsx/.csv)</button>
       </div>
       <div class="scroll-x" id="summaryTableWrap"></div>
     </div>`;
@@ -2345,6 +2528,7 @@ function renderSummary(main, cls){
       });
     });
   }
+  document.getElementById("summaryImport").addEventListener("click",()=>importSummaryTable(cls));
   document.querySelectorAll(".summary-termbtn").forEach(b=>{
     b.addEventListener("click", ()=>{
       SUMMARY_TERM.current = b.dataset.term;
@@ -2367,8 +2551,9 @@ function renderReport(main, cls){
       <div class="sub">Two-page spread matching the official Learner's Progress Report: Page 1 is the learning-progress report, Page 2 is attendance, comments, signatures and the Certificate of Transfer. This app only tracks <strong>${esc(cls.meta.subject)}</strong>, so that row fills in automatically — the other learning areas, attendance and comments are blank fields you can type into, same as filling in the paper form.</div>
       <div class="toolbar">
         <select id="rcStudent"></select>
-        <button id="rcPrint" class="primary">Print this learner</button>
-        <button id="rcPrintAll" class="ghost-alt" style="background:var(--paper-deep);">Print all learners</button>
+        <button id="rcPreview" class="ghost-alt" style="background:var(--paper-deep);">SF9 Preview</button>
+        <button id="rcPrint" class="primary">Print SF9 — This Learner</button>
+        <button id="rcPrintAll" class="ghost-alt" style="background:var(--paper-deep);">Print SF9 — All Learners</button>
       </div>
     </div>
     <div id="rcContainer"></div>`;
@@ -2385,6 +2570,13 @@ function renderReport(main, cls){
     bindReportCardEvents(cls, container);
   }
   sel.addEventListener("change", draw);
+  document.getElementById("rcPreview").addEventListener("click", async ()=>{
+    const st=cls.students.find(x=>x.id===sel.value)||cls.students[0];
+    if(!st)return;
+    const snapshot=`<!doctype html><html data-theme="${document.documentElement.dataset.theme||"light"}"><head><meta charset="utf-8"><title>SF9 Preview — ${esc(st.name)}</title><style>${Array.from(document.styleSheets).map(ss=>{try{return Array.from(ss.cssRules||[]).map(r=>r.cssText).join("\n")}catch{return""}}).join("\n")}</style></head><body><main style="padding:20px;max-width:none;">${reportCardHtml(cls,st)}</main></body></html>`;
+    const r=await window.eclassAPI.runtimeInvoke("sf9:preview-html",{html:snapshot,name:st.name||"Learner"});
+    if(!r||!r.ok)alert("Could not open SF9 preview: "+(r&&r.error?r.error:"Unknown error"));
+  });
   document.getElementById("rcPrint").addEventListener("click", ()=>printCurrentView());
   document.getElementById("rcPrintAll").addEventListener("click", ()=>{
     const container = document.getElementById("rcContainer");
@@ -2539,8 +2731,8 @@ function reportCardHtml(cls, s){
       <div class="rc-sealrow">
         <div class="rc-seal"><img src="${schoolLogoDataUri()}" alt="School Seal"></div>
         <div class="rc-headtext">
-          <div class="l1">Republic of the Philippines</div>
-          <div class="l1">Department of Education</div>
+          <div class="l1 old-english">Republic of the Philippines</div>
+          <div class="l1 old-english">Department of Education</div>
           <div class="region">${esc((m.region||"").toUpperCase())}</div>
           <div class="div">${esc((m.division||"").toUpperCase())} DIVISION</div>
           <div class="addr">${esc(m.schoolAddress||"")}</div>
@@ -2733,6 +2925,20 @@ function showTextEntryDialog({title, message, value="", multiline=false, confirm
   });
 }
 
+
+function applyTheme(theme){
+  ensureAppSettings();
+  const next=theme||APP.settings.theme||"light";
+  APP.settings.theme=next==="dark"?"dark":"light";
+  document.documentElement.dataset.theme=APP.settings.theme;
+  const btn=document.getElementById("btnTheme");
+  if(btn) btn.textContent=APP.settings.theme==="dark"?"☀ Light":"🌙 Dark";
+}
+async function refreshFullscreenControl(){
+  const btn=document.getElementById("restoreWindowBtn");if(!btn||!window.eclassAPI||typeof window.eclassAPI.runtimeInvoke!=="function")return;
+  try{const r=await window.eclassAPI.runtimeInvoke("window:fullscreen-state",{});btn.classList.toggle("visible",!!(r&&r.fullscreen));}catch{}
+}
+
 /* =========================================================================
    TOP-LEVEL EVENTS
    ========================================================================= */
@@ -2744,6 +2950,15 @@ document.getElementById("tabs").addEventListener("click", e=>{
 });
 document.getElementById("classSelect").addEventListener("change", e=>{
   APP.activeId = e.target.value; saveState(); render();
+});
+document.getElementById("btnTheme").addEventListener("click",()=>{
+  ensureAppSettings();
+  APP.settings.theme=APP.settings.theme==="dark"?"light":"dark";
+  saveState();applyTheme(APP.settings.theme);
+});
+document.getElementById("restoreWindowBtn").addEventListener("click",async ()=>{
+  if(window.eclassAPI&&typeof window.eclassAPI.runtimeInvoke==="function") await window.eclassAPI.runtimeInvoke("window:exit-fullscreen",{});
+  setTimeout(refreshFullscreenControl,150);
 });
 document.getElementById("btnNewClass").addEventListener("click", async ()=>{
   const name = await showTextEntryDialog({
@@ -2850,8 +3065,11 @@ async function initLocalThreadUpdaterStatus(){
 }
 
 /* init */
+applyTheme();
 render();
 initLocalThreadUpdaterStatus();
+refreshFullscreenControl();
+setInterval(refreshFullscreenControl,900);
 </script>
 </body>
 </html>
