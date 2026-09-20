@@ -935,6 +935,141 @@ function updateWeightTotal(cls){
   el.innerHTML = `<span class="weight-badge ${ok?"":"warn"}">Total weight: ${pct}%${ok?"":" — should be 100%"}</span>`;
 }
 
+/* ===== v1.0.8: Import official School Form 1 (SF1) .xls ===================
+   SF1 is the authoritative roster source for learner identity. The desktop
+   process reads the official legacy Excel workbook directly; this renderer
+   previews the detected learners, then merges them into the current class by
+   LRN first and normalized learner name second. Existing student IDs are kept
+   whenever possible so scores, GS data and SF9 data remain attached. */
+function showOfficialSf1ImportDialog(data,fileName,cls){
+  return new Promise(resolve=>{
+    const learners=Array.isArray(data.learners)?data.learners:[];
+    const meta=data.meta||{}, counts=data.counts||{};
+    const backdrop=document.createElement("div"); backdrop.className="app-modal-backdrop no-print";
+    const modal=document.createElement("div"); modal.className="app-modal import-modal"; modal.setAttribute("role","dialog"); modal.setAttribute("aria-modal","true");
+    const warnings=(data.warnings||[]).slice(0,5);
+    const sampleRows=learners.map(x=>`<tr><td style="text-align:left;">${esc(x.name||"")}</td><td>${esc(x.lrn||"")}</td><td>${esc(x.age||"")}</td><td>${x.sex==="F"?"Female":"Male"}</td></tr>`).join("");
+    modal.innerHTML=`
+      <h3>Import Official SF1 Roster</h3>
+      <p><strong>${esc(fileName||"Official SF1 workbook")}</strong> was recognized as an official School Form 1. Review the roster before importing.</p>
+      <div class="import-summary">
+        <strong>Learners:</strong> ${learners.length} (${Number(counts.male||0)} male, ${Number(counts.female||0)} female)
+        &nbsp;•&nbsp; <strong>Grade:</strong> ${esc(meta.gradeLevel||"—")}
+        &nbsp;•&nbsp; <strong>Section:</strong> ${esc(meta.section||"—")}
+        &nbsp;•&nbsp; <strong>School Year:</strong> ${esc(meta.schoolYear||"—")}
+      </div>
+      <div class="hint" style="margin-top:8px;">SF1 will be treated as the authoritative source for <strong>learner name, LRN, age and sex</strong>. Existing learners are matched by LRN first, then by name. Their existing scores and SF9 data remain attached.</div>
+      <div class="scroll-x" style="margin-top:10px;max-height:340px;overflow-y:auto;">
+        <table class="import-map-table">
+          <thead><tr><th style="text-align:left;">Learner Name</th><th>LRN</th><th>Age</th><th>Sex</th></tr></thead>
+          <tbody>${sampleRows}</tbody>
+        </table>
+      </div>
+      <div class="import-options">
+        <label><input type="checkbox" id="sf1RemoveAbsent"> Remove current learners who are not listed in this SF1</label>
+      </div>
+      <div class="hint">Leave this unchecked for the safest merge. If enabled, learners absent from SF1 will be removed together with their stored scores, attendance, comments and other SF9 data.</div>
+      ${warnings.length?`<div class="app-modal-error" style="margin-top:10px;">${warnings.map(w=>esc(w)).join("<br>")}</div>`:""}
+      <div class="app-modal-actions"><button type="button" class="cancel" id="sf1Cancel">Cancel</button><button type="button" class="primary" id="sf1Confirm">Import SF1 Roster</button></div>`;
+    backdrop.appendChild(modal); document.body.appendChild(backdrop);
+    const finish=result=>{ document.removeEventListener("keydown",onKey,true); backdrop.remove(); resolve(result); };
+    const onKey=e=>{ if(e.key==="Escape"){ e.preventDefault(); finish(null); } };
+    document.addEventListener("keydown",onKey,true);
+    modal.querySelector("#sf1Cancel").addEventListener("click",()=>finish(null));
+    modal.querySelector("#sf1Confirm").addEventListener("click",()=>finish({removeAbsent:modal.querySelector("#sf1RemoveAbsent").checked}));
+    backdrop.addEventListener("click",e=>{ if(e.target===backdrop) finish(null); });
+  });
+}
+
+function deleteStudentEverywhere(cls,sid){
+  ["term1","term2","term3"].forEach(t=>{ if(cls.scores&&cls.scores[t]) delete cls.scores[t][sid]; });
+  if(cls.otherGrades) delete cls.otherGrades[sid];
+  if(cls.attendance) delete cls.attendance[sid];
+  if(cls.comments) delete cls.comments[sid];
+}
+
+function applyOfficialSf1Import(cls,data,options={}){
+  const sources=Array.isArray(data.learners)?data.learners:[];
+  if(!sources.length) throw new Error("No learners were found in the SF1 data.");
+  const original=[...cls.students];
+  const idx=buildStudentImportIndexes(cls);
+  const ordered=[], usedIds=new Set();
+  let matched=0,added=0,removed=0;
+
+  for(const source of sources){
+    const lrn=String(source.lrn||"").replace(/\D/g,"");
+    const name=String(source.name||"").trim();
+    if(!lrn||!name) continue;
+    let student=idx.byLrn.get(lrn)||null;
+    if(!student){
+      const nk=normalizeLearnerName(name), candidate=nk&&idx.byName.has(nk)?idx.byName.get(nk):null;
+      const candidateLrn=candidate?String(candidate.lrn||"").replace(/\D/g,""):"";
+      if(candidate&&(!candidateLrn||candidateLrn===lrn)) student=candidate;
+    }
+    if(!student){
+      const tk=learnerTokenKey(name), list=tk?idx.byTokens.get(tk):null;
+      if(list&&list.length===1){
+        const candidate=list[0], candidateLrn=String(candidate.lrn||"").replace(/\D/g,"");
+        if(!candidateLrn||candidateLrn===lrn) student=candidate;
+      }
+    }
+
+    if(!student){
+      student={id:uid("s"),name,lrn,age:String(source.age||""),sex:source.sex==="F"?"F":"M"};
+      if(source.birthDate) student.birthDate=String(source.birthDate);
+      cls.students.push(student); ensureStudentExtras(cls,student.id); added++;
+    }else{
+      matched++;
+      student.name=name;
+      student.lrn=lrn;
+      student.age=String(source.age||"");
+      student.sex=source.sex==="F"?"F":"M";
+      if(source.birthDate) student.birthDate=String(source.birthDate);
+      ensureStudentExtras(cls,student.id);
+    }
+    usedIds.add(student.id); ordered.push(student);
+
+    // Refresh indexes so a later row cannot create a duplicate after an update.
+    idx.byLrn.set(lrn,student);
+    const nk=normalizeLearnerName(name); if(nk) idx.byName.set(nk,student);
+  }
+
+  const unmatchedOriginal=original.filter(s=>!usedIds.has(s.id));
+  if(options.removeAbsent){
+    unmatchedOriginal.forEach(s=>{ deleteStudentEverywhere(cls,s.id); removed++; });
+    cls.students=ordered;
+  }else{
+    // Official SF1 order first, then any pre-existing learners not represented
+    // in the uploaded SF1. This preserves their data without mixing the order.
+    cls.students=[...ordered,...unmatchedOriginal];
+  }
+
+  return {learners:ordered.length,matched,added,removed,warnings:(data.warnings||[]).length};
+}
+
+async function importOfficialSf1IntoClass(cls){
+  if(!window.eclassAPI||typeof window.eclassAPI.importOfficialSf1!=="function"){
+    alert("Official SF1 import is available in the installed desktop app."); return;
+  }
+  let result;
+  try{ result=await window.eclassAPI.importOfficialSf1(); }
+  catch(err){ alert("Could not open the Official SF1 importer: "+(err&&err.message?err.message:String(err))); return; }
+  if(!result||result.cancelled) return;
+  if(!result.ok){ alert("Could not read that Official SF1 workbook: "+(result.error||"Unknown error")); return; }
+  const options=await showOfficialSf1ImportDialog(result.data,result.fileName,cls);
+  if(!options) return;
+  try{
+    const stats=applyOfficialSf1Import(cls,result.data,options);
+    saveState(); render();
+    const parts=[`${stats.learners} official SF1 learner${stats.learners===1?"":"s"} processed`];
+    if(stats.matched) parts.push(`${stats.matched} existing learner${stats.matched===1?"":"s"} matched and updated`);
+    if(stats.added) parts.push(`${stats.added} new learner${stats.added===1?"":"s"} added`);
+    if(stats.removed) parts.push(`${stats.removed} learner${stats.removed===1?"":"s"} removed because they were absent from SF1`);
+    if(stats.warnings) parts.push(`${stats.warnings} SF1 warning${stats.warnings===1?"":"s"}`);
+    await showInfoDialog("Official SF1 Import Complete",parts.join(" • "));
+  }catch(err){ alert("Could not import the Official SF1 roster: "+(err&&err.message?err.message:String(err))); }
+}
+
 /* =========================================================================
    RENDER: Roster tab
    ========================================================================= */
@@ -956,13 +1091,14 @@ function renderRoster(main, cls){
       <h2>Roster <span class="badge-count">${cls.students.length} learners</span></h2>
       <div class="sub">Grouped Male then Female, matching the standard class record layout.</div>
       <div class="toolbar">
-        <button id="addStudent" class="primary">+ Add learner</button>
+        <button id="importSf1" class="primary">Import Official SF1 (.xls)</button>
+        <button id="addStudent" class="ghost-alt" style="background:var(--paper-deep);">+ Add learner</button>
         <button id="pasteNames" class="ghost-alt" style="background:var(--paper-deep);">Paste names (one per line)</button>
         <button id="importCsv" class="ghost-alt" style="background:var(--paper-deep);">Import CSV</button>
         <button id="downloadTemplate" class="ghost-alt" style="background:var(--paper-deep);">Download CSV template</button>
         <input type="file" id="csvFile" accept=".csv,text/csv" style="display:none;">
       </div>
-      <div class="hint" style="margin-bottom:10px;">CSV columns: Name, LRN, Age, Sex (Sex accepts Male/Female or M/F). A header row is optional — it's detected automatically.</div>
+      <div class="hint" style="margin-bottom:10px;"><strong>Preferred:</strong> import the official SF1 Excel file so learner names, LRN, age and sex come directly from the official class register. CSV/manual entry remain available as alternatives.</div>
       <div class="scroll-x">
       <table class="data" id="rosterTable">
         <thead><tr><th style="text-align:left;">Name</th><th>LRN</th><th>Age</th><th>Sex</th><th></th></tr></thead>
@@ -975,6 +1111,7 @@ function renderRoster(main, cls){
       </table>
       </div>
     </div>`;
+  document.getElementById("importSf1").addEventListener("click", ()=>importOfficialSf1IntoClass(cls));
   document.getElementById("addStudent").addEventListener("click", ()=>{
     cls.students.push({id:uid("s"), name:"", lrn:"", age:"", sex:"M"});
     saveState(); render();

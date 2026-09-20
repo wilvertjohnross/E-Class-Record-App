@@ -1,5 +1,41 @@
 E-Class Record App with GS and SF9
-Version 1.0.7
+Version 1.0.8
+
+
+VERSION 1.0.8 — IMPORT OFFICIAL SF1 (.XLS)
+The Roster tab now accepts the official School Form 1 (SF1) Excel 97-2004
+workbook directly. There is no need to convert the official SF1 to CSV.
+
+In Roster, click:
+  Import Official SF1 (.xls)
+
+The importer detects the official SF1 LRN/NAME header row and reads:
+- Learner name
+- 12-digit LRN
+- Age
+- Sex
+- Birth date (stored with the learner record for future use)
+
+The SF1 is treated as the authoritative source for learner identity. Existing
+learners are matched by LRN first, then by normalized name when the existing
+learner has no conflicting LRN. Matching learners keep their internal app ID,
+so existing Term scores, other subject grades, attendance, comments and SF9
+data remain attached while the official SF1 name/LRN/age/sex are refreshed.
+Missing learners are added automatically.
+
+Before import, the app displays a roster preview and detected learner counts.
+The optional "Remove current learners who are not listed in this SF1" setting
+is OFF by default. When enabled, those learners and their stored class/SF9 data
+are removed; leaving it off performs a safe merge.
+
+The importer also detects basic SF1 class metadata for the preview (school,
+school year, grade level and section), but v1.0.8 does not overwrite the class
+Setup fields with those values.
+
+SF1 import is implemented by the app itself and does not require Microsoft
+Excel to be installed. Version 1.0.8 targets the legacy .xls SF1 format used by
+the supplied official file. The uploaded SF1 itself is not bundled into the
+application or installer.
 
 
 VERSION 1.0.7 — IMPORT FILLED OFFICIAL ECR (.XLSX)

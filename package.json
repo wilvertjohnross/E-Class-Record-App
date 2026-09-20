@@ -1,6 +1,6 @@
 {
   "name": "e-class-record-app-gs-sf9",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "Offline E-Class Record App with Grading Sheets and SF9",
   "main": "main.js",
   "author": "",
@@ -25,6 +25,7 @@
     "files": [
       "main.js",
       "preload.js",
+      "sf1-parser.js",
       "app/**/*",
       "assets/**/*",
       "templates/**/*"

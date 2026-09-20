@@ -1,3 +1,15 @@
+v1.0.8
+- Added Import Official SF1 (.xls) to the Roster tab.
+- Reads the official legacy Excel SF1 file directly; CSV conversion is not required.
+- Detects the LRN/NAME/Sex/Birth Date/Age columns from the official SF1 header.
+- Imports learner name, 12-digit LRN, age and sex; birth date is retained in the learner record for future use.
+- Treats SF1 as the authoritative learner-identity source and matches by LRN first, then safe normalized-name fallback.
+- Preserves existing learner IDs so Term grades, SF9 other grades, attendance and comments remain connected after an SF1 refresh.
+- Adds missing learners automatically and reorders the roster to the official SF1 order.
+- Includes an optional, OFF-by-default control to remove current learners not listed in the uploaded SF1.
+- Parses .xls internally and does not require Microsoft Excel for SF1 importing.
+- The user's uploaded SF1 is never bundled into the app package.
+
 v1.0.7
 - Replaced the Class Record CSV score-import button with Import Official ECR (.xlsx).
 - Imports an already-filled workbook that uses the same official ECR template bundled with the app.

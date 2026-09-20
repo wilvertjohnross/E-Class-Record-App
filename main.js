@@ -3,6 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const { execFile, spawn } = require('child_process');
 const AdmZip = require('adm-zip');
+const { parseOfficialSf1Xls } = require('./sf1-parser');
 
 const PRODUCT_NAME = 'E-Class Record App with GS and SF9';
 let mainWindow;
@@ -185,6 +186,23 @@ ipcMain.handle('print:current', async (event) => {
 });
 
 ipcMain.handle('data:location', async () => ensureDataFolders().root);
+
+ipcMain.handle('sf1:import-official', async () => {
+  try {
+    const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
+      title: 'Import Official School Form 1 (SF1)',
+      properties: ['openFile'],
+      filters: [{ name: 'Official SF1 Excel 97-2004 Workbook', extensions: ['xls'] }]
+    });
+    if (canceled || !filePaths[0]) return { ok: false, cancelled: true };
+    const filePath = filePaths[0];
+    const data = parseOfficialSf1Xls(filePath);
+    return { ok: true, path: filePath, fileName: path.basename(filePath), data };
+  } catch (err) {
+    console.error('Official SF1 import failed:', err);
+    return { ok: false, error: err.message };
+  }
+});
 
 
 
