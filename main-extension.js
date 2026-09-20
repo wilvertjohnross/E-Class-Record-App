@@ -291,17 +291,19 @@ function validatePayload(payload) {
     if (!Number.isFinite(weight) || weight < 0 || weight > 1) throw new Error(`${key} has an invalid category weight.`);
     totalWeight += weight;
     let customTotal = 0;
+    let activeCustomItems = 0;
     for (const c of cat.components) {
       const h = Number(c && c.hps);
-      if (!Number.isFinite(h) || h <= 0 || h > 1000000) throw new Error(`${key} contains an invalid HPS.`);
+      if (!Number.isFinite(h) || h < 0 || h > 1000000) throw new Error(`${key} contains an invalid HPS.`);
       if (String(c && c.name || '').length > 200) throw new Error(`${key} contains an unexpectedly long component name.`);
       if (key === 'EXAM') {
         const sw=Number(c && c.subWeight);
         if (!Number.isFinite(sw) || sw < 0 || sw > 100) throw new Error('EXAM contains an invalid item weight.');
-        customTotal += sw;
+        if (h > 0) { customTotal += sw; activeCustomItems++; }
+        else if (Math.abs(sw) > 0.001) throw new Error('An inactive EXAM item (HPS 0) must have 0% item weight.');
       }
     }
-    if (key === 'EXAM' && Math.abs(customTotal - 100) > 0.001) throw new Error('EXAM item weights must total exactly 100%.');
+    if (key === 'EXAM' && activeCustomItems > 0 && Math.abs(customTotal - 100) > 0.001) throw new Error('Active EXAM item weights must total exactly 100%.');
   }
   if (Math.abs(totalWeight - 1) > 0.0001) throw new Error('Category weights must total exactly 100%.');
   for (const st of payload.students) {
@@ -312,8 +314,11 @@ function validatePayload(payload) {
       const comps = payload.categories[key].components;
       for (let i=0;i<scores.length;i++) {
         const v=scores[i]; if (v === '' || v === null || v === undefined) continue;
-        const n=Number(v),h=Number(comps[i] && comps[i].hps);
-        if (!Number.isFinite(n) || n < 0 || n > h) throw new Error(`${key} contains a learner score outside 0..HPS.`);
+        const n=Number(v),h=Number(comps[i] && comps[i].hps),label=String(comps[i] && comps[i].name || `${key}${i+1}`);
+        if (!Number.isFinite(n) || n < 0) throw new Error(`${key} contains an invalid learner score.`);
+        if (!Number.isFinite(h) || h < 0) throw new Error(`${label} contains an invalid HPS.`);
+        if (h === 0) throw new Error(`${st.name || 'A learner'} has a ${label} score, but its HPS is 0.`);
+        if (n > h) throw new Error(`${st.name || 'A learner'} has a ${label} score (${n}) above its HPS (${h}).`);
       }
     }
   }

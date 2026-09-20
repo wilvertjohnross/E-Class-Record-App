@@ -1639,10 +1639,12 @@ function maxExistingScoreForComponent(cls,catKey,compId){
   }
   return max===-Infinity?null:max;
 }
-function validateGradingConfiguration(cls,{official=false}={}){
+function validateGradingConfiguration(cls,{official=false,termKey=null}={}){
   const errors=[];
   const cats=cls && cls.categories || {};
   const keys=["WW","PT","EXAM"];
+  const termsToCheck=termKey ? [termKey] : ["term1","term2","term3"];
+  const studentNameById=new Map((cls && Array.isArray(cls.students)?cls.students:[]).map(s=>[String(s.id),String(s.name||"Learner")]));
   let totalWeight=0;
   for(const key of keys){
     const cat=cats[key];
@@ -1657,28 +1659,34 @@ function validateGradingConfiguration(cls,{official=false}={}){
     let customTotal=0;
     cat.components.forEach((c,i)=>{
       const h=Number(c.hps);
-      if(!Number.isFinite(h) || h<=0) errors.push(`${key}${i+1}: HPS must be greater than 0.`);
+      if(!Number.isFinite(h) || h<0) errors.push(`${key}${i+1}: HPS must be 0 or greater.`);
       if(cat.mode==="custom"){
         const sw=Number(c.subWeight);
         if(!Number.isFinite(sw) || sw<0 || sw>100) errors.push(`${key}${i+1}: item weight must be from 0% to 100%.`);
-        else customTotal+=sw;
+        else if(Number.isFinite(h) && h>0) customTotal+=sw;
+        else if(Number.isFinite(h) && h===0 && Math.abs(sw)>0.001) errors.push(`${key}${i+1}: an inactive item (HPS 0) must have 0% item weight.`);
       }
     });
-    if(cat.mode==="custom" && Math.abs(customTotal-100)>0.001) errors.push(`${key}: custom item weights must total exactly 100% (currently ${Math.round(customTotal*100)/100}%).`);
+    const activeCustom=cat.mode==="custom" && cat.components.some(c=>Number(c.hps)>0);
+    if(activeCustom && Math.abs(customTotal-100)>0.001) errors.push(`${key}: active custom item weights must total exactly 100% (currently ${Math.round(customTotal*100)/100}%).`);
   }
   if(Math.abs(totalWeight-1)>0.0001) errors.push(`Category weights must total exactly 100% (currently ${Math.round(totalWeight*10000)/100}%).`);
 
-  for(const termKey of ["term1","term2","term3"]){
-    const term=cls.scores && cls.scores[termKey] || {};
+  for(const checkTerm of termsToCheck){
+    const term=cls.scores && cls.scores[checkTerm] || {};
     for(const [sid,scoreSet] of Object.entries(term)){
+      const learner=studentNameById.get(String(sid)) || "Learner";
       for(const key of keys){
         const cat=cats[key];if(!cat)continue;
         const values=scoreSet && scoreSet[key] || {};
-        for(const c of cat.components){
+        for(let i=0;i<cat.components.length;i++){
+          const c=cat.components[i];
           const raw=values[c.id];if(raw===undefined||raw===null||raw==="")continue;
-          const n=Number(raw),h=Number(c.hps);
-          if(!Number.isFinite(n)||n<0) errors.push(`${termKey.toUpperCase()}: an invalid ${key} raw score was found.`);
-          else if(Number.isFinite(h)&&h>0&&n>h) errors.push(`${termKey.toUpperCase()}: a ${key} raw score (${n}) exceeds its HPS (${h}).`);
+          const n=Number(raw),h=Number(c.hps),label=String(c.name||`${key}${i+1}`);
+          if(!Number.isFinite(n)||n<0) errors.push(`${checkTerm.toUpperCase()}: ${learner} has an invalid ${label} raw score.`);
+          else if(!Number.isFinite(h)||h<0) errors.push(`${checkTerm.toUpperCase()}: ${label} has an invalid HPS.`);
+          else if(h===0) errors.push(`${checkTerm.toUpperCase()}: ${learner} has ${label} score ${n}, but its HPS is 0.`);
+          else if(n>h) errors.push(`${checkTerm.toUpperCase()}: ${learner}'s ${label} score ${n} exceeds its HPS ${h}.`);
           if(errors.length>=12) return errors;
         }
       }
@@ -1688,7 +1696,7 @@ function validateGradingConfiguration(cls,{official=false}={}){
 }
 
 function officialEcrPayload(cls, termKey){
-  const validationErrors=validateGradingConfiguration(cls,{official:true});
+  const validationErrors=validateGradingConfiguration(cls,{official:true,termKey});
   if(validationErrors.length) throw new Error("Please correct the grading setup/data before creating an official form:\n\n• "+validationErrors.slice(0,8).join("\n• "));
   const cats=cls.categories || {};
   const ww=cats.WW, pt=cats.PT, ex=cats.EXAM;
