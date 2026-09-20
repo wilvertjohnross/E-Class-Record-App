@@ -129,7 +129,8 @@ function newClass(name){
       region:"Region I", division:"Vigan City", schoolId:"300052",
       schoolName:"Ilocos Sur National High School", schoolAddress:"",
       schoolYear:"2026-2027",
-      schoolHead:"", subject:"Science", gradeLevel:"10", section:"", teacher:"", adviser:"", sf2Enabled:false,
+      schoolHead:"", subject:"Science", classRecordSubjectId:"SCI_STD", classRecordElectiveId:"research_1", electiveSubject:"Research I",
+      gradeLevel:"10", section:"", teacher:"", adviser:"", sf2Enabled:false,
       preparedByName:"", preparedByTitle:"Subject Teacher",
       checkedByName:"Eloisa B. Aquino", checkedByTitle:"Head Teacher VI, Science Department",
       approvedByName:"Rolly A. Raceles", approvedByTitle:"Asst. Principal II"
@@ -142,6 +143,8 @@ function newClass(name){
       MATH:"Math",
       SCI:"Science",
       TLE:"Technology and Livelihood Education (TLE)",
+      ELEC1_ID:"research_1",
+      ELEC2_ID:"environmental_science",
       ELEC1:"Research I",
       ELEC2:"Environmental Science"
     },
@@ -170,6 +173,16 @@ const STANDARD_AREAS = [
   {key:"ELEC2",label:"Elective 2"}
 ];
 const CLASS_TYPE_OPTIONS = ["Regular","Special Science Class"];
+const ELECTIVE_CATALOG = [
+  {id:"environmental_science", label:"Environmental Science"},
+  {id:"research_1", label:"Research I"},
+  {id:"research_2", label:"Research II"},
+  {id:"biotechnology", label:"Biotechnology"},
+  {id:"research_3", label:"Research III"},
+  {id:"research_4", label:"Research IV"},
+  {id:"consumer_chemistry", label:"Consumer Chemistry"},
+  {id:"basic_electronics", label:"Basic Electronics"}
+];
 const SUBJECT_NAME_OPTIONS = {
   MATH:["Math","Enhanced Math"],
   SCI:["Science","Enhanced Science"],
@@ -181,17 +194,104 @@ const SUBJECT_NAME_OPTIONS = {
     "Creative Technology III",
     "Creative Technology IV"
   ],
-  ELECTIVE:[
-    "Environmental Science",
-    "Research I",
-    "Research II",
-    "Biotechnology",
-    "Research III",
-    "Research IV",
-    "Consumer Chemistry",
-    "Basic Electronics"
-  ]
+  ELECTIVE:ELECTIVE_CATALOG.map(x=>x.label)
 };
+const CLASS_RECORD_SUBJECT_OPTIONS = [
+  {id:"FIL", areaKey:"FIL", label:"Filipino", aliases:["fil"]},
+  {id:"ENG", areaKey:"ENG", label:"English", aliases:["eng"]},
+  {id:"MATH_STD", areaKey:"MATH", label:"Math", aliases:["mathematics"]},
+  {id:"MATH_ENH", areaKey:"MATH", label:"Enhanced Math", aliases:["enhanced mathematics"]},
+  {id:"SCI_STD", areaKey:"SCI", label:"Science", aliases:["sci"]},
+  {id:"SCI_ENH", areaKey:"SCI", label:"Enhanced Science", aliases:["enhanced sci"]},
+  {id:"AP", areaKey:"AP", label:"Araling Panlipunan (AP)", aliases:["araling panlipunan","ap"]},
+  {id:"VAL", areaKey:"VAL", label:"Values Education", aliases:["values","esp","edukasyon sa pagpapakatao","gmrc"]},
+  {id:"TLE_STD", areaKey:"TLE", label:"Technology and Livelihood Education (TLE)", aliases:["tle","technology and livelihood education"]},
+  {id:"TLE_CT", areaKey:"TLE", label:"Creative Technologies", aliases:["creative technology"]},
+  {id:"TLE_CT1", areaKey:"TLE", label:"Creative Technology I"},
+  {id:"TLE_CT2", areaKey:"TLE", label:"Creative Technology II"},
+  {id:"TLE_CT3", areaKey:"TLE", label:"Creative Technology III"},
+  {id:"TLE_CT4", areaKey:"TLE", label:"Creative Technology IV"},
+  {id:"MUS", areaKey:"MUS", label:"Music and Arts", aliases:["music & arts","music arts","music"]},
+  {id:"PE", areaKey:"PE", label:"Physical Education and Health", aliases:["pe and health","pe & health","pe","p.e."]},
+  {id:"ELECTIVE", areaKey:null, label:"Elective"}
+];
+function subjectNorm(v){ return String(v||"").toLowerCase().replace(/[^a-z0-9]+/g," ").trim(); }
+function electiveCatalogId(value){
+  const n=subjectNorm(value); if(!n) return "";
+  const item=ELECTIVE_CATALOG.find(x=>subjectNorm(x.id)===n||subjectNorm(x.label)===n);
+  return item?item.id:"";
+}
+function electiveCatalogLabel(value){
+  const id=electiveCatalogId(value)||String(value||"");
+  const item=ELECTIVE_CATALOG.find(x=>x.id===id);
+  return item?item.label:"";
+}
+function classRecordSubjectOption(id){ return CLASS_RECORD_SUBJECT_OPTIONS.find(x=>x.id===id)||null; }
+function classRecordSubjectIdFromLabel(value){
+  const n=subjectNorm(value); if(!n) return "";
+  if(electiveCatalogId(value)) return "ELECTIVE";
+  const item=CLASS_RECORD_SUBJECT_OPTIONS.find(x=>[x.label].concat(x.aliases||[]).some(v=>subjectNorm(v)===n));
+  return item?item.id:"";
+}
+function classRecordSubjectLabel(cls){
+  const m=cls&&cls.meta||{};
+  const opt=classRecordSubjectOption(m.classRecordSubjectId)||classRecordSubjectOption("SCI_STD");
+  if(opt.id==="ELECTIVE") return electiveCatalogLabel(m.classRecordElectiveId||m.electiveSubject)||"Elective";
+  return opt.label;
+}
+function ensureClassRecordSubject(cls){
+  if(!cls.meta||typeof cls.meta!=="object") cls.meta={};
+  const m=cls.meta;
+  let id=classRecordSubjectOption(m.classRecordSubjectId)?m.classRecordSubjectId:"";
+  if(!id) id=classRecordSubjectIdFromLabel(m.subject)||"SCI_STD";
+  m.classRecordSubjectId=id;
+  let electiveId=electiveCatalogId(m.classRecordElectiveId||m.electiveSubject||(id==="ELECTIVE"?m.subject:""));
+  if(!electiveId) electiveId="research_1";
+  m.classRecordElectiveId=electiveId;
+  m.electiveSubject=electiveCatalogLabel(electiveId);
+  m.subject=classRecordSubjectLabel(cls);
+  return m;
+}
+function setClassRecordSubjectFromLabel(cls,label){
+  const id=classRecordSubjectIdFromLabel(label);
+  if(!id) return false;
+  cls.meta.classRecordSubjectId=id;
+  if(id==="ELECTIVE"){
+    const eid=electiveCatalogId(label);
+    if(eid) cls.meta.classRecordElectiveId=eid;
+  }
+  ensureClassRecordSubject(cls);
+  return true;
+}
+function classRecordSubjectAreaKey(cls){
+  const m=ensureClassRecordSubject(cls),opt=classRecordSubjectOption(m.classRecordSubjectId);
+  if(!opt) return null;
+  if(opt.id!=="ELECTIVE") return opt.areaKey;
+  const sc=ensureSubjectConfig(cls);
+  if(sc.classType!=="Special Science Class") return null;
+  if(m.classRecordElectiveId===sc.ELEC1_ID) return "ELEC1";
+  if(m.classRecordElectiveId===sc.ELEC2_ID) return "ELEC2";
+  return null;
+}
+function classRecordLinkStatus(cls){
+  const m=ensureClassRecordSubject(cls),key=classRecordSubjectAreaKey(cls);
+  if(m.classRecordSubjectId!=="ELECTIVE") return {ok:true,key,label:classRecordSubjectLabel(cls)};
+  if(key) return {ok:true,key,label:classRecordSubjectLabel(cls)};
+  const sc=ensureSubjectConfig(cls);
+  if(sc.classType!=="Special Science Class") return {ok:false,key:null,label:classRecordSubjectLabel(cls),message:"The active Class Record is an elective, but SF9 Setup is currently Regular Class. Configure SF9 as a special class before this elective can link to Summary of Grades."};
+  return {ok:false,key:null,label:classRecordSubjectLabel(cls),message:`${classRecordSubjectLabel(cls)} is not assigned to Elective 1 or Elective 2 in SF9 Setup. Select the same elective there before grades can link to Summary of Grades.`};
+}
+function classHasEncodedScores(cls){
+  const walk=v=>{
+    if(v===null||v===undefined||v==="") return false;
+    if(typeof v==="number") return Number.isFinite(v);
+    if(typeof v==="string") return v.trim()!=="";
+    if(Array.isArray(v)) return v.some(walk);
+    if(typeof v==="object") return Object.values(v).some(walk);
+    return false;
+  };
+  return walk(cls&&cls.scores);
+}
 function ensureSubjectConfig(cls){
   if(!cls.subjectConfig || typeof cls.subjectConfig!=="object" || Array.isArray(cls.subjectConfig)) cls.subjectConfig={};
   const c=cls.subjectConfig;
@@ -200,15 +300,15 @@ function ensureSubjectConfig(cls){
   c.MATH=valid(SUBJECT_NAME_OPTIONS.MATH,c.MATH,"Math");
   c.SCI=valid(SUBJECT_NAME_OPTIONS.SCI,c.SCI,"Science");
   c.TLE=valid(SUBJECT_NAME_OPTIONS.TLE,c.TLE,"Technology and Livelihood Education (TLE)");
-  c.ELEC1=valid(SUBJECT_NAME_OPTIONS.ELECTIVE,c.ELEC1,"Research I");
-  c.ELEC2=valid(SUBJECT_NAME_OPTIONS.ELECTIVE,c.ELEC2,"Environmental Science");
+  c.ELEC1_ID=electiveCatalogId(c.ELEC1_ID||c.ELEC1)||"research_1";
+  c.ELEC2_ID=electiveCatalogId(c.ELEC2_ID||c.ELEC2)||"environmental_science";
+  if(c.ELEC1_ID===c.ELEC2_ID) c.ELEC2_ID=(ELECTIVE_CATALOG.find(x=>x.id!==c.ELEC1_ID)||ELECTIVE_CATALOG[0]).id;
+  c.ELEC1=electiveCatalogLabel(c.ELEC1_ID);
+  c.ELEC2=electiveCatalogLabel(c.ELEC2_ID);
   if(c.classType==="Regular"){
     c.MATH="Math";
     c.SCI="Science";
     c.TLE="Technology and Livelihood Education (TLE)";
-  }
-  if(c.ELEC1===c.ELEC2){
-    c.ELEC2=SUBJECT_NAME_OPTIONS.ELECTIVE.find(x=>x!==c.ELEC1)||"Environmental Science";
   }
   return c;
 }
@@ -237,6 +337,10 @@ function activeGradeInputAreas(cls){ return corePrimaryAreas(cls).concat(mapehCo
 function subjectOptionHtml(options,selected,disabledValue=""){
   return options.map(v=>`<option value="${esc(v)}" ${v===selected?"selected":""} ${disabledValue&&v===disabledValue&&v!==selected?"disabled":""}>${esc(v)}</option>`).join("");
 }
+function catalogOptionHtml(options,selectedId,disabledId=""){
+  return options.map(o=>`<option value="${esc(o.id)}" ${o.id===selectedId?"selected":""} ${disabledId&&o.id===disabledId&&o.id!==selectedId?"disabled":""}>${esc(o.label)}</option>`).join("");
+}
+function classRecordSubjectOptionHtml(selectedId){ return catalogOptionHtml(CLASS_RECORD_SUBJECT_OPTIONS,selectedId); }
 const ATT_MONTHS = ["Jun","Jul","Aug","Sep","Oct","Nov","Dec","Jan","Feb","Mar","Apr"];
 
 function ensureStudentExtras(cls, sid){
@@ -456,6 +560,13 @@ function setSaveStatus(text,isError=false){
   el.style.fontWeight=isError?"800":"";
 }
 function saveState(){
+  try{
+    Object.values(APP.classes||{}).forEach(c=>{
+      ensureSubjectConfig(c);
+      ensureClassRecordSubject(c);
+      syncClassRecordToSummary(c);
+    });
+  }catch(err){ console.warn("Could not synchronize Class Record grades into Summary before saving",err); }
   if(!APP._persistence || typeof APP._persistence!=="object") APP._persistence={};
   APP._persistence.revision=persistenceRevision(APP)+1;
   APP._persistence.modifiedAt=new Date().toISOString();
@@ -596,7 +707,11 @@ function studentFinalResult(cls, studentId){
 function render(){
   renderClassPicker();
   const cls = activeClass();
-  if(cls) ensureSubjectConfig(cls);
+  if(cls){
+    ensureSubjectConfig(cls);
+    ensureClassRecordSubject(cls);
+    syncClassRecordToSummary(cls);
+  }
   const sf2Tab = document.querySelector('nav.tabs .tab[data-tab="sf2"]');
   const sf2Enabled = !!(cls && cls.meta && cls.meta.sf2Enabled === true);
   if(sf2Tab) sf2Tab.hidden = !sf2Enabled;
@@ -608,6 +723,7 @@ function render(){
   main.innerHTML = "";
   if(!cls){ if(sf2Tab) sf2Tab.hidden=true; main.innerHTML = `<div class="empty-state"><h2>No class yet</h2><p>Create one with "+ New Class" above.</p></div>`; return; }
   if(activeTab==="setup") renderSetup(main, cls);
+  else if(activeTab==="sf9setup") renderSf9Setup(main, cls);
   else if(activeTab==="roster") renderRoster(main, cls);
   else if(activeTab==="sf2") renderSf2(main, cls);
   else if(activeTab==="term1") renderTerm(main, cls, "term1", "Term 1");
@@ -634,23 +750,26 @@ function renderClassPicker(){
    RENDER: Setup tab
    ========================================================================= */
 function renderSetup(main, cls){
-  const m = cls.meta;
-  const sc = ensureSubjectConfig(cls);
+  const m = ensureClassRecordSubject(cls);
+  const linkStatus=classRecordLinkStatus(cls);
+  const electiveMode=m.classRecordSubjectId==="ELECTIVE";
   main.innerHTML = `
     <div class="card">
-      <h2>Class &amp; School Information</h2>
-      <div class="sub">This header prints on report cards. Fields match the DepEd class record header.</div>
+      <h2>Class Setup</h2>
+      <div class="sub">This area defines the class and the specific Class Record / Grading Sheet being built. SF9 curriculum choices are configured separately in the <strong>SF9 Setup</strong> tab.</div>
       <div class="field"><label>Class label (shown in the class switcher)</label>
         <input type="text" id="f_className" value="${esc(m.className)}"></div>
       <div class="grid3">
-        <div class="field"><label>Subject</label><input type="text" id="f_subject" value="${esc(m.subject)}"></div>
+        <div class="field"><label>Class Record Subject</label><select id="f_classRecordSubject">${classRecordSubjectOptionHtml(m.classRecordSubjectId)}</select></div>
         <div class="field"><label>Grade Level</label><input type="text" id="f_gradeLevel" value="${esc(m.gradeLevel)}"></div>
         <div class="field"><label>Section</label><input type="text" id="f_section" value="${esc(m.section)}"></div>
       </div>
+      ${electiveMode?`<div class="field"><label>Elective Subject</label><select id="f_classRecordElective">${catalogOptionHtml(ELECTIVE_CATALOG,m.classRecordElectiveId)}</select><div class="hint">Electives are kept in a separate dropdown so the main subject list stays manageable as additional special-program electives are added.</div></div>`:""}
+      ${!linkStatus.ok?`<div class="import-summary" style="border-color:var(--red-pen);"><strong>Summary link needs attention:</strong> ${esc(linkStatus.message)}</div>`:`<div class="import-summary"><strong>Summary link:</strong> ${esc(classRecordSubjectLabel(cls))} → ${esc(linkStatus.key||"—")} column. Computed term grades from this Class Record are synchronized there automatically.</div>`}
       <div class="grid3">
         <div class="field"><label>Subject Teacher</label><input type="text" id="f_teacher" value="${esc(m.teacher)}"></div>
         <div class="field"><label>Adviser</label><input type="text" id="f_adviser" value="${esc(m.adviser)}"></div>
-        <div class="field"><label>School Head</label><input type="text" id="f_schoolHead" value="${esc(m.schoolHead)}"></div>
+        <div class="field"><label>School Head / Principal</label><input type="text" id="f_schoolHead" value="${esc(m.schoolHead)}"></div>
       </div>
       <div class="grid3">
         <div class="field"><label>Region</label><input type="text" id="f_region" value="${esc(m.region)}"></div>
@@ -661,23 +780,7 @@ function renderSetup(main, cls){
         <div class="field"><label>School Name</label><input type="text" id="f_schoolName" value="${esc(m.schoolName)}"></div>
         <div class="field"><label>School Year</label><input type="text" id="f_schoolYear" value="${esc(m.schoolYear)}"></div>
       </div>
-      <div class="field"><label>School Address (printed on the report card header)</label>
-        <input type="text" id="f_schoolAddress" value="${esc(m.schoolAddress||"")}"></div>
-    </div>
-
-    <div class="card">
-      <h2>SF9 Subject Configuration</h2>
-      <div class="sub">Regular Class uses the standard subject names and locks the subject controls. Special Science Class unlocks the approved subject nomenclature and enables two elective learning areas.</div>
-      <div class="grid3">
-        <div class="field"><label>Class Type</label><select id="f_classType">${subjectOptionHtml(CLASS_TYPE_OPTIONS,sc.classType)}</select></div>
-        <div class="field"><label>Mathematics</label><select id="f_mathName" ${sc.classType==="Special Science Class"?"":"disabled"}>${subjectOptionHtml(SUBJECT_NAME_OPTIONS.MATH,sc.MATH)}</select></div>
-        <div class="field"><label>Science</label><select id="f_scienceName" ${sc.classType==="Special Science Class"?"":"disabled"}>${subjectOptionHtml(SUBJECT_NAME_OPTIONS.SCI,sc.SCI)}</select></div>
-      </div>
-      <div class="grid3">
-        <div class="field"><label>TLE / Special Subject</label><select id="f_tleName" ${sc.classType==="Special Science Class"?"":"disabled"}>${subjectOptionHtml(SUBJECT_NAME_OPTIONS.TLE,sc.TLE)}</select></div>
-        <div class="field"><label>Elective 1</label><select id="f_elective1" ${sc.classType==="Special Science Class"?"":"disabled"}>${subjectOptionHtml(SUBJECT_NAME_OPTIONS.ELECTIVE,sc.ELEC1,sc.ELEC2)}</select></div>
-        <div class="field"><label>Elective 2</label><select id="f_elective2" ${sc.classType==="Special Science Class"?"":"disabled"}>${subjectOptionHtml(SUBJECT_NAME_OPTIONS.ELECTIVE,sc.ELEC2,sc.ELEC1)}</select></div>
-      </div>
+      <div class="field"><label>School Address</label><input type="text" id="f_schoolAddress" value="${esc(m.schoolAddress||"")}"></div>
     </div>
 
     <div class="card">
@@ -697,60 +800,65 @@ function renderSetup(main, cls){
             <button type="button" id="btnResetSchoolLogo">Reset to Default</button>
             <input type="file" id="schoolLogoFile" accept="image/png,image/jpeg,image/webp" style="display:none;">
           </div>
-          <div class="school-logo-note">PNG is recommended, especially for logos with a transparent background. The image is resized for efficient storage and is saved with your gradebook data. The DepEd seal and DepEd wordmark are not changed.</div>
+          <div class="school-logo-note">PNG is recommended, especially for logos with a transparent background. The image is resized for efficient storage and is saved with your gradebook data.</div>
         </div>
       </div>
     </div>
 
     <div class="card">
       <h2>Official Form Signatories</h2>
-      <div class="sub">The official ECR always uses the Subject Teacher entered above as its signatory, with the fixed title “Subject Teacher.” SF2 uses the Adviser and School Head entered above. The signatory entries below remain available for the Grading Sheet and other official forms. The templates themselves stay fixed; the app only fills the required names and titles.</div>
+      <div class="sub">The official ECR uses the Subject Teacher above. SF2 uses the Adviser and School Head. These additional entries remain available for the Grading Sheet and other official forms.</div>
       <div class="grid2">
         <div class="field"><label>Prepared by — Name</label><input type="text" id="f_preparedByName" value="${esc(m.preparedByName||"")}" placeholder="Defaults to Subject Teacher"></div>
         <div class="field"><label>Prepared by — Title</label><input type="text" id="f_preparedByTitle" value="${esc(m.preparedByTitle||"Subject Teacher")}" placeholder="e.g. Subject Teacher"></div>
         <div class="field"><label>Checked by — Name</label><input type="text" id="f_checkedByName" value="${esc(m.checkedByName||"")}"></div>
-        <div class="field"><label>Checked by — Title</label><input type="text" id="f_checkedByTitle" value="${esc(m.checkedByTitle||"")}" placeholder="e.g. Head Teacher VI, Science Department"></div>
+        <div class="field"><label>Checked by — Title</label><input type="text" id="f_checkedByTitle" value="${esc(m.checkedByTitle||"")}" placeholder="e.g. Head Teacher VI"></div>
         <div class="field"><label>Approved by — Name</label><input type="text" id="f_approvedByName" value="${esc(m.approvedByName||"")}"></div>
-        <div class="field"><label>Approved by — Title</label><input type="text" id="f_approvedByTitle" value="${esc(m.approvedByTitle||"")}" placeholder="e.g. Asst. Principal II"></div>
+        <div class="field"><label>Approved by — Title</label><input type="text" id="f_approvedByTitle" value="${esc(m.approvedByTitle||"")}" placeholder="e.g. Assistant Principal"></div>
       </div>
     </div>
 
     <div class="card">
       <h2>Grading Weights</h2>
-      <div class="sub">Written Works, Performance Tasks and Exams weights should add up to 100%. Defaults shown match DepEd's Science weighting — edit freely for any subject.</div>
+      <div class="sub">Written Works, Performance Tasks and Exams weights should add up to 100%. Configure them for the current Class Record subject.</div>
       <div id="weightTotal" style="margin-bottom:14px;"></div>
       ${["WW","PT","EXAM"].map(k=>renderCategoryEditor(cls,k)).join("")}
     </div>
   `;
-  ["className","subject","gradeLevel","section","teacher","adviser","schoolHead","region","division","schoolId","schoolName","schoolYear","schoolAddress","preparedByName","preparedByTitle","checkedByName","checkedByTitle","approvedByName","approvedByTitle"].forEach(f=>{
+
+  ["className","gradeLevel","section","teacher","adviser","schoolHead","region","division","schoolId","schoolName","schoolYear","schoolAddress","preparedByName","preparedByTitle","checkedByName","checkedByTitle","approvedByName","approvedByTitle"].forEach(f=>{
     document.getElementById("f_"+f).addEventListener("change", e=>{
       m[f] = unicodeText(e.target.value); saveState(); renderClassPicker();
     });
   });
-  document.getElementById("f_classType").addEventListener("change", e=>{
-    sc.classType=e.target.value;
-    ensureSubjectConfig(cls);
-    saveState();
-    render();
+
+  document.getElementById("f_classRecordSubject").addEventListener("change",e=>{
+    const next=e.target.value,prev=m.classRecordSubjectId;
+    if(next===prev)return;
+    if(classHasEncodedScores(cls) && !confirm(`This class already contains encoded raw scores. Changing the Class Record Subject will make those same scores feed a different Summary of Grades column.\n\nChange from ${classRecordSubjectLabel(cls)} to ${classRecordSubjectOption(next)?.label||next}?`)){
+      render();return;
+    }
+    m.classRecordSubjectId=next;
+    ensureClassRecordSubject(cls);
+    syncClassRecordToSummary(cls);
+    saveState();render();
   });
-  [["f_mathName","MATH"],["f_scienceName","SCI"],["f_tleName","TLE"],["f_elective1","ELEC1"],["f_elective2","ELEC2"]].forEach(([id,key])=>{
-    document.getElementById(id).addEventListener("change", e=>{
-      const next=e.target.value;
-      if((key==="ELEC1"||key==="ELEC2") && next===sc[key==="ELEC1"?"ELEC2":"ELEC1"]){
-        alert("Elective 1 and Elective 2 must be different subjects.");
-        render();
-        return;
-      }
-      sc[key]=next;
-      ensureSubjectConfig(cls);
-      saveState();
-      render();
-    });
+  const electiveSelect=document.getElementById("f_classRecordElective");
+  if(electiveSelect) electiveSelect.addEventListener("change",e=>{
+    const next=e.target.value,prev=m.classRecordElectiveId;
+    if(next===prev)return;
+    if(classHasEncodedScores(cls) && !confirm(`This class already contains encoded raw scores. Changing the active elective will make those same scores feed a different Summary of Grades elective column.\n\nContinue?`)){
+      render();return;
+    }
+    m.classRecordElectiveId=next;
+    ensureClassRecordSubject(cls);
+    syncClassRecordToSummary(cls);
+    saveState();render();
   });
+
   document.getElementById("f_sf2Enabled").addEventListener("change", e=>{
     m.sf2Enabled = !!e.target.checked;
-    saveState();
-    render();
+    saveState();render();
   });
   const logoFile = document.getElementById("schoolLogoFile");
   const changeLogoBtn = document.getElementById("btnChangeSchoolLogo");
@@ -786,6 +894,54 @@ function renderSetup(main, cls){
 
   updateWeightTotal(cls);
   bindCategoryEditorEvents(cls);
+}
+
+function renderSf9Setup(main, cls){
+  const m=ensureClassRecordSubject(cls),sc=ensureSubjectConfig(cls);
+  const regular=sc.classType==="Regular";
+  main.innerHTML=`
+    <div class="card">
+      <h2>SF9 Setup</h2>
+      <div class="sub">SF9 curriculum configuration is independent from the Class Record setup. Shared class information is inherited automatically and cannot be edited here.</div>
+      <div class="grid3">
+        <div class="field"><label>Region — automatic</label><input value="${esc(m.region||"")}" readonly></div>
+        <div class="field"><label>Division — automatic</label><input value="${esc(m.division||"")}" readonly></div>
+        <div class="field"><label>School — automatic</label><input value="${esc(m.schoolName||"")}" readonly></div>
+        <div class="field"><label>School ID — automatic</label><input value="${esc(m.schoolId||"")}" readonly></div>
+        <div class="field"><label>School Year — automatic</label><input value="${esc(m.schoolYear||"")}" readonly></div>
+        <div class="field"><label>Grade / Section — automatic</label><input value="${esc([m.gradeLevel,m.section].filter(Boolean).join(" - "))}" readonly></div>
+        <div class="field"><label>School Head / Principal — automatic</label><input value="${esc(m.schoolHead||"")}" readonly></div>
+        <div class="field"><label>Adviser — automatic</label><input value="${esc(m.adviser||"")}" readonly></div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>SF9 Curriculum / Subject Structure</h2>
+      <div class="sub">These choices determine the learning-area labels and active elective rows shown in SF9 and Summary of Grades. They do not change the subject of the current Class Record.</div>
+      <div class="grid3">
+        <div class="field"><label>Class Type</label><select id="sf9_classType">${subjectOptionHtml(CLASS_TYPE_OPTIONS,sc.classType)}</select></div>
+        <div class="field"><label>Mathematics</label><select id="sf9_mathName" ${regular?"disabled":""}>${subjectOptionHtml(SUBJECT_NAME_OPTIONS.MATH,sc.MATH)}</select></div>
+        <div class="field"><label>Science</label><select id="sf9_scienceName" ${regular?"disabled":""}>${subjectOptionHtml(SUBJECT_NAME_OPTIONS.SCI,sc.SCI)}</select></div>
+      </div>
+      <div class="grid3">
+        <div class="field"><label>TLE / Special Subject</label><select id="sf9_tleName" ${regular?"disabled":""}>${subjectOptionHtml(SUBJECT_NAME_OPTIONS.TLE,sc.TLE)}</select></div>
+        <div class="field"><label>Elective 1</label><select id="sf9_elective1" ${regular?"disabled":""}>${catalogOptionHtml(ELECTIVE_CATALOG,sc.ELEC1_ID,sc.ELEC2_ID)}</select></div>
+        <div class="field"><label>Elective 2</label><select id="sf9_elective2" ${regular?"disabled":""}>${catalogOptionHtml(ELECTIVE_CATALOG,sc.ELEC2_ID,sc.ELEC1_ID)}</select></div>
+      </div>
+      <div class="import-summary"><strong>Grade source:</strong> SF9 learning-area grades are read only from <strong>Summary of Grades</strong>. The current Class Record contributes automatically to its linked Summary column.</div>
+    </div>`;
+  document.getElementById("sf9_classType").addEventListener("change",e=>{
+    sc.classType=e.target.value;ensureSubjectConfig(cls);syncClassRecordToSummary(cls);saveState();render();
+  });
+  [["sf9_mathName","MATH"],["sf9_scienceName","SCI"],["sf9_tleName","TLE"]].forEach(([id,key])=>{
+    document.getElementById(id).addEventListener("change",e=>{sc[key]=e.target.value;ensureSubjectConfig(cls);saveState();render();});
+  });
+  [["sf9_elective1","ELEC1_ID"],["sf9_elective2","ELEC2_ID"]].forEach(([id,key])=>{
+    document.getElementById(id).addEventListener("change",e=>{
+      const next=e.target.value,other=key==="ELEC1_ID"?sc.ELEC2_ID:sc.ELEC1_ID;
+      if(next===other){alert("Elective 1 and Elective 2 must be different subjects.");render();return;}
+      sc[key]=next;ensureSubjectConfig(cls);syncClassRecordToSummary(cls);saveState();render();
+    });
+  });
 }
 
 function renderCategoryEditor(cls, key){
@@ -1978,9 +2134,13 @@ function applyOfficialEcrImport(cls,data){
 
   // Import the metadata that actually exists on the official Class Record.
   const m=data.meta||{};
-  ["region","division","schoolId","schoolName","schoolYear","gradeLevel","teacher","subject","section"].forEach(k=>{
+  ["region","division","schoolId","schoolName","schoolYear","gradeLevel","teacher","section"].forEach(k=>{
     if(m[k]!==undefined && m[k]!==null && String(m[k]).trim()!=="") cls.meta[k]=String(m[k]).trim();
   });
+  if(m.subject!==undefined && m.subject!==null && String(m.subject).trim()!==""){
+    setClassRecordSubjectFromLabel(cls,String(m.subject).trim());
+  }
+  ensureClassRecordSubject(cls);
 
   // The official form is authoritative for HPS and component weighting.
   const applyHps=(cat,vals)=>cat.components.forEach((c,i)=>{
@@ -2476,11 +2636,25 @@ function renderFinal(main, cls){
 const SUMMARY_TERM = {current: "term1"};
 const SUMMARY_TERM_LABELS = {term1:"Term 1", term2:"Term 2", term3:"Term 3"};
 
+function syncClassRecordToSummary(cls){
+  if(!cls||!Array.isArray(cls.students)) return {ok:false,key:null,updated:0};
+  ensureSubjectConfig(cls);ensureClassRecordSubject(cls);
+  const key=classRecordSubjectAreaKey(cls);
+  if(!key) return {ok:false,key:null,updated:0,status:classRecordLinkStatus(cls)};
+  let updated=0;
+  cls.students.forEach(s=>{
+    ensureStudentExtras(cls,s.id);
+    for(const termKey of ["term1","term2","term3"]){
+      const result=studentTermResult(cls,termKey,s.id).term;
+      const next=(result===null||result===undefined)?"":Number(result);
+      if(cls.otherGrades[s.id][key][termKey]!==next){cls.otherGrades[s.id][key][termKey]=next;updated++;}
+    }
+  });
+  return {ok:true,key,updated,status:classRecordLinkStatus(cls)};
+}
+
 function areaTermValue(cls, s, area, termKey){
-  if(areaMatchesSubject(cls, area)){
-    const t = studentTermResult(cls, termKey, s.id).term;
-    return (t===null || t===undefined) ? null : t;
-  }
+  ensureStudentExtras(cls,s.id);
   const v = cls.otherGrades[s.id][area.key][termKey];
   return (v===undefined || v==="") ? null : Number(v);
 }
@@ -2490,7 +2664,7 @@ function summaryStudentRow(cls, s, termKey){
   const subAreas = mapehComponentAreas(cls);
   const electiveAreas = activeElectiveAreas(cls);
   function cell(area){
-    const locked = areaMatchesSubject(cls, area);
+    const locked = area.key===classRecordSubjectAreaKey(cls);
     const val = areaTermValue(cls, s, area, termKey);
     if(locked) return `<td class="computed">${val===null?"—":val}</td>`;
     return `<td><input type="number" class="summary-input" data-sid="${esc(s.id)}" data-key="${area.key}" data-term="${termKey}" value="${val===null?"":val}" min="60" max="100"></td>`;
@@ -2579,24 +2753,22 @@ function showSummaryImportDialog(cls, rows, fileName, termKey){
     const headers=(rows[headerRow]||[]).map(v=>String(v??"").trim());
     const dataRows=rows.slice(headerRow+1).filter(r=>(r||[]).some(v=>String(v??"").trim()!==""));
     const autoName=findSummaryHeader(headers,["Name","Learner Name","Learners Name","Learner's Name","Student Name","Full Name"]);
-    const autoLrn=findSummaryHeader(headers,["LRN","Learner Reference Number"]);
     const maps=activeGradeInputAreas(cls).map(a=>({area:a,col:findSummaryHeader(headers,summaryAliasesForArea(cls,a))}));
     const optionHtml=(selected,none=true)=>`${none?'<option value="-1">— Not mapped —</option>':''}${headers.map((h,i)=>`<option value="${i}" ${i===selected?"selected":""}>${esc(csvColumnLabel(h,i))}</option>`).join("")}`;
     const backdrop=document.createElement("div");backdrop.className="app-modal-backdrop no-print";
     const modal=document.createElement("div");modal.className="app-modal import-modal";
     modal.innerHTML=`
       <h3>Import Summary Table — ${esc(SUMMARY_TERM_LABELS[termKey])}</h3>
-      <p><strong>${esc(fileName||"Summary file")}</strong> was read. Map the learner and subject columns below. Imported grades are written directly to the same learner records used by SF9.</p>
+      <p><strong>${esc(fileName||"Summary file")}</strong> was read. Map the learner-name and subject columns below. Imported grades are written to Summary of Grades, which is the sole grade source used by SF9.</p>
       <div class="import-summary">Header row: <strong>${headerRow+1}</strong> • Data rows: <strong>${dataRows.length}</strong> • Auto-mapped subjects: <strong>${maps.filter(m=>m.col>=0).length}/${maps.length}</strong></div>
       <div class="import-grid">
         <div class="field"><label>Learner Name *</label><select id="sumName">${optionHtml(autoName)}</select></div>
-        <div class="field"><label>LRN (optional)</label><select id="sumLrn">${optionHtml(autoLrn)}</select></div>
         <div class="field"><label>Import Into</label><select id="sumTerm">${["term1","term2","term3"].map(t=>`<option value="${t}" ${t===termKey?"selected":""}>${SUMMARY_TERM_LABELS[t]}</option>`).join("")}</select></div>
       </div>
       <div class="scroll-x"><table class="import-map-table"><thead><tr><th>SF9 Learning Area</th><th>Summary Column</th></tr></thead><tbody>
       ${maps.map((m,i)=>`<tr><td>${esc(m.area.label)}</td><td><select class="sum-map" data-i="${i}">${optionHtml(m.col)}</select></td></tr>`).join("")}
       </tbody></table></div>
-      <div class="hint" style="margin-top:10px;">The subject represented by this Class Record remains authoritative and is not overwritten by a summary import. Learners are matched by LRN first, then by normalized name.</div>
+      <div class="hint" style="margin-top:10px;">Learners are matched by normalized name because official grading sheets do not provide LRN. Exact normalized-name matches are preferred; a unique token-equivalent name is used only as a fallback. Ambiguous duplicate names are never guessed. The active Class Record subject remains authoritative and is not overwritten by this import.</div>
       <div class="app-modal-error" id="sumErr"></div>
       <div class="app-modal-actions"><button class="cancel" id="sumCancel">Cancel</button><button class="primary" id="sumConfirm">Import Grades</button></div>`;
     backdrop.appendChild(modal);document.body.appendChild(backdrop);
@@ -2608,25 +2780,40 @@ function showSummaryImportDialog(cls, rows, fileName, termKey){
       if(nameCol<0){modal.querySelector("#sumErr").textContent="Select the learner-name column.";return;}
       const mappings=maps.map((m,i)=>({...m,col:Number(modal.querySelector(`.sum-map[data-i="${i}"]`).value)})).filter(m=>m.col>=0);
       if(!mappings.length){modal.querySelector("#sumErr").textContent="Map at least one subject column.";return;}
-      finish({dataRows,nameCol,lrnCol:Number(modal.querySelector("#sumLrn").value),termKey:modal.querySelector("#sumTerm").value,mappings});
+      finish({dataRows,nameCol,termKey:modal.querySelector("#sumTerm").value,mappings});
     };
   });
 }
+function buildSummaryNameIndex(cls){
+  const exact=new Map(),tokens=new Map();
+  for(const st of cls.students||[]){
+    const nk=normalizeLearnerName(st.name);
+    if(nk){if(!exact.has(nk))exact.set(nk,[]);exact.get(nk).push(st);}
+    const tk=learnerTokenKey(st.name);
+    if(tk){if(!tokens.has(tk))tokens.set(tk,[]);tokens.get(tk).push(st);}
+  }
+  return {exact,tokens};
+}
+function matchSummaryLearner(index,name){
+  const nk=normalizeLearnerName(name),exact=nk?(index.exact.get(nk)||[]):[];
+  if(exact.length===1)return {student:exact[0],ambiguous:false,mode:"exact"};
+  if(exact.length>1)return {student:null,ambiguous:true,mode:"exact"};
+  const tk=learnerTokenKey(name),list=tk?(index.tokens.get(tk)||[]):[];
+  if(list.length===1)return {student:list[0],ambiguous:false,mode:"tokens"};
+  return {student:null,ambiguous:list.length>1,mode:"tokens"};
+}
 function applySummaryImport(cls, config){
-  const idx=buildStudentImportIndexes(cls);let matched=0,unmatched=0,imported=0,invalid=0,lockedSkipped=0;
-  const seen=new Set();
+  const idx=buildSummaryNameIndex(cls);let matched=0,unmatched=0,ambiguous=0,imported=0,invalid=0,lockedSkipped=0;
+  const seen=new Set(),activeKey=classRecordSubjectAreaKey(cls);
   for(const row of config.dataRows){
     const name=unicodeText((row||[])[config.nameCol]).trim();
-    const lrn=config.lrnCol>=0?String((row||[])[config.lrnCol]??"").replace(/\D/g,""):"";
-    if(!name&&!lrn)continue;
-    let st=lrn?idx.byLrn.get(lrn):null;
-    if(!st&&name){const nk=normalizeLearnerName(name);st=idx.byName.get(nk)||null;}
-    if(!st&&name){const tk=learnerTokenKey(name),list=tk?idx.byTokens.get(tk):null;if(list&&list.length===1)st=list[0];}
-    if(!st){unmatched++;continue;}
+    if(!name)continue;
+    const match=matchSummaryLearner(idx,name),st=match.student;
+    if(!st){if(match.ambiguous)ambiguous++;else unmatched++;continue;}
     if(!seen.has(st.id)){seen.add(st.id);matched++;}
     ensureStudentExtras(cls,st.id);
     for(const m of config.mappings){
-      if(areaMatchesSubject(cls,m.area)){lockedSkipped++;continue;}
+      if(activeKey && m.area.key===activeKey){lockedSkipped++;continue;}
       const raw=(row||[])[m.col];if(raw===undefined||raw===null||String(raw).trim()==="")continue;
       const n=Number(String(raw).replace(/,/g,"").trim());
       if(!Number.isFinite(n)||n<60||n>100){invalid++;continue;}
@@ -2634,7 +2821,8 @@ function applySummaryImport(cls, config){
       imported++;
     }
   }
-  return {matched,unmatched,imported,invalid,lockedSkipped,termKey:config.termKey};
+  syncClassRecordToSummary(cls);
+  return {matched,unmatched,ambiguous,imported,invalid,lockedSkipped,termKey:config.termKey};
 }
 async function importSummaryTable(cls){
   if(!window.eclassAPI||typeof window.eclassAPI.runtimeInvoke!=="function"){alert("Summary import is available in the installed desktop app.");return;}
@@ -2642,7 +2830,7 @@ async function importSummaryTable(cls){
   if(!result||result.cancelled)return;if(!result.ok){alert("Could not read that summary file: "+(result.error||"Unknown error"));return;}
   const cfg=await showSummaryImportDialog(cls,result.rows,result.fileName,SUMMARY_TERM.current);if(!cfg)return;if(cfg.error){alert(cfg.error);return;}
   const stats=applySummaryImport(cls,cfg);SUMMARY_TERM.current=cfg.termKey;saveState();render();
-  await showInfoDialog("Summary Import Complete",`${stats.imported} grade value${stats.imported===1?"":"s"} imported for ${stats.matched} matched learner${stats.matched===1?"":"s"}.`+(stats.unmatched?` ${stats.unmatched} learner row${stats.unmatched===1?"":"s"} could not be matched.`:"")+(stats.invalid?` ${stats.invalid} invalid grade value${stats.invalid===1?"":"s"} skipped.`:"")+(stats.lockedSkipped?` ${stats.lockedSkipped} value${stats.lockedSkipped===1?"":"s"} for the Class Record subject were left unchanged.`:""));
+  await showInfoDialog("Summary Import Complete",`${stats.imported} grade value${stats.imported===1?"":"s"} imported for ${stats.matched} matched learner${stats.matched===1?"":"s"}.`+(stats.unmatched?` ${stats.unmatched} learner row${stats.unmatched===1?"":"s"} could not be matched by name.`:"")+(stats.ambiguous?` ${stats.ambiguous} learner row${stats.ambiguous===1?" was":"s were"} ambiguous and was not assigned automatically.`:"")+(stats.invalid?` ${stats.invalid} invalid grade value${stats.invalid===1?"":"s"} skipped.`:"")+(stats.lockedSkipped?` ${stats.lockedSkipped} value${stats.lockedSkipped===1?"":"s"} for the active Class Record subject were left unchanged.`:""));
 }
 
 function summaryTemplatePayload(cls,termKey){
@@ -2672,6 +2860,8 @@ ${result.path||result.xlsxPath||""}`);
 }
 
 function renderSummary(main, cls){
+  syncClassRecordToSummary(cls);
+  const linkStatus=classRecordLinkStatus(cls);
   if(!cls.students.length){
     main.innerHTML = `<div class="empty-state"><h2>No learners yet</h2><p>Add learners in the Roster tab first.</p></div>`;
     return;
@@ -2680,7 +2870,8 @@ function renderSummary(main, cls){
   main.innerHTML = `
     <div class="card">
       <h2>Summary of Term Grade</h2>
-      <div class="sub">Enter every learner's grade in each subject for the selected term. <strong>${esc(cls.meta.subject)}</strong> fills in automatically from the Term tabs — everything else you type here feeds straight into the SF9 report cards' Learning Progress table and General Average, for all three terms.</div>
+      <div class="sub">This is the <strong>single source of truth for all SF9 learning-area grades</strong>. The active Class Record subject, <strong>${esc(classRecordSubjectLabel(cls))}</strong>, is synchronized automatically from the Term tabs. Other subjects are entered here or imported from a Summary workbook.</div>
+      ${linkStatus.ok?`<div class="import-summary"><strong>Active Class Record link:</strong> ${esc(classRecordSubjectLabel(cls))} → ${esc(linkStatus.key)}. This column is read-only because its values come from the current Class Record / Grading Sheet.</div>`:`<div class="import-summary" style="border-color:var(--red-pen);"><strong>Active Class Record is not linked:</strong> ${esc(linkStatus.message)} The grading sheet will not write into an elective Summary column until this is resolved in SF9 Setup.</div>`}
       <div class="toolbar">
         <div class="cr-viewtoggle">
           ${["term1","term2","term3"].map(t=>`<button class="small summary-termbtn ${SUMMARY_TERM.current===t?"active":""}" data-term="${t}">${SUMMARY_TERM_LABELS[t]}</button>`).join("")}
@@ -2716,6 +2907,7 @@ function renderSummary(main, cls){
 }
 
 function renderReport(main, cls){
+  syncClassRecordToSummary(cls);
   if(!cls.students.length){
     main.innerHTML = `<div class="empty-state"><h2>No learners yet</h2><p>Add learners in the Roster tab first.</p></div>`;
     return;
@@ -2728,7 +2920,7 @@ function renderReport(main, cls){
   main.innerHTML = `
     <div class="card no-print">
       <h2>Report Cards (SF9)</h2>
-      <div class="sub">Two-page spread matching the official Learner's Progress Report: Page 1 is the learning-progress report, Page 2 is attendance, comments, signatures and the Certificate of Transfer. This app only tracks <strong>${esc(cls.meta.subject)}</strong>, so that row fills in automatically — the other learning areas and comments remain hand-fillable.${sf2ReportNote}</div>
+      <div class="sub">SF9 learning-area grades are <strong>read-only here</strong> and come exclusively from Summary of Grades. The current Class Record / Grading Sheet synchronizes its active subject into Summary automatically; other subject grades are entered or imported in Summary.${sf2ReportNote} Teacher comments remain editable here.</div>
       <div class="toolbar">
         <select id="rcStudent"></select>
         <button id="rcPreview" class="ghost-alt" style="background:var(--paper-deep);">SF9 Preview</button>
@@ -2767,18 +2959,9 @@ function renderReport(main, cls){
   draw();
 }
 
-/* Wire up the hand-fillable fields (other learning areas, attendance,
-   comments) inside whichever report card spread(s) are currently in the DOM. */
+/* SF9 grades are read-only and come exclusively from Summary of Grades.
+   Only attendance fallback fields and comments are editable in the report card. */
 function bindReportCardEvents(cls, container){
-  container.querySelectorAll(".og-input").forEach(inp=>{
-    inp.addEventListener("change", e=>{
-      const sid = e.target.dataset.sid, key = e.target.dataset.key, term = e.target.dataset.term;
-      ensureStudentExtras(cls, sid);
-      cls.otherGrades[sid][key][term] = e.target.value;
-      saveState();
-      renderReportRowsInPlace(cls, container, sid);
-    });
-  });
   container.querySelectorAll(".att-input").forEach(inp=>{
     inp.addEventListener("change", e=>{
       const sid = e.target.dataset.sid, month = e.target.dataset.month, field = e.target.dataset.field;
@@ -2811,29 +2994,17 @@ function renderReportRowsInPlace(cls, container, sid){
 }
 
 function areaMatchesSubject(cls, area){
-  const norm=v=>String(v||"").toLowerCase().replace(/[^a-z0-9]+/g," ").trim();
-  const subj=norm(cls.meta.subject);
-  if(!subj) return false;
-  const labels=[area.key,area.label,subjectDisplayLabel(cls,area.key)];
-  if(area.key!=="ELEC1"&&area.key!=="ELEC2") labels.push(...(SUMMARY_SUBJECT_ALIASES[area.key]||[]));
-  return labels.some(v=>norm(v)===subj);
+  return area && area.key===classRecordSubjectAreaKey(cls);
 }
 
-/* Term grade + final grade + Passed/Failed remark for one SF9 learning-area row.
-   For the area that matches this class's own subject, pulls the computed
-   value; otherwise reads whatever was typed into the other-subject fields. */
+/* SF9 never reads directly from the Class Record and never owns separate
+   learning-area grade entries. Summary of Grades is the sole grade source. */
 function areaRowResult(cls, s, area){
-  if(areaMatchesSubject(cls, area)){
-    const t1 = studentTermResult(cls,"term1",s.id).term;
-    const t2 = studentTermResult(cls,"term2",s.id).term;
-    const t3 = studentTermResult(cls,"term3",s.id).term;
-    const fin = studentFinalResult(cls, s.id);
-    return {t1,t2,t3, final:fin.final, locked:true};
-  }
-  const g = cls.otherGrades[s.id][area.key];
-  const nums = ["term1","term2","term3"].map(t=> g[t]!=="" && g[t]!==undefined ? Number(g[t]) : null);
-  const final = averageWhole(nums);
-  return {t1:nums[0], t2:nums[1], t3:nums[2], final, locked:false};
+  ensureStudentExtras(cls,s.id);
+  const g=cls.otherGrades[s.id][area.key]||{term1:"",term2:"",term3:""};
+  const nums=["term1","term2","term3"].map(t=>g[t]!==""&&g[t]!==undefined?Number(g[t]):null);
+  const final=averageWhole(nums);
+  return {t1:nums[0],t2:nums[1],t3:nums[2],final,locked:true};
 }
 
 function reportCardHtml(cls, s){
@@ -2852,10 +3023,9 @@ function reportCardHtml(cls, s){
 
   const primaryAreas = corePrimaryAreas(cls);
   const electiveAreas = activeElectiveAreas(cls);
-  function gradeCell(sid, area, term, result){
-    const val = result[term];
-    if(result.locked) return `<td class="rc-computed">${fmt(val)===""?"—":val}</td>`;
-    return `<td><input type="number" class="og-input" data-sid="${esc(sid)}" data-key="${area.key}" data-term="${term}" value="${fmt(val)}" min="60" max="100"></td>`;
+  function gradeCell(_sid, _area, term, result){
+    const val=result[term];
+    return `<td class="rc-computed">${fmt(val)===""?"—":val}</td>`;
   }
   const areaRows = primaryAreas.map(area=>{
     const r = rowResults[area.key];
