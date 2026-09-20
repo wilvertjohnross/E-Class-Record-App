@@ -1,5 +1,12 @@
 E-Class Record App with GS and SF9
 
+Version 1.0.2
+- Fixed the + New Class button in the Electron desktop app.
+- Replaced the unsupported browser prompt() used by New Class with a native-looking in-app dialog.
+- The new dialog supports Create Class, Cancel, Enter to submit, Escape to cancel, and required-name validation.
+- Replaced the second prompt() dependency used by Roster > Paste names with the same desktop-safe dialog system.
+- No changes to grade calculations, class data structure, GS/SF9 layouts, or saved-data format.
+
 Version 1.0.1
 - Fixed "This app doesn't support print preview" when using in-app Print buttons.
 - Class Record and Grading Sheet now open the native Windows print dialog.

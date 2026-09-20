@@ -1,5 +1,11 @@
 E-Class Record App with GS and SF9
-Version 1.0.1
+Version 1.0.2
+
+NEW CLASS FIX IN v1.0.2
+The + New Class button now uses an in-app dialog instead of window.prompt().
+This fixes the issue where clicking + New Class appeared to do nothing in the
+standalone Electron app. Roster > Paste names was updated to use the same
+desktop-safe dialog because it relied on the same unsupported prompt mechanism.
 
 PRINTING FIX IN v1.0.1
 The in-app Print buttons now use Electron's native Windows printing API instead

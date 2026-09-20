@@ -340,6 +340,36 @@
     padding:8px 22px;font-size:12px;color:var(--ink-soft);
     display:flex;justify-content:space-between;
   }
+  /* ===== Desktop-safe in-app dialogs ===== */
+  .app-modal-backdrop{
+    position:fixed;inset:0;z-index:10000;
+    background:rgba(31,42,60,.52);
+    display:flex;align-items:center;justify-content:center;
+    padding:24px;
+  }
+  .app-modal{
+    width:min(520px,100%);
+    background:var(--white);color:var(--ink);
+    border:1px solid var(--border);border-top:5px solid var(--red-pen);
+    border-radius:6px;box-shadow:0 14px 40px rgba(31,42,60,.30);
+    padding:20px;
+  }
+  .app-modal h3{
+    margin:0 0 6px;font-family:var(--serif);font-size:20px;
+  }
+  .app-modal p{margin:0 0 14px;color:var(--ink-soft);font-size:13px;line-height:1.45;}
+  .app-modal input,.app-modal textarea{
+    width:100%;font-family:var(--sans);font-size:14px;
+    border:1px solid var(--border);border-radius:3px;background:#fff;color:var(--ink);
+    padding:9px 10px;outline:none;
+  }
+  .app-modal textarea{min-height:190px;resize:vertical;line-height:1.4;}
+  .app-modal input:focus,.app-modal textarea:focus{
+    border-color:var(--green-chalk);box-shadow:0 0 0 2px rgba(51,81,62,.15);
+  }
+  .app-modal-actions{display:flex;justify-content:flex-end;gap:9px;margin-top:16px;}
+  .app-modal-actions .cancel{background:var(--paper-deep);color:var(--ink);border:1px solid var(--border);}
+  .app-modal-error{min-height:17px;margin-top:7px;color:var(--red-pen);font-size:12px;font-weight:600;}
   .badge-count{background:var(--paper-deep);border:1px solid var(--border);border-radius:10px;padding:1px 9px;font-size:11.5px;margin-left:6px;}
 </style>
 </head>
@@ -839,8 +869,14 @@ function renderRoster(main, cls){
     cls.students.push({id:uid("s"), name:"", lrn:"", age:"", sex:"M"});
     saveState(); render();
   });
-  document.getElementById("pasteNames").addEventListener("click", ()=>{
-    const text = prompt("Paste learner names, one per line:");
+  document.getElementById("pasteNames").addEventListener("click", async ()=>{
+    const text = await showTextEntryDialog({
+      title:"Paste learner names",
+      message:"Paste one learner name per line. Imported learners will initially be placed in the Male group; you can change Sex afterward.",
+      multiline:true,
+      confirmText:"Add learners",
+      required:true
+    });
     if(!text) return;
     text.split("\n").map(t=>t.trim()).filter(Boolean).forEach(name=>{
       cls.students.push({id:uid("s"), name, lrn:"", age:"", sex:"M"});
@@ -1835,6 +1871,98 @@ function esc(str){
   return String(str).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
 }
 
+
+/* Desktop-safe replacement for window.prompt(). Electron does not provide a
+   dependable browser prompt UI, so text entry is handled inside the app. */
+function showTextEntryDialog({title, message, value="", multiline=false, confirmText="OK", required=false}){
+  return new Promise(resolve=>{
+    const backdrop = document.createElement("div");
+    backdrop.className = "app-modal-backdrop no-print";
+
+    const modal = document.createElement("div");
+    modal.className = "app-modal";
+    modal.setAttribute("role", "dialog");
+    modal.setAttribute("aria-modal", "true");
+
+    const heading = document.createElement("h3");
+    heading.textContent = title || "Enter information";
+    modal.appendChild(heading);
+
+    if(message){
+      const p = document.createElement("p");
+      p.textContent = message;
+      modal.appendChild(p);
+    }
+
+    const field = document.createElement(multiline ? "textarea" : "input");
+    if(!multiline) field.type = "text";
+    field.value = value == null ? "" : String(value);
+    field.setAttribute("aria-label", title || "Text entry");
+    modal.appendChild(field);
+
+    const error = document.createElement("div");
+    error.className = "app-modal-error";
+    modal.appendChild(error);
+
+    const actions = document.createElement("div");
+    actions.className = "app-modal-actions";
+
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.className = "cancel";
+    cancel.textContent = "Cancel";
+
+    const ok = document.createElement("button");
+    ok.type = "button";
+    ok.className = "primary";
+    ok.textContent = confirmText;
+
+    actions.append(cancel, ok);
+    modal.appendChild(actions);
+    backdrop.appendChild(modal);
+    document.body.appendChild(backdrop);
+
+    let closed = false;
+    const finish = result=>{
+      if(closed) return;
+      closed = true;
+      document.removeEventListener("keydown", onKeyDown, true);
+      backdrop.remove();
+      resolve(result);
+    };
+
+    const submit = ()=>{
+      const result = field.value.trim();
+      if(required && !result){
+        error.textContent = "Please enter a value.";
+        field.focus();
+        return;
+      }
+      finish(result);
+    };
+
+    const onKeyDown = e=>{
+      if(e.key === "Escape"){
+        e.preventDefault();
+        finish(null);
+      }else if(e.key === "Enter" && (!multiline || e.ctrlKey || e.metaKey)){
+        e.preventDefault();
+        submit();
+      }
+    };
+
+    cancel.addEventListener("click", ()=>finish(null));
+    ok.addEventListener("click", submit);
+    backdrop.addEventListener("mousedown", e=>{ if(e.target === backdrop) finish(null); });
+    document.addEventListener("keydown", onKeyDown, true);
+
+    requestAnimationFrame(()=>{
+      field.focus();
+      if(!multiline) field.select();
+    });
+  });
+}
+
 /* =========================================================================
    TOP-LEVEL EVENTS
    ========================================================================= */
@@ -1847,10 +1975,16 @@ document.getElementById("tabs").addEventListener("click", e=>{
 document.getElementById("classSelect").addEventListener("change", e=>{
   APP.activeId = e.target.value; saveState(); render();
 });
-document.getElementById("btnNewClass").addEventListener("click", ()=>{
-  const name = prompt("Name for the new class (e.g. Grade 9 Math — Section B):", "New Class");
+document.getElementById("btnNewClass").addEventListener("click", async ()=>{
+  const name = await showTextEntryDialog({
+    title:"Create New Class",
+    message:"Enter the class name (for example: Grade 10 Science — Gomez).",
+    value:"New Class",
+    confirmText:"Create Class",
+    required:true
+  });
   if(name===null) return;
-  const c = newClass(name || "New Class");
+  const c = newClass(name);
   APP.classes[c.id] = c; APP.activeId = c.id;
   saveState(); render();
 });
