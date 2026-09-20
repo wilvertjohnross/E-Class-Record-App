@@ -1,7 +1,7 @@
 {
   "name": "e-class-record-app-gs-sf9",
-  "version": "1.0.8",
-  "description": "Offline E-Class Record App with Grading Sheets and SF9",
+  "version": "1.0.9",
+  "description": "Offline-first E-Class Record App with Grading Sheets, SF9, official SF1/ECR import, and local development auto-updates",
   "main": "main.js",
   "author": "",
   "license": "UNLICENSED",
@@ -26,6 +26,7 @@
       "main.js",
       "preload.js",
       "sf1-parser.js",
+      "thread-updater.js",
       "app/**/*",
       "assets/**/*",
       "templates/**/*"

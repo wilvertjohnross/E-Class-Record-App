@@ -1,3 +1,12 @@
+v1.0.9
+- Added local Downloads-folder development auto-update channel (.ecrupdate).
+- Updates stage automatically without interrupting the running app and activate on the next normal launch.
+- Added Help > Check Downloaded Updates and update-aware About information.
+- Added footer runtime/staged-version status.
+- Added stable runtimeInvoke bridge so future downloaded runtime packages can add main-process features without changing preload.
+- Added runtime resource overlay support for app UI and official templates.
+- Preserved all v1.0.8 SF1/ECR/GS/SF9 features and local data storage.
+
 v1.0.8
 - Added Import Official SF1 (.xls) to the Roster tab.
 - Reads the official legacy Excel SF1 file directly; CSV conversion is not required.

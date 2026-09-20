@@ -1,5 +1,43 @@
 E-Class Record App with GS and SF9
-Version 1.0.8
+Version 1.0.9
+
+
+VERSION 1.0.9 — LOCAL THREAD-DOWNLOAD AUTO UPDATE CHANNEL
+This is the one-time bootstrap update intended to remove the repeated
+extract / rebuild / reinstall cycle during development.
+
+After v1.0.9 is installed, ordinary future development updates can be
+delivered as a single file ending in:
+  .ecrupdate
+
+When that file is downloaded from the ChatGPT development thread into the
+Windows Downloads folder, the installed app automatically detects and stages
+it. The app is NOT forcibly restarted. The downloaded version becomes active
+the next time the teacher normally closes and opens the app. If the update was
+downloaded while the app was closed, it can become active on the very next
+launch.
+
+The footer displays the effective version and indicates when a newer version
+is staged. Help > Check Downloaded Updates can also scan the Downloads folder
+manually, and Help > About shows both the effective runtime version and the
+installed bootstrap version.
+
+This development updater does not contact or read the ChatGPT conversation
+directly. It watches the local Downloads folder for .ecrupdate packages that
+the user explicitly downloads. The app's class/learner/grade data remains in
+the separate Documents data folder and is not replaced by an update package.
+
+IMPORTANT DEVELOPMENT SECURITY NOTE:
+The local thread updater is intended only for this private build/test phase.
+It validates app identity, version compatibility, safe ZIP paths and file
+hashes for corruption detection, but these local packages are not publisher
+code-signed. Before broad distribution to other teachers, move to signed
+releases / a trusted hosted update channel.
+
+A rare future change to the Electron bootstrap itself, preload security bridge,
+or native dependency set may still require one full installer update. Normal
+UI, template, form-mapping and feature iterations should be deliverable through
+.ecrupdate packages using the stable runtime extension bridge introduced here.
 
 
 VERSION 1.0.8 — IMPORT OFFICIAL SF1 (.XLS)

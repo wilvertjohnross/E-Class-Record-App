@@ -1,0 +1,47 @@
+E-CLASS RECORD APP — DEVELOPMENT THREAD UPDATE FORMAT
+Bootstrap introduced in v1.0.9
+
+PURPOSE
+After the user installs the v1.0.9 full Windows build one time, ordinary
+feature/UI/template iterations can be delivered in this ChatGPT thread as a
+single *.ecrupdate file. The installed app watches the user's Windows Downloads
+folder, stages the file automatically, and activates it on the next normal app
+launch. No manual extraction or reinstall is required for an ordinary runtime
+update.
+
+PACKAGE FORMAT
+.ecrupdate is a ZIP-compatible package with this layout:
+
+  manifest.json
+  payload/
+    app/index.html              (normally include the complete current UI)
+    main-extension.js           (optional; new/overridden main-process actions)
+    templates/...               (official templates or mapping resources)
+    ...                         (other runtime JS/data used by the extension)
+
+manifest.json fields:
+  format: 1
+  appId: ph.edu.eclassrecord.gs.sf9
+  productName: E-Class Record App with GS and SF9
+  version: semantic version newer than the effective installed version
+  minBootstrapVersion: normally 1.0.9
+  files: SHA-256 map keyed by payload/<relative-path>
+
+RUNTIME EXTENSION
+The v1.0.9 preload exposes:
+  window.eclassAPI.runtimeInvoke(action, payload)
+
+An update may provide payload/main-extension.js exporting:
+  async register(context) { ... }      // optional startup hook
+  async invoke(action, payload, context) { ... }
+
+This allows future SF2/SF10/form-import logic to be added without replacing the
+stable preload bridge. Existing packaged IPCs continue to work.
+
+IMPORTANT
+- Future .ecrupdate packages should be self-contained snapshots of the current
+  runtime files they depend on; do not assume an older update overlay remains.
+- A change to the Electron bootstrap/preload itself or a new native Node module
+  can still require a new full installer.
+- This local update channel is for private development/testing. Before broad
+  deployment, use publisher signing and a trusted hosted update channel.

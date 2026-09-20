@@ -425,6 +425,7 @@
 
 <footer class="status no-print">
   <span id="statusLeft">Ready.</span>
+  <span id="statusVersion" title="Application/update status"></span>
   <span id="statusRight">Saved automatically to this device.</span>
 </footer>
 
@@ -2771,8 +2772,36 @@ document.getElementById("fileImport").addEventListener("change", e=>{
   e.target.value = "";
 });
 
+async function initLocalThreadUpdaterStatus(){
+  const versionEl = document.getElementById("statusVersion");
+  if(!versionEl || !window.eclassAPI || typeof window.eclassAPI.getUpdateInfo !== "function") return;
+
+  function showInfo(info){
+    if(!info) return;
+    const ver = info.effectiveVersion || info.bootstrapVersion || "";
+    const staged = info.stagedVersion;
+    versionEl.textContent = staged ? `v${ver} • update ${staged} ready` : `v${ver}`;
+    versionEl.title = staged
+      ? `Version ${staged} has been downloaded and staged. It will become active the next time you normally open the app.`
+      : `Current application version ${ver}. Downloaded .ecrupdate files placed in your Downloads folder are detected automatically.`;
+  }
+
+  try{ showInfo(await window.eclassAPI.getUpdateInfo()); }catch(err){ console.warn("Update status unavailable", err); }
+
+  if(typeof window.eclassAPI.onUpdateStatus === "function") {
+    window.eclassAPI.onUpdateStatus(status=>{
+      showInfo(status);
+      if(status && status.type === "update-staged") {
+        const left = document.getElementById("statusLeft");
+        if(left) left.textContent = `Update ${status.stagedVersion || ""} ready for next launch.`.trim();
+      }
+    });
+  }
+}
+
 /* init */
 render();
+initLocalThreadUpdaterStatus();
 </script>
 </body>
 </html>

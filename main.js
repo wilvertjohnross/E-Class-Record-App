@@ -4,9 +4,13 @@ const fs = require('fs');
 const { execFile, spawn } = require('child_process');
 const AdmZip = require('adm-zip');
 const { parseOfficialSf1Xls } = require('./sf1-parser');
+const { ThreadUpdater } = require('./thread-updater');
 
 const PRODUCT_NAME = 'E-Class Record App with GS and SF9';
+const APP_ID = 'ph.edu.eclassrecord.gs.sf9';
 let mainWindow;
+let threadUpdater = null;
+let runtimeExtension = null;
 
 function dataPaths() {
   const root = path.join(app.getPath('documents'), PRODUCT_NAME);
@@ -45,7 +49,7 @@ function createWindow() {
     minWidth: 980,
     minHeight: 680,
     title: PRODUCT_NAME,
-    icon: path.join(__dirname, 'assets', 'app.png'),
+    icon: threadUpdater ? threadUpdater.resolveResource('assets/app.png') : path.join(__dirname, 'assets', 'app.png'),
     backgroundColor: '#F1E9D6',
     show: false,
     webPreferences: {
@@ -56,7 +60,7 @@ function createWindow() {
     }
   });
 
-  mainWindow.loadFile(path.join(__dirname, 'app', 'index.html'));
+  mainWindow.loadFile(threadUpdater ? threadUpdater.resolveResource('app/index.html') : path.join(__dirname, 'app', 'index.html'));
   mainWindow.once('ready-to-show', () => mainWindow.show());
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -116,13 +120,62 @@ function buildMenu() {
       label: 'Help',
       submenu: [
         {
+          label: 'Check Downloaded Updates',
+          click: async () => {
+            if (!threadUpdater) return;
+            const result = await threadUpdater.scanDownloadedUpdates({ quiet: false });
+            const info = threadUpdater.info();
+            const detail = info.stagedVersion
+              ? `Version ${info.stagedVersion} is staged and will become active the next time you normally open the app.`
+              : `No newer .ecrupdate package was found in:\n${info.downloadsFolder}`;
+            dialog.showMessageBox(mainWindow, {
+              type: info.stagedVersion ? 'info' : 'none',
+              title: 'Downloaded Updates',
+              message: info.stagedVersion ? 'Update ready for next launch' : 'No downloaded update found',
+              detail
+            });
+            return result;
+          }
+        },
+        {
+          label: 'Install Local Update File...',
+          click: async () => {
+            if (!threadUpdater) return;
+            const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
+              title: 'Select E-Class Record Update',
+              properties: ['openFile'],
+              filters: [{ name: 'E-Class Record Update', extensions: ['ecrupdate'] }]
+            });
+            if (canceled || !filePaths[0]) return;
+            const result = await threadUpdater.stagePackage(filePaths[0], { quiet: false });
+            if (result && result.staged) {
+              dialog.showMessageBox(mainWindow, {
+                type: 'info',
+                title: 'Update staged',
+                message: `Version ${result.version} is ready`,
+                detail: 'Continue working normally. The update will become active the next time you close and open the app.'
+              });
+            } else if (result && result.error) {
+              dialog.showErrorBox('Could not stage update', result.error);
+            }
+          }
+        },
+        {
+          label: 'Open Downloads Folder',
+          click: () => shell.openPath(app.getPath('downloads'))
+        },
+        { type: 'separator' },
+        {
           label: 'About',
-          click: () => dialog.showMessageBox(mainWindow, {
-            type: 'info',
-            title: `About ${PRODUCT_NAME}`,
-            message: PRODUCT_NAME,
-            detail: `Version ${app.getVersion()}\nOffline desktop class record, grading sheet, and SF9 application.`
-          })
+          click: () => {
+            const info = threadUpdater ? threadUpdater.info() : { effectiveVersion: app.getVersion(), bootstrapVersion: app.getVersion() };
+            dialog.showMessageBox(mainWindow, {
+              type: 'info',
+              title: `About ${PRODUCT_NAME}`,
+              message: PRODUCT_NAME,
+              detail: `Current version ${info.effectiveVersion}\nBootstrap ${info.bootstrapVersion}\n\nOffline-first class record and learner records application.\nDevelopment updates downloaded as .ecrupdate files are applied on the next normal launch.`
+            });
+          }
         }
       ]
     }
@@ -437,7 +490,9 @@ ipcMain.handle('ecr:import-official', async () => {
    the template's styles, merged cells, drawings, page setup, margins and print
    layout exactly. The exported workbook contains static values, so it does not
    depend on the template's original external INPUT DATA / HELPER workbook. */
-const OFFICIAL_ECR_TEMPLATE = path.join(__dirname, 'templates', 'ECR official Template.xlsx');
+function officialEcrTemplatePath() {
+  return threadUpdater ? threadUpdater.resolveResource('templates/ECR official Template.xlsx') : path.join(__dirname, 'templates', 'ECR official Template.xlsx');
+}
 
 function xmlEscape(value) {
   return String(value ?? '')
@@ -499,7 +554,8 @@ function officialTermNumber(termKey) {
 }
 
 function buildOfficialEcrBuffer(payload) {
-  if (!fs.existsSync(OFFICIAL_ECR_TEMPLATE)) throw new Error('The bundled Official ECR template is missing.');
+  const officialTemplate = officialEcrTemplatePath();
+  if (!fs.existsSync(officialTemplate)) throw new Error('The bundled Official ECR template is missing.');
   if (!payload || !payload.meta || !payload.categories || !Array.isArray(payload.students)) {
     throw new Error('The Class Record data sent to the exporter is incomplete.');
   }
@@ -516,7 +572,7 @@ function buildOfficialEcrBuffer(payload) {
     throw new Error('The official template requires exactly 5 WW, 3 PT and 3 Examination components.');
   }
 
-  const zip = new AdmZip(fs.readFileSync(OFFICIAL_ECR_TEMPLATE));
+  const zip = new AdmZip(fs.readFileSync(officialTemplate));
   const entry = zip.getEntry('xl/worksheets/sheet1.xml');
   if (!entry) throw new Error('The official ECR worksheet was not found in the template.');
   let xml = entry.getData().toString('utf8');
@@ -752,11 +808,93 @@ ipcMain.handle('ecr:export-official', async (_event, payload, mode) => {
   catch (err) { console.error('Official ECR export failed:', err); return { ok: false, error: err.message }; }
 });
 
-app.whenReady().then(() => {
+ipcMain.handle('update:info', async () => threadUpdater ? threadUpdater.info() : {
+  bootstrapVersion: app.getVersion(), effectiveVersion: app.getVersion(), stagedVersion: null
+});
+
+ipcMain.handle('update:scan', async () => {
+  if (!threadUpdater) return { ok: false, error: 'Update service is not ready.' };
+  return threadUpdater.scanDownloadedUpdates({ quiet: false });
+});
+
+ipcMain.handle('update:choose-file', async () => {
+  if (!threadUpdater) return { ok: false, error: 'Update service is not ready.' };
+  const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
+    title: 'Select E-Class Record Update',
+    properties: ['openFile'],
+    filters: [{ name: 'E-Class Record Update', extensions: ['ecrupdate'] }]
+  });
+  if (canceled || !filePaths[0]) return { ok: false, cancelled: true };
+  return threadUpdater.stagePackage(filePaths[0], { quiet: false });
+});
+
+ipcMain.handle('runtime:invoke', async (_event, action, payload) => {
+  if (!runtimeExtension || typeof runtimeExtension.invoke !== 'function') {
+    return { ok: false, unsupported: true, error: `Runtime action is not available: ${action}` };
+  }
+  try {
+    return await runtimeExtension.invoke(action, payload, {
+      app, dialog, shell, fs, path, dataPaths, ensureDataFolders,
+      resolveResource: rel => threadUpdater ? threadUpdater.resolveResource(rel) : path.join(__dirname, rel)
+    });
+  } catch (err) {
+    console.error('Runtime extension action failed:', action, err);
+    return { ok: false, error: err.message };
+  }
+});
+
+async function loadRuntimeExtension() {
+  runtimeExtension = null;
+  if (!threadUpdater) return;
+  const extPath = threadUpdater.extensionPath();
+  if (!extPath) return;
+  try {
+    delete require.cache[require.resolve(extPath)];
+    const ext = require(extPath);
+    if (ext && typeof ext.register === 'function') {
+      await ext.register({
+        app, BrowserWindow, dialog, ipcMain, Menu, shell, fs, path,
+        dataPaths, ensureDataFolders,
+        resolveResource: rel => threadUpdater.resolveResource(rel),
+        getMainWindow: () => mainWindow
+      });
+    }
+    runtimeExtension = ext || null;
+  } catch (err) {
+    console.error('Could not load downloaded runtime extension:', err);
+    runtimeExtension = null;
+  }
+}
+
+app.whenReady().then(async () => {
   ensureDataFolders();
+
+  threadUpdater = new ThreadUpdater({
+    app,
+    AdmZip,
+    productName: PRODUCT_NAME,
+    appId: APP_ID,
+    packagedRoot: __dirname
+  });
+  await threadUpdater.initialize();
+  await loadRuntimeExtension();
+
   createWindow();
   buildMenu();
+  threadUpdater.startWatching({
+    intervalMs: 8000,
+    onStatus: status => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('update:status', status);
+      }
+    }
+  });
+
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
+});
+
+app.on('before-quit', () => {
+  if (threadUpdater) threadUpdater.stopWatching();
 });
 
 app.on('window-all-closed', () => {
