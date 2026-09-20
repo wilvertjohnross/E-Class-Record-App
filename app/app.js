@@ -81,6 +81,10 @@ function transmute(initialGrade){
 /* =========================================================================
    STATE
    ========================================================================= */
+function unicodeText(value){
+  return String(value===undefined||value===null?"":value).normalize("NFC");
+}
+
 const STORE_KEY = "eclass_record_app_v1";
 const LEGACY_STORE_KEY = "ledger_gradebook_v1";
 let APP = loadState();
@@ -133,6 +137,14 @@ function newClass(name){
     categories: defaultCategories(),
     students: [],
     scores: { term1:{}, term2:{}, term3:{} },
+    subjectConfig: {
+      classType:"Regular",
+      MATH:"Math",
+      SCI:"Science",
+      TLE:"Technology and Livelihood Education (TLE)",
+      ELEC1:"Research I",
+      ELEC2:"Environmental Science"
+    },
     otherGrades: {},   // studentId -> { AREA_KEY -> {term1,term2,term3} }
     attendance: {},    // studentId -> { MonthKey -> {classDays, present} }
     sf2: {activeMonth:"", months:{}}, // daily attendance + SF2 monthly summaries
@@ -147,14 +159,79 @@ function newClass(name){
 const STANDARD_AREAS = [
   {key:"FIL",  label:"Filipino"},
   {key:"ENG",  label:"English"},
-  {key:"MATH", label:"Mathematics"},
+  {key:"MATH", label:"Math"},
   {key:"SCI",  label:"Science"},
   {key:"AP",   label:"Araling Panlipunan (AP)"},
   {key:"VAL",  label:"Values Education"},
-  {key:"TLE",  label:"TLE"},
+  {key:"TLE",  label:"Technology and Livelihood Education (TLE)"},
   {key:"MUS",  label:"Music and Arts"},
-  {key:"PE",   label:"Physical Education and Health"}
+  {key:"PE",   label:"Physical Education and Health"},
+  {key:"ELEC1",label:"Elective 1"},
+  {key:"ELEC2",label:"Elective 2"}
 ];
+const CLASS_TYPE_OPTIONS = ["Regular","Special Science Class"];
+const SUBJECT_NAME_OPTIONS = {
+  MATH:["Math","Enhanced Math"],
+  SCI:["Science","Enhanced Science"],
+  TLE:[
+    "Technology and Livelihood Education (TLE)",
+    "Creative Technologies",
+    "Creative Technology I",
+    "Creative Technology II",
+    "Creative Technology III",
+    "Creative Technology IV"
+  ],
+  ELECTIVE:[
+    "Environmental Science",
+    "Research I",
+    "Research II",
+    "Biotechnology",
+    "Research III",
+    "Research IV",
+    "Consumer Chemistry",
+    "Basic Electronics"
+  ]
+};
+function ensureSubjectConfig(cls){
+  if(!cls.subjectConfig || typeof cls.subjectConfig!=="object" || Array.isArray(cls.subjectConfig)) cls.subjectConfig={};
+  const c=cls.subjectConfig;
+  const valid=(arr,v,fallback)=>arr.includes(v)?v:fallback;
+  c.classType=valid(CLASS_TYPE_OPTIONS,c.classType,"Regular");
+  c.MATH=valid(SUBJECT_NAME_OPTIONS.MATH,c.MATH,"Math");
+  c.SCI=valid(SUBJECT_NAME_OPTIONS.SCI,c.SCI,"Science");
+  c.TLE=valid(SUBJECT_NAME_OPTIONS.TLE,c.TLE,"Technology and Livelihood Education (TLE)");
+  c.ELEC1=valid(SUBJECT_NAME_OPTIONS.ELECTIVE,c.ELEC1,"Research I");
+  c.ELEC2=valid(SUBJECT_NAME_OPTIONS.ELECTIVE,c.ELEC2,"Environmental Science");
+  if(c.ELEC1===c.ELEC2){
+    c.ELEC2=SUBJECT_NAME_OPTIONS.ELECTIVE.find(x=>x!==c.ELEC1)||"Environmental Science";
+  }
+  return c;
+}
+function isSpecialScienceClass(cls){ return ensureSubjectConfig(cls).classType==="Special Science Class"; }
+function subjectDisplayLabel(cls,key){
+  const c=ensureSubjectConfig(cls);
+  if(key==="MATH") return c.MATH;
+  if(key==="SCI") return c.SCI;
+  if(key==="TLE") return c.TLE;
+  if(key==="ELEC1") return c.ELEC1;
+  if(key==="ELEC2") return c.ELEC2;
+  const area=STANDARD_AREAS.find(a=>a.key===key);
+  return area ? area.label : key;
+}
+function configuredArea(cls,area){ return {...area,label:subjectDisplayLabel(cls,area.key)}; }
+function corePrimaryAreas(cls){
+  const keys=["FIL","ENG","MATH","SCI","AP","VAL","TLE"];
+  return keys.map(k=>configuredArea(cls,STANDARD_AREAS.find(a=>a.key===k)));
+}
+function activeElectiveAreas(cls){
+  if(!isSpecialScienceClass(cls)) return [];
+  return ["ELEC1","ELEC2"].map(k=>configuredArea(cls,STANDARD_AREAS.find(a=>a.key===k)));
+}
+function mapehComponentAreas(cls){ return ["MUS","PE"].map(k=>configuredArea(cls,STANDARD_AREAS.find(a=>a.key===k))); }
+function activeGradeInputAreas(cls){ return corePrimaryAreas(cls).concat(mapehComponentAreas(cls),activeElectiveAreas(cls)); }
+function subjectOptionHtml(options,selected,disabledValue=""){
+  return options.map(v=>`<option value="${esc(v)}" ${v===selected?"selected":""} ${disabledValue&&v===disabledValue&&v!==selected?"disabled":""}>${esc(v)}</option>`).join("");
+}
 const ATT_MONTHS = ["Jun","Jul","Aug","Sep","Oct","Nov","Dec","Jan","Feb","Mar","Apr"];
 
 function ensureStudentExtras(cls, sid){
@@ -378,7 +455,9 @@ function saveState(){
   APP._persistence.revision=persistenceRevision(APP)+1;
   APP._persistence.modifiedAt=new Date().toISOString();
   const revision=APP._persistence.revision;
-  const serialized=JSON.stringify(APP);
+  // v1.1.10: persist text in Unicode NFC so ñ/Ñ and other accented letters
+  // survive input/import -> JSON -> official-output round trips consistently.
+  const serialized=JSON.stringify(APP,(_k,v)=>typeof v==="string"?unicodeText(v):v);
 
   try{ localStorage.setItem(STORE_KEY,serialized); }
   catch(err){ console.warn("Local recovery save failed",err); }
@@ -512,6 +591,7 @@ function studentFinalResult(cls, studentId){
 function render(){
   renderClassPicker();
   const cls = activeClass();
+  if(cls) ensureSubjectConfig(cls);
   const sf2Tab = document.querySelector('nav.tabs .tab[data-tab="sf2"]');
   const sf2Enabled = !!(cls && cls.meta && cls.meta.sf2Enabled === true);
   if(sf2Tab) sf2Tab.hidden = !sf2Enabled;
@@ -550,6 +630,7 @@ function renderClassPicker(){
    ========================================================================= */
 function renderSetup(main, cls){
   const m = cls.meta;
+  const sc = ensureSubjectConfig(cls);
   main.innerHTML = `
     <div class="card">
       <h2>Class &amp; School Information</h2>
@@ -577,6 +658,21 @@ function renderSetup(main, cls){
       </div>
       <div class="field"><label>School Address (printed on the report card header)</label>
         <input type="text" id="f_schoolAddress" value="${esc(m.schoolAddress||"")}"></div>
+    </div>
+
+    <div class="card">
+      <h2>SF9 Subject Configuration</h2>
+      <div class="sub">Choose the approved subject nomenclature for this advisory class. Special Science Class enables two elective learning areas; Regular hides them from SF9 and General Average.</div>
+      <div class="grid3">
+        <div class="field"><label>Class Type</label><select id="f_classType">${subjectOptionHtml(CLASS_TYPE_OPTIONS,sc.classType)}</select></div>
+        <div class="field"><label>Mathematics</label><select id="f_mathName">${subjectOptionHtml(SUBJECT_NAME_OPTIONS.MATH,sc.MATH)}</select></div>
+        <div class="field"><label>Science</label><select id="f_scienceName">${subjectOptionHtml(SUBJECT_NAME_OPTIONS.SCI,sc.SCI)}</select></div>
+      </div>
+      <div class="grid3">
+        <div class="field"><label>TLE / Special Subject</label><select id="f_tleName">${subjectOptionHtml(SUBJECT_NAME_OPTIONS.TLE,sc.TLE)}</select></div>
+        <div class="field"><label>Elective 1</label><select id="f_elective1" ${sc.classType==="Special Science Class"?"":"disabled"}>${subjectOptionHtml(SUBJECT_NAME_OPTIONS.ELECTIVE,sc.ELEC1,sc.ELEC2)}</select></div>
+        <div class="field"><label>Elective 2</label><select id="f_elective2" ${sc.classType==="Special Science Class"?"":"disabled"}>${subjectOptionHtml(SUBJECT_NAME_OPTIONS.ELECTIVE,sc.ELEC2,sc.ELEC1)}</select></div>
+      </div>
     </div>
 
     <div class="card">
@@ -623,7 +719,27 @@ function renderSetup(main, cls){
   `;
   ["className","subject","gradeLevel","section","teacher","adviser","schoolHead","region","division","schoolId","schoolName","schoolYear","schoolAddress","preparedByName","preparedByTitle","checkedByName","checkedByTitle","approvedByName","approvedByTitle"].forEach(f=>{
     document.getElementById("f_"+f).addEventListener("change", e=>{
-      m[f] = e.target.value; saveState(); renderClassPicker();
+      m[f] = unicodeText(e.target.value); saveState(); renderClassPicker();
+    });
+  });
+  document.getElementById("f_classType").addEventListener("change", e=>{
+    sc.classType=e.target.value;
+    ensureSubjectConfig(cls);
+    saveState();
+    render();
+  });
+  [["f_mathName","MATH"],["f_scienceName","SCI"],["f_tleName","TLE"],["f_elective1","ELEC1"],["f_elective2","ELEC2"]].forEach(([id,key])=>{
+    document.getElementById(id).addEventListener("change", e=>{
+      const next=e.target.value;
+      if((key==="ELEC1"||key==="ELEC2") && next===sc[key==="ELEC1"?"ELEC2":"ELEC1"]){
+        alert("Elective 1 and Elective 2 must be different subjects.");
+        render();
+        return;
+      }
+      sc[key]=next;
+      ensureSubjectConfig(cls);
+      saveState();
+      render();
     });
   });
   document.getElementById("f_sf2Enabled").addEventListener("change", e=>{
@@ -761,15 +877,16 @@ function showOfficialSf1ImportDialog(data,fileName,cls){
     const backdrop=document.createElement("div"); backdrop.className="app-modal-backdrop no-print";
     const modal=document.createElement("div"); modal.className="app-modal import-modal"; modal.setAttribute("role","dialog"); modal.setAttribute("aria-modal","true");
     const warnings=(data.warnings||[]).slice(0,5);
-    const sampleRows=learners.map(x=>`<tr><td style="text-align:left;">${esc(x.name||"")}</td><td>${esc(x.lrn||"")}</td><td>${esc(x.age||"")}</td><td>${x.sex==="F"?"Female":"Male"}</td></tr>`).join("");
+    const sampleRows=learners.map(x=>`<tr><td style="text-align:left;">${esc(x.name||"")}</td><td>${esc(x.lrn||"")}</td><td>${esc(x.age||"")}</td><td>${x.sex==="F"?"Female":x.sex==="M"?"Male":"—"}</td></tr>`).join("");
     modal.innerHTML=`
-      <h3>Import Official SF1 Roster</h3>
-      <p><strong>${esc(fileName||"Official SF1 workbook")}</strong> was recognized as an official School Form 1. Review the roster before importing.</p>
+      <h3>Import SF1 Roster</h3>
+      <p><strong>${esc(fileName||"SF1 workbook")}</strong> was recognized as a compatible School Form 1. Review the detected roster before importing.</p>
       <div class="import-summary">
         <strong>Learners:</strong> ${learners.length} (${Number(counts.male||0)} male, ${Number(counts.female||0)} female)
         &nbsp;•&nbsp; <strong>Grade:</strong> ${esc(meta.gradeLevel||"—")}
         &nbsp;•&nbsp; <strong>Section:</strong> ${esc(meta.section||"—")}
         &nbsp;•&nbsp; <strong>School Year:</strong> ${esc(meta.schoolYear||"—")}
+        ${data.detection?`&nbsp;•&nbsp; <strong>Detection:</strong> ${Math.round(Number(data.detection.confidence||0))}%`:""}
       </div>
       <div class="hint" style="margin-top:8px;">SF1 will be treated as the authoritative source for <strong>learner name, LRN, age and sex</strong>. Existing learners are matched by LRN first, then by name. Their existing scores and SF9 data remain attached.</div>
       <div class="scroll-x" style="margin-top:10px;max-height:340px;overflow-y:auto;">
@@ -818,7 +935,7 @@ function applyOfficialSf1Import(cls,data,options={}){
 
   for(const source of sources){
     const lrn=String(source.lrn||"").replace(/\D/g,"");
-    const name=String(source.name||"").trim();
+    const name=unicodeText(source.name).trim();
     if(!lrn||!name) continue;
     let student=idx.byLrn.get(lrn)||null;
     if(!student){
@@ -869,14 +986,21 @@ function applyOfficialSf1Import(cls,data,options={}){
 }
 
 async function importOfficialSf1IntoClass(cls){
-  if(!window.eclassAPI||typeof window.eclassAPI.importOfficialSf1!=="function"){
-    alert("Official SF1 import is available in the installed desktop app."); return;
+  if(!window.eclassAPI){
+    alert("SF1 import is available in the installed desktop app."); return;
   }
   let result;
-  try{ result=await window.eclassAPI.importOfficialSf1(); }
-  catch(err){ alert("Could not open the Official SF1 importer: "+(err&&err.message?err.message:String(err))); return; }
+  try{
+    // v1.1.11: route SF1 through the bounded-flexibility runtime importer.
+    // It accepts recognized DepEd-compatible layout variations while keeping
+    // LRN/name/sex meaning strict and warning instead of silently guessing.
+    if(typeof window.eclassAPI.runtimeInvoke==="function") result=await window.eclassAPI.runtimeInvoke("summary:import-file",{kind:"sf1"});
+    else if(typeof window.eclassAPI.importOfficialSf1==="function") result=await window.eclassAPI.importOfficialSf1();
+    else throw new Error("SF1 import is not available in this build.");
+  }
+  catch(err){ alert("Could not open the SF1 importer: "+(err&&err.message?err.message:String(err))); return; }
   if(!result||result.cancelled) return;
-  if(!result.ok){ alert("Could not read that Official SF1 workbook: "+(result.error||"Unknown error")); return; }
+  if(!result.ok){ alert("Could not read that SF1 workbook: "+(result.error||"Unknown error")); return; }
   const options=await showOfficialSf1ImportDialog(result.data,result.fileName,cls);
   if(!options) return;
   try{
@@ -887,8 +1011,8 @@ async function importOfficialSf1IntoClass(cls){
     if(stats.added) parts.push(`${stats.added} new learner${stats.added===1?"":"s"} added`);
     if(stats.removed) parts.push(`${stats.removed} learner${stats.removed===1?"":"s"} removed because they were absent from SF1`);
     if(stats.warnings) parts.push(`${stats.warnings} SF1 warning${stats.warnings===1?"":"s"}`);
-    await showInfoDialog("Official SF1 Import Complete",parts.join(" • "));
-  }catch(err){ alert("Could not import the Official SF1 roster: "+(err&&err.message?err.message:String(err))); }
+    await showInfoDialog("SF1 Import Complete",parts.join(" • "));
+  }catch(err){ alert("Could not import the SF1 roster: "+(err&&err.message?err.message:String(err))); }
 }
 
 /* =========================================================================
@@ -912,14 +1036,14 @@ function renderRoster(main, cls){
       <h2>Roster <span class="badge-count">${cls.students.length} learners</span></h2>
       <div class="sub">Grouped Male then Female, matching the standard class record layout.</div>
       <div class="toolbar">
-        <button id="importSf1" class="primary">Import Official SF1 (.xls)</button>
+        <button id="importSf1" class="primary">Import SF1 (.xls/.xlsx)</button>
         <button id="addStudent" class="ghost-alt" style="background:var(--paper-deep);">+ Add learner</button>
         <button id="pasteNames" class="ghost-alt" style="background:var(--paper-deep);">Paste names (one per line)</button>
         <button id="importCsv" class="ghost-alt" style="background:var(--paper-deep);">Import CSV</button>
         <button id="downloadTemplate" class="ghost-alt" style="background:var(--paper-deep);">Download CSV template</button>
         <input type="file" id="csvFile" accept=".csv,text/csv" style="display:none;">
       </div>
-      <div class="hint" style="margin-bottom:10px;"><strong>Preferred:</strong> import the official SF1 Excel file so learner names, LRN, age and sex come directly from the official class register. CSV/manual entry remain available as alternatives.</div>
+      <div class="hint" style="margin-bottom:10px;"><strong>Preferred:</strong> import an SF1 Excel file so learner names, LRN, age and sex can be detected from the class register. The importer tolerates common layout variations but will not guess ambiguous learner data. CSV/manual entry remain available as alternatives.</div>
       <div class="scroll-x">
       <table class="data" id="rosterTable">
         <thead><tr><th style="text-align:left;">Name</th><th>LRN</th><th>Age</th><th>Sex</th><th></th></tr></thead>
@@ -947,7 +1071,7 @@ function renderRoster(main, cls){
       required:true
     });
     if(!text) return;
-    const names=text.split("\n").map(t=>t.trim()).filter(Boolean);
+    const names=text.split("\n").map(t=>unicodeText(t).trim()).filter(Boolean);
     if(cls.students.length+names.length>1000){alert("That paste would exceed the 1,000-learner safety limit for one class.");return;}
     names.forEach(name=>{ cls.students.push({id:uid("s"), name, lrn:"", age:"", sex:"M"}); });
     saveState(); render();
@@ -982,7 +1106,7 @@ function renderRoster(main, cls){
   document.querySelectorAll("#rosterTable tr[data-sid]").forEach(row=>{
     const sid = row.dataset.sid;
     const s = cls.students.find(x=>x.id===sid);
-    row.querySelector(".s-name").addEventListener("change", e=>{s.name=e.target.value; saveState(); renderClassPicker();});
+    row.querySelector(".s-name").addEventListener("change", e=>{s.name=unicodeText(e.target.value); saveState(); renderClassPicker();});
     row.querySelector(".s-lrn").addEventListener("change", e=>{s.lrn=e.target.value; saveState();});
     row.querySelector(".s-age").addEventListener("change", e=>{s.age=e.target.value; saveState();});
     row.querySelector(".s-sex").addEventListener("change", e=>{s.sex=e.target.value; saveState(); render();});
@@ -1115,7 +1239,7 @@ function renderSf2(main,cls){
     btn.addEventListener("click",()=>applyMark(btn,sf2NextMark(btn.dataset.status)));
     btn.addEventListener("keydown",e=>{let st=null;const k=e.key.toLowerCase();if(k==="p"||k===" ")st="P";else if(k==="x"||k==="a")st="A";else if(k==="l"||k==="t")st="L";else if(k==="c")st="C";if(st){e.preventDefault();applyMark(btn,st);}});
   });
-  document.querySelectorAll("[data-sf2-remark]").forEach(inp=>inp.addEventListener("change",()=>{month.remarks[inp.dataset.sf2Remark]=inp.value;saveState();}));
+  document.querySelectorAll("[data-sf2-remark]").forEach(inp=>inp.addEventListener("change",()=>{month.remarks[inp.dataset.sf2Remark]=unicodeText(inp.value);saveState();}));
   document.querySelectorAll("[data-sf2-summary-input]").forEach(inp=>inp.addEventListener("change",()=>{
     const [field,sex]=inp.dataset.sf2SummaryInput.split("|");let v=inp.value.trim();if(v!==""){const n=Number(v);if(!Number.isFinite(n)||n<0){markRawScoreError(inp,"Monthly SF2 summary values must be zero or greater.");inp.value=month.summary[field][sex]||"";return;}v=Math.round(n);inp.value=String(v);}month.summary[field][sex]=v;saveState();renderSf2(main,cls);
   }));
@@ -1200,7 +1324,7 @@ function importRosterCsv(cls, text){
   const pending=[];
   for(let i=startIdx; i<rows.length; i++){
     const r = rows[i];
-    const name = String(colMap.name!==undefined ? (r[colMap.name]||"") : (r[0]||"")).trim();
+    const name = unicodeText(colMap.name!==undefined ? (r[colMap.name]||"") : (r[0]||"")).trim();
     if(!name) continue;
     const lrn = colMap.lrn!==undefined ? String(r[colMap.lrn]||"").trim() : "";
     const age = colMap.age!==undefined ? String(r[colMap.age]||"").trim() : "";
@@ -1626,8 +1750,14 @@ function componentHeaderAliases(catKey, comp, index){
   return [...new Set(aliases)];
 }
 function normalizeLearnerName(name){
-  return String(name||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"")
-    .replace(/[^a-z0-9]+/g," ").trim().replace(/\s+/g," ");
+  // ñ is a separate Spanish/Filipino letter and must not collapse to n.
+  // Protect it while folding other combining accents for tolerant name matching.
+  const ENYE="\uE000";
+  return unicodeText(name).toLocaleLowerCase("en-US")
+    .replace(/ñ/g,ENYE)
+    .normalize("NFD").replace(/[\u0300-\u036f]/g,"")
+    .replace(new RegExp(ENYE,"g"),"ñ")
+    .replace(/[^\p{L}\p{N}]+/gu," ").trim().replace(/\s+/g," ");
 }
 function learnerTokenKey(name){
   return normalizeLearnerName(name).split(" ").filter(Boolean).sort().join("|");
@@ -1725,7 +1855,7 @@ function applyScoreCsvImport(cls, termKey, config){
   let matched=0, added=0, imported=0, preserved=0, invalid=0, unmatched=0;
   const seenStudents=new Set();
   for(const row of config.dataRows){
-    const name=String(row[config.nameCol]||"").trim(); if(!name) continue;
+    const name=unicodeText(row[config.nameCol]).trim(); if(!name) continue;
     const lrn=config.lrnCol>=0 ? String(row[config.lrnCol]||"").replace(/\D/g,"") : "";
     let student=null;
     if(lrn && idx.byLrn.has(lrn)) student=idx.byLrn.get(lrn);
@@ -1800,13 +1930,14 @@ function showOfficialEcrImportDialog(data,fileName,currentTermKey){
     const differentTerm=targetTermKey!==currentTermKey;
     const warnings=(data.warnings||[]).slice(0,4);
     modal.innerHTML=`
-      <h3>Import Filled Official ECR</h3>
-      <p><strong>${esc(fileName||"Official ECR workbook")}</strong> matches the official Class Record layout. Review the detected data before importing.</p>
+      <h3>Import Filled ECR</h3>
+      <p><strong>${esc(fileName||"ECR workbook")}</strong> was recognized as a compatible Class Record. Review the detected data before importing.</p>
       <div class="import-summary">
         <strong>Detected:</strong> ${esc(TERM_LABELS[targetTermKey])}
         &nbsp;•&nbsp; <strong>Learners:</strong> ${data.students.length} (${male} male, ${female} female)
         &nbsp;•&nbsp; <strong>Subject:</strong> ${esc((data.meta&&data.meta.subject)||"—")}
         &nbsp;•&nbsp; <strong>Grade/Section:</strong> ${esc((data.meta&&data.meta.gradeLevel)||"—")} / ${esc((data.meta&&data.meta.section)||"—")}
+        ${data.detection?`&nbsp;•&nbsp; <strong>Detection:</strong> ${Math.round(Number(data.detection.confidence||0))}%`:""}
       </div>
       ${differentTerm?`<div class="import-summary" style="border-color:var(--red-pen);"><strong>Term notice:</strong> You opened ${esc(TERM_LABELS[currentTermKey])}, but the workbook identifies itself as <strong>${esc(TERM_LABELS[targetTermKey])}</strong>. It will be imported into the detected term automatically.</div>`:""}
       <div class="scroll-x" style="margin-top:10px;">
@@ -1853,20 +1984,26 @@ function applyOfficialEcrImport(cls,data){
   applyHps(ww,data.categories&&data.categories.WW&&data.categories.WW.hps);
   applyHps(pt,data.categories&&data.categories.PT&&data.categories.PT.hps);
   applyHps(ex,data.categories&&data.categories.EXAM&&data.categories.EXAM.hps);
-  const setWeight=(cat,v)=>{ const n=Number(v); if(Number.isFinite(n)&&n>=0) cat.weight=n; };
+  const setWeight=(cat,v)=>{
+    if(v===""||v===null||v===undefined) return;
+    const n=Number(v); if(Number.isFinite(n)&&n>=0) cat.weight=n;
+  };
   setWeight(ww,data.categories&&data.categories.WW&&data.categories.WW.weight);
   setWeight(pt,data.categories&&data.categories.PT&&data.categories.PT.weight);
   setWeight(ex,data.categories&&data.categories.EXAM&&data.categories.EXAM.weight);
   const sw=data.categories&&data.categories.EXAM&&data.categories.EXAM.subWeights;
-  ex.components.forEach((c,i)=>{ const n=Number(sw&&sw[i]); if(Number.isFinite(n)&&n>=0) c.subWeight=n; });
+  ex.components.forEach((c,i)=>{
+    const raw=sw&&sw[i]; if(raw===""||raw===null||raw===undefined) return;
+    const n=Number(raw); if(Number.isFinite(n)&&n>=0) c.subWeight=n;
+  });
 
   if(!cls.scores[targetTermKey]) cls.scores[targetTermKey]={};
   const idx=buildStudentImportIndexes(cls);
-  let matched=0,added=0,importedScores=0,invalid=0,gradeChecks=0,gradeMismatches=0;
+  let matched=0,added=0,importedScores=0,invalid=0,unresolvedSex=0,gradeChecks=0,gradeMismatches=0;
   const importedStudentIds=[];
 
   for(const source of (data.students||[])){
-    const name=String(source.name||"").trim(); if(!name) continue;
+    const name=unicodeText(source.name).trim(); if(!name) continue;
     let student=null;
     const nk=normalizeLearnerName(name);
     if(nk&&idx.byName.has(nk)) student=idx.byName.get(nk);
@@ -1874,15 +2011,17 @@ function applyOfficialEcrImport(cls,data){
       const tk=learnerTokenKey(name), list=tk?idx.byTokens.get(tk):null;
       if(list&&list.length===1) student=list[0];
     }
+    const sourceSex=source.sex==="F"?"F":source.sex==="M"?"M":"";
     if(!student){
-      student={id:uid("s"),name,lrn:"",age:"",sex:source.sex==="F"?"F":"M"};
+      if(!sourceSex){ unresolvedSex++; continue; }
+      student={id:uid("s"),name,lrn:"",age:"",sex:sourceSex};
       cls.students.push(student); ensureStudentExtras(cls,student.id); added++;
       idx.byName.set(normalizeLearnerName(name),student);
       const tk=learnerTokenKey(name); if(tk){ if(!idx.byTokens.has(tk)) idx.byTokens.set(tk,[]); idx.byTokens.get(tk).push(student); }
     }else{
       matched++;
       student.name=name;
-      student.sex=source.sex==="F"?"F":"M";
+      if(sourceSex) student.sex=sourceSex;
       ensureStudentExtras(cls,student.id);
     }
 
@@ -1915,15 +2054,22 @@ function applyOfficialEcrImport(cls,data){
     if(Number(computed)!==official) gradeMismatches++;
   });
 
-  return {termKey:targetTermKey,matched,added,learners:importedStudentIds.length,importedScores,invalid,gradeChecks,gradeMismatches,warnings:(data.warnings||[]).length};
+  return {termKey:targetTermKey,matched,added,learners:importedStudentIds.length,importedScores,invalid,unresolvedSex,gradeChecks,gradeMismatches,warnings:(data.warnings||[]).length};
 }
 
 async function importOfficialEcrIntoClass(cls,currentTermKey){
-  if(!window.eclassAPI||typeof window.eclassAPI.importOfficialEcr!=="function"){
+  if(!window.eclassAPI){
     alert("Official ECR import is available in the installed desktop app."); return;
   }
   let result;
-  try{ result=await window.eclassAPI.importOfficialEcr(); }
+  try{
+    // v1.1.9: use the signed runtime-extension importer. This bypasses a
+    // legacy bootstrap helper omission (regexEscape) without weakening the
+    // updater trust boundary or requiring another full installer.
+    if(typeof window.eclassAPI.runtimeInvoke==="function") result=await window.eclassAPI.runtimeInvoke("summary:import-file",{kind:"official-ecr"});
+    else if(typeof window.eclassAPI.importOfficialEcr==="function") result=await window.eclassAPI.importOfficialEcr();
+    else throw new Error("Official ECR import is not available in this build.");
+  }
   catch(err){ alert("Could not open the Official ECR importer: "+(err&&err.message?err.message:String(err))); return; }
   if(!result||result.cancelled) return;
   if(!result.ok){ alert("Could not read that Official ECR workbook: "+(result.error||"Unknown error")); return; }
@@ -1941,9 +2087,10 @@ async function importOfficialEcrIntoClass(cls,currentTermKey){
     if(stats.matched) parts.push(`${stats.matched} existing learner${stats.matched===1?"":"s"} matched`);
     if(stats.added) parts.push(`${stats.added} learner${stats.added===1?"":"s"} added to roster`);
     if(stats.invalid) parts.push(`${stats.invalid} invalid/out-of-HPS score${stats.invalid===1?"":"s"} skipped`);
+    if(stats.unresolvedSex) parts.push(`${stats.unresolvedSex} new learner${stats.unresolvedSex===1?"":"s"} skipped because sex could not be identified safely`);
     if(stats.gradeChecks) parts.push(stats.gradeMismatches?`${stats.gradeMismatches}/${stats.gradeChecks} cached Excel term grade${stats.gradeChecks===1?"":"s"} differed from the app's recalculation`:`${stats.gradeChecks} cached Excel term grade${stats.gradeChecks===1?"":"s"} verified against the app`);
     if(stats.warnings) parts.push(`${stats.warnings} workbook warning${stats.warnings===1?"":"s"}`);
-    await showInfoDialog(`Official ECR Import Complete — ${TERM_LABELS[stats.termKey]}`,parts.join(" • "));
+    await showInfoDialog(`ECR Import Complete — ${TERM_LABELS[stats.termKey]}`,parts.join(" • "));
   }catch(err){ alert("Could not import the Official ECR data: "+(err&&err.message?err.message:String(err))); }
 }
 
@@ -2137,10 +2284,10 @@ function renderTerm(main, cls, termKey, termLabel){
     main.innerHTML = `
       <div class="card no-print">
         <h2>${termLabel}</h2>
-        <div class="sub">You can build the class manually from Roster, or import an already-filled Excel Class Record that uses the official ECR template.</div>
-        <div class="toolbar"><button id="termImportOfficial" class="primary">Import Official ECR (.xlsx)</button></div>
+        <div class="sub">You can build the class manually from Roster, or import an already-filled compatible Excel Class Record.</div>
+        <div class="toolbar"><button id="termImportOfficial" class="primary">Import ECR (.xlsx)</button></div>
       </div>
-      <div class="empty-state"><h2>No learners yet</h2><p>Import your filled official ECR to bring in learner names, HPS and raw scores automatically, or add learners from the Roster tab.</p></div>`;
+      <div class="empty-state"><h2>No learners yet</h2><p>Import a compatible filled ECR to bring in learner names, HPS and raw scores automatically, or add learners from the Roster tab.</p></div>`;
     document.getElementById("termImportOfficial").addEventListener("click",()=>importOfficialEcrIntoClass(cls,termKey));
     return;
   }
@@ -2154,7 +2301,7 @@ function renderTerm(main, cls, termKey, termLabel){
           <button class="small viewbtn ${mode==="record"?"active":""}" data-mode="record">Class Record</button>
           <button class="small viewbtn ${mode==="gs"?"active":""}" data-mode="gs">Grading Sheet</button>
         </div>
-        <button id="termImportOfficial" class="ghost-alt" style="background:var(--paper-deep);">Import Official ECR (.xlsx)</button>
+        <button id="termImportOfficial" class="ghost-alt" style="background:var(--paper-deep);">Import ECR (.xlsx)</button>
         <button id="termExportOfficial" class="ghost-alt" style="background:var(--paper-deep);">Download Official ECR (.xlsx)</button>
         <button id="termPrint" class="ghost-alt" style="background:var(--paper-deep);">Print this view</button>
       </div>
@@ -2334,8 +2481,9 @@ function areaTermValue(cls, s, area, termKey){
 }
 
 function summaryStudentRow(cls, s, termKey){
-  const primaryAreas = STANDARD_AREAS.filter(a=>a.key!=="MUS" && a.key!=="PE");
-  const subAreas = STANDARD_AREAS.filter(a=>a.key==="MUS" || a.key==="PE");
+  const primaryAreas = corePrimaryAreas(cls);
+  const subAreas = mapehComponentAreas(cls);
+  const electiveAreas = activeElectiveAreas(cls);
   function cell(area){
     const locked = areaMatchesSubject(cls, area);
     const val = areaTermValue(cls, s, area, termKey);
@@ -2346,8 +2494,9 @@ function summaryStudentRow(cls, s, termKey){
   const subVals = subAreas.map(a=>areaTermValue(cls, s, a, termKey));
   const subCells = subAreas.map(cell).join("");
   const mapeh = averageWhole(subVals);
+  const electiveCells = electiveAreas.map(cell).join("");
 
-  const genAvgVals = primaryAreas.map(a=>areaTermValue(cls, s, a, termKey)).concat([mapeh]);
+  const genAvgVals = primaryAreas.map(a=>areaTermValue(cls, s, a, termKey)).concat([mapeh],electiveAreas.map(a=>areaTermValue(cls,s,a,termKey)));
   const genAvg = averageWhole(genAvgVals);
   const remark = genAvg===null ? "" : (genAvg>=75 ? "Passed" : "Failed");
 
@@ -2356,20 +2505,24 @@ function summaryStudentRow(cls, s, termKey){
       ${primaryCells}
       ${subCells}
       <td class="computed">${mapeh===null?"—":mapeh}</td>
+      ${electiveCells}
       <td class="grade-final">${genAvg===null?"—":genAvg}</td>
       <td>${remark}</td>
     </tr>`;
 }
 
 function summaryTableHtml(cls, termKey){
-  const primaryAreas = STANDARD_AREAS.filter(a=>a.key!=="MUS" && a.key!=="PE");
-  const subAreas = STANDARD_AREAS.filter(a=>a.key==="MUS" || a.key==="PE");
+  const primaryAreas = corePrimaryAreas(cls);
+  const subAreas = mapehComponentAreas(cls);
+  const electiveAreas = activeElectiveAreas(cls);
   const males = cls.students.filter(s=>s.sex==="M");
   const females = cls.students.filter(s=>s.sex==="F");
-  const colCount = 1 + primaryAreas.length + subAreas.length + 3;
+  const colCount = 1 + primaryAreas.length + subAreas.length + 1 + electiveAreas.length + 2;
   const headCells = primaryAreas.map(a=>`<th>${esc(a.label)}</th>`).join("")
     + subAreas.map(a=>`<th>${esc(a.label)}</th>`).join("")
-    + `<th>MAPEH</th><th>General<br>Average</th><th>Remarks</th>`;
+    + `<th>MAPEH</th>`
+    + electiveAreas.map(a=>`<th>${esc(a.label)}</th>`).join("")
+    + `<th>General<br>Average</th><th>Remarks</th>`;
   return `<table class="data">
       <thead><tr><th style="text-align:left;">Learner</th>${headCells}</tr></thead>
       <tbody>
@@ -2383,13 +2536,19 @@ function summaryTableHtml(cls, termKey){
 
 
 const SUMMARY_SUBJECT_ALIASES = {
-  FIL:["filipino","fil"], ENG:["english","eng"], MATH:["mathematics","math"],
-  SCI:["science","sci"], AP:["araling panlipunan","ap"],
+  FIL:["filipino","fil"], ENG:["english","eng"], MATH:["mathematics","math","enhanced math"],
+  SCI:["science","sci","enhanced science"], AP:["araling panlipunan","ap"],
   VAL:["values education","values","esp","edukasyon sa pagpapakatao","gmrc"],
-  TLE:["tle","technology and livelihood education"],
+  TLE:["tle","technology and livelihood education","technology and livelihood education tle","creative technologies","creative technology i","creative technology ii","creative technology iii","creative technology iv"],
   MUS:["music and arts","music & arts","music arts","music"],
-  PE:["physical education and health","pe and health","pe & health","pe","p.e."]
+  PE:["physical education and health","pe and health","pe & health","pe","p.e."],
+  ELEC1:["elective 1","elective1"], ELEC2:["elective 2","elective2"]
 };
+function summaryAliasesForArea(cls,area){
+  const specific=[subjectDisplayLabel(cls,area.key),area.label,area.key];
+  const base=SUMMARY_SUBJECT_ALIASES[area.key]||[];
+  return [...new Set(specific.concat(base).filter(Boolean))];
+}
 function summaryHeaderNorm(v){ return String(v||"").toLowerCase().replace(/[^a-z0-9]+/g," ").trim(); }
 function detectSummaryHeaderRow(rows){
   let best=0,bestScore=-1;
@@ -2416,7 +2575,7 @@ function showSummaryImportDialog(cls, rows, fileName, termKey){
     const dataRows=rows.slice(headerRow+1).filter(r=>(r||[]).some(v=>String(v??"").trim()!==""));
     const autoName=findSummaryHeader(headers,["Name","Learner Name","Learners Name","Learner's Name","Student Name","Full Name"]);
     const autoLrn=findSummaryHeader(headers,["LRN","Learner Reference Number"]);
-    const maps=STANDARD_AREAS.map(a=>({area:a,col:findSummaryHeader(headers,SUMMARY_SUBJECT_ALIASES[a.key]||[a.label,a.key])}));
+    const maps=activeGradeInputAreas(cls).map(a=>({area:a,col:findSummaryHeader(headers,summaryAliasesForArea(cls,a))}));
     const optionHtml=(selected,none=true)=>`${none?'<option value="-1">— Not mapped —</option>':''}${headers.map((h,i)=>`<option value="${i}" ${i===selected?"selected":""}>${esc(csvColumnLabel(h,i))}</option>`).join("")}`;
     const backdrop=document.createElement("div");backdrop.className="app-modal-backdrop no-print";
     const modal=document.createElement("div");modal.className="app-modal import-modal";
@@ -2452,7 +2611,7 @@ function applySummaryImport(cls, config){
   const idx=buildStudentImportIndexes(cls);let matched=0,unmatched=0,imported=0,invalid=0,lockedSkipped=0;
   const seen=new Set();
   for(const row of config.dataRows){
-    const name=String((row||[])[config.nameCol]??"").trim();
+    const name=unicodeText((row||[])[config.nameCol]).trim();
     const lrn=config.lrnCol>=0?String((row||[])[config.lrnCol]??"").replace(/\D/g,""):"";
     if(!name&&!lrn)continue;
     let st=lrn?idx.byLrn.get(lrn):null;
@@ -2600,7 +2759,7 @@ function bindReportCardEvents(cls, container){
     ta.addEventListener("change", e=>{
       const sid = e.target.dataset.sid, term = e.target.dataset.term;
       ensureStudentExtras(cls, sid);
-      cls.comments[sid][term] = e.target.value;
+      cls.comments[sid][term] = unicodeText(e.target.value);
       saveState();
     });
   });
@@ -2619,8 +2778,12 @@ function renderReportRowsInPlace(cls, container, sid){
 }
 
 function areaMatchesSubject(cls, area){
-  const subj = (cls.meta.subject||"").trim().toLowerCase();
-  return subj === area.label.toLowerCase() || subj === area.key.toLowerCase();
+  const norm=v=>String(v||"").toLowerCase().replace(/[^a-z0-9]+/g," ").trim();
+  const subj=norm(cls.meta.subject);
+  if(!subj) return false;
+  const labels=[area.key,area.label,subjectDisplayLabel(cls,area.key)];
+  if(area.key!=="ELEC1"&&area.key!=="ELEC2") labels.push(...(SUMMARY_SUBJECT_ALIASES[area.key]||[]));
+  return labels.some(v=>norm(v)===subj);
 }
 
 /* Term grade + final grade + Passed/Failed remark for one SF9 learning-area row.
@@ -2654,11 +2817,8 @@ function reportCardHtml(cls, s){
   const mapehT1 = mapehFinal("t1"), mapehT2 = mapehFinal("t2"), mapehT3 = mapehFinal("t3");
   const mapehRow = {t1:mapehT1, t2:mapehT2, t3:mapehT3, final: averageWhole([mapehT1, mapehT2, mapehT3])};
 
-  const primaryAreas = [
-    {key:"FIL", label:"Filipino"}, {key:"ENG", label:"English"}, {key:"MATH", label:"Mathematics"},
-    {key:"SCI", label:"Science"}, {key:"AP", label:"Araling Panlipunan (AP)"},
-    {key:"VAL", label:"Values Education"}, {key:"TLE", label:"TLE"}
-  ];
+  const primaryAreas = corePrimaryAreas(cls);
+  const electiveAreas = activeElectiveAreas(cls);
   function gradeCell(sid, area, term, result){
     const val = result[term];
     if(result.locked) return `<td class="rc-computed">${fmt(val)===""?"—":val}</td>`;
@@ -2697,8 +2857,20 @@ function reportCardHtml(cls, s){
       <td>${r.final===null?"—":r.final}</td>
       <td></td>
     </tr>`).join("");
+  const electiveRowHtml = electiveAreas.map(area=>{
+    const r=rowResults[area.key];
+    const remark=r.final===null?"":(r.final>=75?"Passed":"Failed");
+    return `<tr class="${r.locked?"locked":""}">
+      <td class="left">${esc(area.label)}</td>
+      ${gradeCell(s.id,area,"t1",r)}
+      ${gradeCell(s.id,area,"t2",r)}
+      ${gradeCell(s.id,area,"t3",r)}
+      <td class="rc-computed">${r.final===null?"—":r.final}</td>
+      <td>${remark}</td>
+    </tr>`;
+  }).join("");
 
-  const genAvgVals = primaryAreas.map(a=>rowResults[a.key].final).concat([mapehRow.final]);
+  const genAvgVals = primaryAreas.map(a=>rowResults[a.key].final).concat([mapehRow.final],electiveAreas.map(a=>rowResults[a.key].final));
   const genAvg = averageWhole(genAvgVals);
   const genRemark = genAvg===null ? "" : (genAvg>=75 ? "Passed" : "Failed");
 
@@ -2756,6 +2928,7 @@ function reportCardHtml(cls, s){
           ${areaRows}
           ${mapehRowHtml}
           ${subRowHtml}
+          ${electiveRowHtml}
           <tr class="gen-avg"><td class="left" colspan="4">General Average</td><td>${genAvg===null?"—":genAvg}</td><td>${genRemark}</td></tr>
         </tbody>
       </table>
@@ -2819,7 +2992,7 @@ function reportCardHtml(cls, s){
    ========================================================================= */
 function esc(str){
   if(str===undefined||str===null) return "";
-  return String(str).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+  return unicodeText(str).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
 }
 
 function validateRawScoreEntry(rawValue,hpsValue){

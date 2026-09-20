@@ -13,7 +13,7 @@ let templateFingerprintCache = null;
 let sf2TemplateFingerprintCache = null;
 
 function cleanFileName(value) {
-  return String(value || 'Class Record')
+  return String(value || 'Class Record').normalize('NFC')
     .replace(/[<>:"/\\|?*\x00-\x1F]/g, '-')
     .replace(/\s+/g, ' ')
     .trim()
@@ -25,7 +25,7 @@ function termNumber(termKey) {
 }
 
 function xmlEscape(value) {
-  return String(value ?? '')
+  return String(value ?? '').normalize('NFC')
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
@@ -1931,6 +1931,103 @@ function parseXlsxMatrix(filePath, ctx){
   while((rm=rr.exec(xml))){if(rows.length>=5000)throw new Error('Summary workbook contains more than 5,000 rows.');const out=[];let cm;const cr=/<c\b([^>]*\br="([A-Z]+\d+)"[^>]*)>([\s\S]*?)<\/c>|<c\b([^>]*\br="([A-Z]+\d+)"[^>]*)\/>/g;while((cm=cr.exec(rm[2]))){const attrs=cm[1]||cm[4]||'',ref=cm[2]||cm[5],body=cm[3]||'',i=columnIndexFromRef(ref),type=((attrs.match(/\bt="([^"]+)"/)||[])[1]||'').toLowerCase();if(i<0||i>=500)throw new Error('Summary workbook contains a cell beyond the 500-column safety limit.');let v='';if(type==='inlinestr'){let tm;const tr=/<t\b[^>]*>([\s\S]*?)<\/t>/g;while((tm=tr.exec(body)))v+=xmlDecodeText(tm[1]);}else{const vm=body.match(/<v\b[^>]*>([\s\S]*?)<\/v>/);if(vm){const raw=xmlDecodeText(vm[1]);if(type==='s'){const k=Number(raw);v=Number.isInteger(k)&&k>=0&&k<ss.length?ss[k]:'';}else{const n=Number(raw);v=raw.trim()!==''&&Number.isFinite(n)?n:raw;}}}out[i]=v;}rows.push(out);}
   return rows;
 }
+
+// v1.1.9: updater-safe Official ECR import path.
+// The bootstrap v1.1.5 main-process importer contains a missing regexEscape
+// dependency. During short updater iterations, route Official ECR imports
+// through the signed runtime extension instead of the legacy IPC handler.
+function ecrImportSharedStrings(zip) {
+  const entry = zip.getEntry('xl/sharedStrings.xml');
+  if (!entry) return [];
+  const xml = entry.getData().toString('utf8');
+  const out = [];
+  const siRe = /<si\b[^>]*>([\s\S]*?)<\/si>/g;
+  let m;
+  while ((m = siRe.exec(xml))) {
+    let text = '';
+    const tRe = /<t\b[^>]*>([\s\S]*?)<\/t>/g;
+    let tm;
+    while ((tm = tRe.exec(m[1]))) text += xmlDecodeText(tm[1]);
+    out.push(text);
+  }
+  return out;
+}
+function ecrImportCellParts(xml, ref) {
+  const r = regexEscape(ref);
+  const self = xml.match(new RegExp(`<c\\b([^>]*\\br="${r}"[^>]*)\\/>`));
+  if (self) return {attrs:self[1]||'',body:''};
+  const full = xml.match(new RegExp(`<c\\b([^>]*\\br="${r}"[^>]*)>([\\s\\S]*?)<\\/c>`));
+  if (full) return {attrs:full[1]||'',body:full[2]||''};
+  return null;
+}
+function ecrImportCellValue(xml, ref, sharedStrings) {
+  const cell=ecrImportCellParts(xml,ref); if(!cell)return '';
+  const type=((cell.attrs.match(/\bt="([^"]+)"/)||[])[1]||'').toLowerCase();
+  if(type==='inlinestr'){
+    let text='',tm; const tRe=/<t\b[^>]*>([\s\S]*?)<\/t>/g;
+    while((tm=tRe.exec(cell.body)))text+=xmlDecodeText(tm[1]);
+    return text;
+  }
+  const vm=cell.body.match(/<v\b[^>]*>([\s\S]*?)<\/v>/); if(!vm)return '';
+  const raw=xmlDecodeText(vm[1]);
+  if(type==='s'){const i=Number(raw);return Number.isInteger(i)&&i>=0&&i<sharedStrings.length?sharedStrings[i]:'';}
+  if(type==='str'||type==='e')return raw;
+  if(type==='b')return raw==='1';
+  if(raw.trim()==='')return '';
+  const n=Number(raw);return Number.isFinite(n)?n:raw;
+}
+function ecrImportCellText(xml,ref,ss){const v=ecrImportCellValue(xml,ref,ss);return v==null?'':String(v).normalize('NFC').trim();}
+function ecrImportCellNumber(xml,ref,ss){const v=ecrImportCellValue(xml,ref,ss);if(v===''||v==null)return '';const n=typeof v==='number'?v:Number(String(v).replace(/,/g,'').trim());return Number.isFinite(n)?n:'';}
+function ecrImportFractionWeight(value,fallback){const n=Number(value);if(!Number.isFinite(n)||n<0)return fallback;return n>1.000001?n/100:n;}
+function ecrImportPercentWeight(value,fallback){const n=Number(value);if(!Number.isFinite(n)||n<0)return fallback;return n>0&&n<=1.000001?n*100:n;}
+function ecrImportDetectTerm(headerText,workbookXml){
+  for(const text of [String(headerText||''),String(workbookXml||'')]){
+    const m=text.match(/TERM\s*([123])/i);if(m)return Number(m[1]);
+    if(/FIRST\s+TERM/i.test(text))return 1;if(/SECOND\s+TERM/i.test(text))return 2;if(/THIRD\s+TERM/i.test(text))return 3;
+  }return 1;
+}
+let flexImportersCache = null;
+function getFlexibleImporters() {
+  if (flexImportersCache) return flexImportersCache;
+  try {
+    flexImportersCache = require('./flex-importers.js');
+    return flexImportersCache;
+  } catch (err) {
+    throw new Error(`The flexible importer module could not be loaded: ${err && err.message ? err.message : err}`);
+  }
+}
+function parseOfficialEcrWorkbookRuntime(filePath,ctx){
+  return getFlexibleImporters().parseEcr(filePath,ctx);
+}
+async function importOfficialEcrFileRuntime(context){
+  const ctx={...(startupContext||{}),...(context||{})};
+  const parent=typeof ctx.getMainWindow==='function'?ctx.getMainWindow():undefined;
+  const r=await ctx.dialog.showOpenDialog(parent,{
+    title:'Import Class Record (ECR)',
+    properties:['openFile'],
+    filters:[{name:'Excel Class Record',extensions:['xlsx']}]
+  });
+  if(r.canceled||!r.filePaths||!r.filePaths[0])return{ok:false,cancelled:true};
+  const filePath=r.filePaths[0], st=ctx.fs.statSync(filePath);
+  if(!st.isFile()||st.size>25*1024*1024)throw new Error('The ECR workbook exceeds the 25 MB safety limit.');
+  const data=parseOfficialEcrWorkbookRuntime(filePath,ctx);
+  return{ok:true,path:filePath,fileName:ctx.path.basename(filePath),data};
+}
+async function importFlexibleSf1FileRuntime(context){
+  const ctx={...(startupContext||{}),...(context||{})};
+  const parent=typeof ctx.getMainWindow==='function'?ctx.getMainWindow():undefined;
+  const r=await ctx.dialog.showOpenDialog(parent,{
+    title:'Import School Form 1 (SF1)',
+    properties:['openFile'],
+    filters:[{name:'SF1 Excel Workbook',extensions:['xls','xlsx']}]
+  });
+  if(r.canceled||!r.filePaths||!r.filePaths[0])return{ok:false,cancelled:true};
+  const filePath=r.filePaths[0], st=ctx.fs.statSync(filePath);
+  if(!st.isFile()||st.size>25*1024*1024)throw new Error('The SF1 workbook exceeds the 25 MB safety limit.');
+  const data=getFlexibleImporters().parseSf1(filePath,ctx);
+  return{ok:true,path:filePath,fileName:ctx.path.basename(filePath),data};
+}
+
 async function importSummaryFile(context){
   const ctx={...(startupContext||{}),...(context||{})};const parent=typeof ctx.getMainWindow==='function'?ctx.getMainWindow():undefined;
   const r=await ctx.dialog.showOpenDialog(parent,{title:'Import Summary of Grades',properties:['openFile'],filters:[{name:'Summary Table',extensions:['xlsx','csv']}]});
@@ -1988,7 +2085,11 @@ module.exports = {
       return createOfficialSf2PopupPreview(payload, context);
     }
     if (action === 'sf2:official-save') return saveOfficialDocument('sf2', payload, context);
-    if (action === 'summary:import-file') return importSummaryFile(context);
+    if (action === 'summary:import-file') {
+      if (payload && payload.kind === 'official-ecr') return importOfficialEcrFileRuntime(context);
+      if (payload && payload.kind === 'sf1') return importFlexibleSf1FileRuntime(context);
+      return importSummaryFile(context);
+    }
     if (action === 'sf9:preview-html') return openSf9HtmlPreview(payload, context);
     if (action === 'window:fullscreen-state') {
       const w = startupContext && typeof startupContext.getMainWindow === 'function' ? startupContext.getMainWindow() : null;
