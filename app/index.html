@@ -2005,6 +2005,7 @@ function officialEcrPayload(cls, termKey){
   });
 
   return {
+    classId:cls.id||"",
     termKey,
     meta:{...cls.meta},
     categories:{

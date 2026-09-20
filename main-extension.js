@@ -1,13 +1,15 @@
 'use strict';
 
-// v1.0.12 runtime extension
+// v1.0.13 runtime extension
 // Official ECR preview pipeline:
-// official template -> direct XLSX fill -> Excel PDF render -> in-app popup.
-// Excel is no longer used to write worksheet cells. It is used only to render
-// the completed official workbook, avoiding merged-cell/type-conversion COM errors.
+// official template -> direct XLSX fill -> persistent hidden Excel renderer -> cached PDF -> in-app popup.
+// Excel is pre-warmed once in the background and reused. Preview PDFs are content-addressed,
+// so unchanged Class Records reopen almost instantly without another Excel render.
 
 let startupContext = null;
 const previewWindows = new Set();
+let excelEngine = null;
+let templateFingerprintCache = null;
 
 function cleanFileName(value) {
   return String(value || 'Class Record')
@@ -258,6 +260,305 @@ finally {
 }`;
 }
 
+
+function buildPersistentExcelServerPowerShell() {
+  return String.raw`$ErrorActionPreference = 'Stop'
+[Console]::InputEncoding = New-Object System.Text.UTF8Encoding($false)
+[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
+$excel = $null
+function Send-EcrMessage([hashtable]$obj) {
+  $json = $obj | ConvertTo-Json -Compress -Depth 6
+  [Console]::Out.WriteLine('@@ECR@@' + $json)
+  [Console]::Out.Flush()
+}
+try {
+  $excel = New-Object -ComObject Excel.Application
+  $excel.Visible = $false
+  $excel.DisplayAlerts = $false
+  try { $excel.AskToUpdateLinks = $false } catch {}
+  try { $excel.ScreenUpdating = $false } catch {}
+  try { $excel.EnableEvents = $false } catch {}
+  try { $excel.AutomationSecurity = 3 } catch {}
+  Send-EcrMessage @{ type='ready'; ok=$true }
+
+  while (($line = [Console]::In.ReadLine()) -ne $null) {
+    if ([string]::IsNullOrWhiteSpace($line)) { continue }
+    $req = $null
+    try {
+      $req = $line | ConvertFrom-Json
+      $cmd = [string]$req.cmd
+      $id = [string]$req.id
+      if ($cmd -eq 'quit') { break }
+      if ($cmd -eq 'ping') {
+        Send-EcrMessage @{ type='response'; id=$id; ok=$true; pong=$true }
+        continue
+      }
+      if ($cmd -eq 'render') {
+        $workbook = $null
+        $sheet = $null
+        try {
+          $xlsx = [string]$req.xlsxPath
+          $pdf = [string]$req.pdfPath
+          if (Test-Path -LiteralPath $pdf) { Remove-Item -LiteralPath $pdf -Force -ErrorAction SilentlyContinue }
+          $workbook = $excel.Workbooks.Open($xlsx, 0, $true)
+          $sheet = $workbook.Worksheets.Item(1)
+          [void]$sheet.ExportAsFixedFormat(0, $pdf)
+          $workbook.Close($false)
+          [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($sheet)
+          [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($workbook)
+          $sheet = $null
+          $workbook = $null
+          Send-EcrMessage @{ type='response'; id=$id; ok=$true; pdfPath=$pdf }
+        }
+        catch {
+          $msg = $_.Exception.Message
+          try { if ($workbook -ne $null) { $workbook.Close($false) } } catch {}
+          if ($sheet -ne $null) { try { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($sheet) } catch {} }
+          if ($workbook -ne $null) { try { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($workbook) } catch {} }
+          $sheet = $null
+          $workbook = $null
+          Send-EcrMessage @{ type='response'; id=$id; ok=$false; error=$msg }
+        }
+        continue
+      }
+      Send-EcrMessage @{ type='response'; id=$id; ok=$false; error=('Unknown Excel renderer command: ' + $cmd) }
+    }
+    catch {
+      $msg = $_.Exception.Message
+      $id = ''
+      try { if ($req -ne $null) { $id = [string]$req.id } } catch {}
+      Send-EcrMessage @{ type='response'; id=$id; ok=$false; error=$msg }
+    }
+  }
+}
+catch {
+  Send-EcrMessage @{ type='ready'; ok=$false; error=$_.Exception.Message }
+}
+finally {
+  try { if ($excel -ne $null) { $excel.Quit() } } catch {}
+  if ($excel -ne $null) { try { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($excel) } catch {} }
+  $excel = $null
+  [GC]::Collect()
+  [GC]::WaitForPendingFinalizers()
+}`;
+}
+
+class PersistentExcelRenderer {
+  constructor(ctx) {
+    this.ctx = ctx;
+    this.proc = null;
+    this.scriptPath = null;
+    this.ready = false;
+    this.startPromise = null;
+    this.pending = new Map();
+    this.seq = 0;
+    this.stdoutBuffer = '';
+    this.stderrBuffer = '';
+    this.stopping = false;
+  }
+
+  async start() {
+    if (process.platform !== 'win32') throw new Error('Microsoft Excel rendering is available on Windows only.');
+    if (this.ready && this.proc && !this.proc.killed) return true;
+    if (this.startPromise) return this.startPromise;
+
+    const { app, fs, path } = this.ctx;
+    const { spawn } = require('child_process');
+    this.stopping = false;
+    this.scriptPath = path.join(app.getPath('temp'), `eclass-excel-render-server-${process.pid}.ps1`);
+    fs.writeFileSync(this.scriptPath, buildPersistentExcelServerPowerShell(), 'utf8');
+
+    this.startPromise = new Promise((resolve, reject) => {
+      let settled = false;
+      const settleOk = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(true);
+      };
+      const settleErr = (err) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        reject(err instanceof Error ? err : new Error(String(err)));
+      };
+
+      const proc = spawn('powershell.exe', ['-NoProfile', '-STA', '-ExecutionPolicy', 'Bypass', '-File', this.scriptPath], {
+        windowsHide: true,
+        stdio: ['pipe', 'pipe', 'pipe']
+      });
+      this.proc = proc;
+      proc.stdin.setDefaultEncoding('utf8');
+      proc.stdout.setEncoding('utf8');
+      proc.stderr.setEncoding('utf8');
+
+      proc.stdout.on('data', chunk => this._onStdout(chunk, settleOk, settleErr));
+      proc.stderr.on('data', chunk => { this.stderrBuffer = (this.stderrBuffer + chunk).slice(-8192); });
+      proc.on('error', err => {
+        this.ready = false;
+        this.proc = null;
+        settleErr(err);
+        this._rejectAll(err);
+      });
+      proc.on('exit', (code) => {
+        const wasStopping = this.stopping;
+        this.ready = false;
+        this.proc = null;
+        this.startPromise = null;
+        const detail = this.stderrBuffer.trim();
+        const err = new Error(wasStopping ? 'Excel renderer stopped.' : (detail || `Excel renderer exited with code ${code}.`));
+        if (!wasStopping) settleErr(err);
+        this._rejectAll(err);
+      });
+
+      const timer = setTimeout(() => {
+        try { proc.kill(); } catch {}
+        settleErr(new Error('Microsoft Excel took too long to start.'));
+      }, 20000);
+    }).finally(() => { this.startPromise = null; });
+
+    return this.startPromise;
+  }
+
+  _onStdout(chunk, settleOk, settleErr) {
+    this.stdoutBuffer += chunk;
+    let nl;
+    while ((nl = this.stdoutBuffer.indexOf('\n')) >= 0) {
+      const raw = this.stdoutBuffer.slice(0, nl).replace(/\r$/, '');
+      this.stdoutBuffer = this.stdoutBuffer.slice(nl + 1);
+      if (!raw.startsWith('@@ECR@@')) continue;
+      let msg;
+      try { msg = JSON.parse(raw.slice(7)); } catch { continue; }
+      if (msg.type === 'ready') {
+        if (msg.ok) {
+          this.ready = true;
+          settleOk();
+        } else {
+          this.ready = false;
+          settleErr(new Error(msg.error || 'Microsoft Excel could not be started.'));
+        }
+        continue;
+      }
+      if (msg.type === 'response' && msg.id) {
+        const item = this.pending.get(String(msg.id));
+        if (!item) continue;
+        this.pending.delete(String(msg.id));
+        clearTimeout(item.timer);
+        if (msg.ok) item.resolve(msg);
+        else item.reject(new Error(msg.error || 'Microsoft Excel could not render the preview.'));
+      }
+    }
+  }
+
+  _rejectAll(err) {
+    for (const item of this.pending.values()) {
+      clearTimeout(item.timer);
+      item.reject(err);
+    }
+    this.pending.clear();
+  }
+
+  async request(cmd, data = {}, timeoutMs = 90000) {
+    await this.start();
+    if (!this.proc || !this.ready || this.proc.killed) throw new Error('The Microsoft Excel preview engine is not ready.');
+    const id = `${process.pid}-${Date.now()}-${++this.seq}`;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        reject(new Error('Microsoft Excel took too long to render the official ECR preview.'));
+      }, timeoutMs);
+      this.pending.set(id, { resolve, reject, timer });
+      try {
+        this.proc.stdin.write(JSON.stringify({ id, cmd, ...data }) + '\n', 'utf8');
+      } catch (err) {
+        clearTimeout(timer);
+        this.pending.delete(id);
+        reject(err);
+      }
+    });
+  }
+
+  async render(xlsxPath, pdfPath) {
+    try {
+      return await this.request('render', { xlsxPath, pdfPath });
+    } catch (firstErr) {
+      // If the hidden Excel worker died, restart it once transparently.
+      this.ready = false;
+      if (this.proc) { try { this.proc.kill(); } catch {} }
+      this.proc = null;
+      this.startPromise = null;
+      try {
+        await this.start();
+        return await this.request('render', { xlsxPath, pdfPath });
+      } catch (secondErr) {
+        throw secondErr && secondErr.message ? secondErr : firstErr;
+      }
+    }
+  }
+
+  stop() {
+    this.stopping = true;
+    if (this.proc && !this.proc.killed) {
+      try { this.proc.stdin.write(JSON.stringify({ cmd: 'quit' }) + '\n', 'utf8'); } catch {}
+      const p = this.proc;
+      setTimeout(() => { try { if (p && !p.killed) p.kill(); } catch {} }, 2500).unref?.();
+    }
+    this.ready = false;
+    this._rejectAll(new Error('Excel renderer stopped.'));
+    if (this.scriptPath) {
+      const { fs } = this.ctx;
+      setTimeout(() => { try { fs.unlinkSync(this.scriptPath); } catch {} }, 3000).unref?.();
+    }
+  }
+}
+
+function stableStringify(value) {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return '[' + value.map(stableStringify).join(',') + ']';
+  const keys = Object.keys(value).sort();
+  return '{' + keys.map(k => JSON.stringify(k) + ':' + stableStringify(value[k])).join(',') + '}';
+}
+
+function templateFingerprint(ctx) {
+  const { fs, resolveResource } = ctx;
+  const templatePath = resolveResource('templates/ECR official Template.xlsx');
+  const stat = fs.statSync(templatePath);
+  const key = `${templatePath}|${stat.size}|${stat.mtimeMs}`;
+  if (templateFingerprintCache && templateFingerprintCache.key === key) return templateFingerprintCache.hash;
+  const crypto = require('crypto');
+  const hash = crypto.createHash('sha256').update(fs.readFileSync(templatePath)).digest('hex');
+  templateFingerprintCache = { key, hash };
+  return hash;
+}
+
+function previewSignature(payload, ctx) {
+  const crypto = require('crypto');
+  return crypto.createHash('sha256')
+    .update('ecr-preview-v1.0.13\n')
+    .update(templateFingerprint(ctx))
+    .update('\n')
+    .update(stableStringify(payload))
+    .digest('hex');
+}
+
+function isUsablePreviewFile(fs, filePath) {
+  try {
+    const st = fs.statSync(filePath);
+    return st.isFile() && st.size > 500;
+  } catch { return false; }
+}
+
+async function fallbackOneShotRender(xlsxPath, pdfPath, ctx) {
+  const { app, fs, path } = ctx;
+  const scriptPath = path.join(app.getPath('temp'), `eclass-ecr-render-fallback-${Date.now()}-${process.pid}.ps1`);
+  fs.writeFileSync(scriptPath, buildRenderOnlyPowerShell(), 'utf8');
+  try {
+    return await execPowerShell(scriptPath, [xlsxPath, pdfPath]);
+  } finally {
+    try { fs.unlinkSync(scriptPath); } catch {}
+  }
+}
+
 function openPdfPopup(pdfPath, xlsxPath, payload, ctx) {
   const { BrowserWindow, Menu, shell, getMainWindow } = ctx;
   if (!BrowserWindow) throw new Error('The in-app preview window service is unavailable.');
@@ -335,65 +636,111 @@ async function createOfficialPopupPreview(payload, context) {
     return { ok: false, previewUnavailable: true, error: 'Official ECR preview requires Windows and desktop Microsoft Excel.' };
   }
 
-  const { app, fs, path, dataPaths } = ctx;
+  const { fs, path, dataPaths } = ctx;
   const root = dataPaths().root;
-  const previewDir = path.join(root, 'Official ECR Previews');
+  const previewDir = path.join(root, 'Official ECR Preview Cache');
   fs.mkdirSync(previewDir, { recursive: true });
 
   const termNo = termNumber(payload.termKey);
   const classPart = cleanFileName(payload.meta.className || `${payload.meta.gradeLevel || ''} ${payload.meta.section || ''}`);
-  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const base = `${classPart} - Term ${termNo} - Official ECR Preview - ${stamp}`;
+  const signature = previewSignature(payload, ctx);
+  const shortSig = signature.slice(0, 20);
+  const base = `${classPart} - Term ${termNo} - ${shortSig}`;
   const xlsxPath = path.join(previewDir, `${base}.xlsx`);
   const pdfPath = path.join(previewDir, `${base}.pdf`);
-  const scriptPath = path.join(app.getPath('temp'), `eclass-ecr-render-${Date.now()}-${process.pid}.ps1`);
+
+  // Content-addressed cache: if the class/term payload and official template are
+  // unchanged, the exact previously rendered PDF is reopened immediately.
+  if (isUsablePreviewFile(fs, xlsxPath) && isUsablePreviewFile(fs, pdfPath)) {
+    openPdfPopup(pdfPath, xlsxPath, payload, ctx);
+    return { ok: true, preview: true, inAppPopup: true, cached: true, signature, xlsxPath, pdfPath };
+  }
 
   const buffer = buildOfficialEcrBuffer(payload, ctx);
   fs.writeFileSync(xlsxPath, buffer);
-  fs.writeFileSync(scriptPath, buildRenderOnlyPowerShell(), 'utf8');
 
+  let renderError = null;
   try {
-    const ps = await execPowerShell(scriptPath, [xlsxPath, pdfPath]);
-    if (!ps.ok || !fs.existsSync(pdfPath)) {
+    if (!excelEngine) excelEngine = new PersistentExcelRenderer(ctx);
+    await excelEngine.render(xlsxPath, pdfPath);
+  } catch (err) {
+    renderError = err;
+    // Keep a conservative one-shot fallback so preview still works if the
+    // persistent worker was blocked by local Excel/PowerShell state.
+    const fallback = await fallbackOneShotRender(xlsxPath, pdfPath, ctx);
+    if (!fallback.ok) {
       return {
         ok: false,
         previewUnavailable: true,
         openedFallback: false,
         xlsxPath,
         pdfPath,
-        error: ps.error || 'Microsoft Excel did not create the official ECR PDF preview.'
+        error: fallback.error || (renderError && renderError.message) || 'Microsoft Excel did not create the official ECR PDF preview.'
       };
     }
-
-    openPdfPopup(pdfPath, xlsxPath, payload, ctx);
-
-    try {
-      const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
-      for (const name of fs.readdirSync(previewDir)) {
-        const p = path.join(previewDir, name);
-        if (p === xlsxPath || p === pdfPath) continue;
-        try {
-          const st = fs.statSync(p);
-          if (st.isFile() && st.mtimeMs < cutoff) fs.unlinkSync(p);
-        } catch {}
-      }
-    } catch {}
-
-    return { ok: true, preview: true, inAppPopup: true, xlsxPath, pdfPath };
-  } finally {
-    try { fs.unlinkSync(scriptPath); } catch {}
   }
+
+  if (!isUsablePreviewFile(fs, pdfPath)) {
+    return {
+      ok: false,
+      previewUnavailable: true,
+      openedFallback: false,
+      xlsxPath,
+      pdfPath,
+      error: 'Microsoft Excel completed without producing a usable official ECR PDF preview.'
+    };
+  }
+
+  openPdfPopup(pdfPath, xlsxPath, payload, ctx);
+
+  // Remove stale cached previews after 14 days. Current content-addressed files
+  // remain untouched and unchanged previews continue to open instantly.
+  try {
+    const cutoff = Date.now() - 14 * 24 * 60 * 60 * 1000;
+    for (const name of fs.readdirSync(previewDir)) {
+      const p = path.join(previewDir, name);
+      if (p === xlsxPath || p === pdfPath) continue;
+      try {
+        const st = fs.statSync(p);
+        if (st.isFile() && st.mtimeMs < cutoff) fs.unlinkSync(p);
+      } catch {}
+    }
+  } catch {}
+
+  return { ok: true, preview: true, inAppPopup: true, cached: false, signature, xlsxPath, pdfPath };
 }
 
 module.exports = {
   async register(context) {
     startupContext = context;
+
+    // Pre-warm Excel quietly in the background. Do not delay the main app
+    // window if Excel itself takes a few seconds to initialize.
+    if (process.platform === 'win32') {
+      excelEngine = new PersistentExcelRenderer(context);
+      setTimeout(() => {
+        if (!excelEngine) return;
+        excelEngine.start()
+          .then(() => console.log('Official ECR Excel preview engine is warm.'))
+          .catch(err => console.warn('Official ECR Excel preview pre-warm failed:', err.message));
+      }, 700);
+    }
+
+    if (context.app && typeof context.app.on === 'function') {
+      context.app.on('before-quit', () => {
+        try { if (excelEngine) excelEngine.stop(); } catch {}
+      });
+    }
   },
 
   async invoke(action, payload, context) {
     if (action === 'ecr:official-pdf-preview' || action === 'ecr:official-popup-preview') {
       return createOfficialPopupPreview(payload, context);
     }
-    return { ok: false, unsupported: true, error: `Runtime action is not available in v1.0.12: ${action}` };
+    if (action === 'ecr:preview-engine-status') {
+      return { ok: true, warm: !!(excelEngine && excelEngine.ready) };
+    }
+    return { ok: false, unsupported: true, error: `Runtime action is not available in v1.0.13: ${action}` };
   }
 };
+
