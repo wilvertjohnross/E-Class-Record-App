@@ -2505,7 +2505,7 @@ function summaryStudentRow(cls, s, termKey){
   const genAvg = averageWhole(genAvgVals);
   const remark = genAvg===null ? "" : (genAvg>=75 ? "Passed" : "Failed");
 
-  return `<tr>
+  return `<tr class="summary-learner-row">
       <td class="left">${esc(s.name)||"(unnamed)"}</td>
       ${primaryCells}
       ${subCells}
@@ -2528,7 +2528,7 @@ function summaryTableHtml(cls, termKey){
     + `<th>MAPEH</th>`
     + electiveAreas.map(a=>`<th>${esc(a.label)}</th>`).join("")
     + `<th>General<br>Average</th><th>Remarks</th>`;
-  return `<table class="data">
+  return `<table class="data summary-grade-table">
       <thead><tr><th style="text-align:left;">Learner</th>${headCells}</tr></thead>
       <tbody>
         <tr class="group-row"><td colspan="${colCount}">MALE</td></tr>
@@ -2645,6 +2645,32 @@ async function importSummaryTable(cls){
   await showInfoDialog("Summary Import Complete",`${stats.imported} grade value${stats.imported===1?"":"s"} imported for ${stats.matched} matched learner${stats.matched===1?"":"s"}.`+(stats.unmatched?` ${stats.unmatched} learner row${stats.unmatched===1?"":"s"} could not be matched.`:"")+(stats.invalid?` ${stats.invalid} invalid grade value${stats.invalid===1?"":"s"} skipped.`:"")+(stats.lockedSkipped?` ${stats.lockedSkipped} value${stats.lockedSkipped===1?"":"s"} for the Class Record subject were left unchanged.`:""));
 }
 
+function summaryTemplatePayload(cls,termKey){
+  const males=cls.students.filter(s=>s.sex==="M"),females=cls.students.filter(s=>s.sex==="F");
+  return {
+    kind:"download-template",
+    meta:{
+      gradeLevel:String(cls.meta.gradeLevel||""),section:String(cls.meta.section||""),schoolYear:String(cls.meta.schoolYear||""),
+      className:[cls.meta.gradeLevel,cls.meta.section].filter(Boolean).join(" - ")||"Class"
+    },
+    termKey,
+    termLabel:SUMMARY_TERM_LABELS[termKey]||"Term 1",
+    subjects:activeGradeInputAreas(cls).map(a=>({key:a.key,label:a.label})),
+    learners:males.concat(females).map(s=>({name:String(s.name||"").normalize("NFC")}))
+  };
+}
+async function downloadSummaryTemplate(cls){
+  if(!window.eclassAPI||typeof window.eclassAPI.runtimeInvoke!=="function"){alert("Summary template download is available in the installed desktop app.");return;}
+  let result;
+  try{result=await window.eclassAPI.runtimeInvoke("summary:import-file",summaryTemplatePayload(cls,SUMMARY_TERM.current));}
+  catch(err){alert("Could not create the Summary Grade template: "+(err.message||err));return;}
+  if(!result||result.cancelled)return;
+  if(!result.ok){alert("Could not create the Summary Grade template: "+(result.error||"Unknown error"));return;}
+  await showInfoDialog("Summary Template Saved",`The class-specific Summary Grade import template was saved successfully.
+
+${result.path||result.xlsxPath||""}`);
+}
+
 function renderSummary(main, cls){
   if(!cls.students.length){
     main.innerHTML = `<div class="empty-state"><h2>No learners yet</h2><p>Add learners in the Roster tab first.</p></div>`;
@@ -2659,6 +2685,7 @@ function renderSummary(main, cls){
         <div class="cr-viewtoggle">
           ${["term1","term2","term3"].map(t=>`<button class="small summary-termbtn ${SUMMARY_TERM.current===t?"active":""}" data-term="${t}">${SUMMARY_TERM_LABELS[t]}</button>`).join("")}
         </div>
+        <button id="summaryTemplate" class="ghost-alt" style="background:var(--paper-deep);">Download Summary Template (.xlsx)</button>
         <button id="summaryImport" class="primary">Import Summary Table (.xlsx/.csv)</button>
       </div>
       <div class="scroll-x" id="summaryTableWrap"></div>
@@ -2676,6 +2703,7 @@ function renderSummary(main, cls){
       });
     });
   }
+  document.getElementById("summaryTemplate").addEventListener("click",()=>downloadSummaryTemplate(cls));
   document.getElementById("summaryImport").addEventListener("click",()=>importSummaryTable(cls));
   document.querySelectorAll(".summary-termbtn").forEach(b=>{
     b.addEventListener("click", ()=>{

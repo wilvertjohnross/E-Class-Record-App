@@ -170,6 +170,16 @@
   table.data input{width:56px;text-align:center;padding:4px;}
   table.data td.computed{background:#F5EFE0;font-weight:700;color:var(--green-chalk);}
   table.data td.grade-final{background:#F5EFE0;font-weight:800;color:var(--red-pen);font-size:14.5px;}
+
+  /* Summary of Grades: keep learner identity visible during horizontal scrolling. */
+  table.summary-grade-table thead th:first-child{
+    position:sticky;left:0;z-index:8;background:var(--manila);min-width:210px;max-width:260px;
+    box-shadow:2px 0 0 var(--border-strong);
+  }
+  table.summary-grade-table tbody tr.summary-learner-row > td:first-child{
+    position:sticky;left:0;z-index:4;background:var(--white);min-width:210px;max-width:260px;
+    box-shadow:2px 0 0 var(--border);text-align:left;font-weight:600;white-space:nowrap;
+  }
   .scroll-x{overflow-x:auto;}
 
   .comp-table td, .comp-table th{padding:6px;}
@@ -613,6 +623,8 @@
   html[data-theme="dark"] table.sf2-summary-table th{background:#373029;color:var(--text-primary);}
   html[data-theme="dark"] table.sf2-summary-table td{background:var(--surface);color:var(--text-primary);border-color:var(--border);}
   html[data-theme="dark"] table.data th{background:#373029;color:var(--text-primary);border-color:var(--border-strong);}
+  html[data-theme="dark"] table.summary-grade-table thead th:first-child{background:#373029;color:var(--text-primary);box-shadow:2px 0 0 var(--border-strong);}
+  html[data-theme="dark"] table.summary-grade-table tbody tr.summary-learner-row > td:first-child{background:var(--surface-raised);color:var(--text-primary);box-shadow:2px 0 0 var(--border-strong);}
   html[data-theme="dark"] table.data th,
   html[data-theme="dark"] table.data td,
   html[data-theme="dark"] table.cr-table th,

@@ -1925,10 +1925,11 @@ function parseCsvMatrix(text){
 }
 function parseXlsxMatrix(filePath, ctx){
   const AdmZip=resolveAdmZip();const zip=new AdmZip(ctx.fs.readFileSync(filePath));assertSafeImportedXlsx(zip,'The summary workbook');
-  const ss=[];const se=zip.getEntry('xl/sharedStrings.xml');if(se){const sx=se.getData().toString('utf8');let sm;const sir=/<si\b[^>]*>([\s\S]*?)<\/si>/g;while((sm=sir.exec(sx))){let t='',tm;const tr=/<t\b[^>]*>([\s\S]*?)<\/t>/g;while((tm=tr.exec(sm[1])))t+=xmlDecodeText(tm[1]);ss.push(t);}}
+  const ns='(?:[A-Za-z_][\\w.-]*:)?';
+  const ss=[];const se=zip.getEntry('xl/sharedStrings.xml');if(se){const sx=se.getData().toString('utf8');let sm;const sir=new RegExp(`<${ns}si\\b[^>]*>([\\s\\S]*?)<\\/${ns}si>`,'g');while((sm=sir.exec(sx))){let t='',tm;const tr=new RegExp(`<${ns}t\\b[^>]*>([\\s\\S]*?)<\\/${ns}t>`,'g');while((tm=tr.exec(sm[1])))t+=xmlDecodeText(tm[1]);ss.push(t);}}
   let sheetEntry=zip.getEntry('xl/worksheets/sheet1.xml');if(!sheetEntry)throw new Error('The first worksheet could not be read.');const xml=sheetEntry.getData().toString('utf8');
-  const rows=[];let rm;const rr=/<row\b[^>]*\br="(\d+)"[^>]*>([\s\S]*?)<\/row>/g;
-  while((rm=rr.exec(xml))){if(rows.length>=5000)throw new Error('Summary workbook contains more than 5,000 rows.');const out=[];let cm;const cr=/<c\b([^>]*\br="([A-Z]+\d+)"[^>]*)>([\s\S]*?)<\/c>|<c\b([^>]*\br="([A-Z]+\d+)"[^>]*)\/>/g;while((cm=cr.exec(rm[2]))){const attrs=cm[1]||cm[4]||'',ref=cm[2]||cm[5],body=cm[3]||'',i=columnIndexFromRef(ref),type=((attrs.match(/\bt="([^"]+)"/)||[])[1]||'').toLowerCase();if(i<0||i>=500)throw new Error('Summary workbook contains a cell beyond the 500-column safety limit.');let v='';if(type==='inlinestr'){let tm;const tr=/<t\b[^>]*>([\s\S]*?)<\/t>/g;while((tm=tr.exec(body)))v+=xmlDecodeText(tm[1]);}else{const vm=body.match(/<v\b[^>]*>([\s\S]*?)<\/v>/);if(vm){const raw=xmlDecodeText(vm[1]);if(type==='s'){const k=Number(raw);v=Number.isInteger(k)&&k>=0&&k<ss.length?ss[k]:'';}else{const n=Number(raw);v=raw.trim()!==''&&Number.isFinite(n)?n:raw;}}}out[i]=v;}rows.push(out);}
+  const rows=[];let rm;const rr=new RegExp(`<${ns}row\\b[^>]*\\br="(\\d+)"[^>]*>([\\s\\S]*?)<\\/${ns}row>`,'g');
+  while((rm=rr.exec(xml))){if(rows.length>=5000)throw new Error('Summary workbook contains more than 5,000 rows.');const out=[];let cm;const cr=new RegExp(`<${ns}c\\b([^>]*\\br="([A-Z]+\\d+)"[^>]*)>([\\s\\S]*?)<\\/${ns}c>|<${ns}c\\b([^>]*\\br="([A-Z]+\\d+)"[^>]*)\\/>`,'g');while((cm=cr.exec(rm[2]))){const attrs=cm[1]||cm[4]||'',ref=cm[2]||cm[5],body=cm[3]||'',i=columnIndexFromRef(ref),type=((attrs.match(/\bt="([^"]+)"/)||[])[1]||'').toLowerCase();if(i<0||i>=500)throw new Error('Summary workbook contains a cell beyond the 500-column safety limit.');let v='';if(type==='inlinestr'){let tm;const tr=new RegExp(`<${ns}t\\b[^>]*>([\\s\\S]*?)<\\/${ns}t>`,'g');while((tm=tr.exec(body)))v+=xmlDecodeText(tm[1]);}else{const vm=body.match(new RegExp(`<${ns}v\\b[^>]*>([\\s\\S]*?)<\\/${ns}v>`));if(vm){const raw=xmlDecodeText(vm[1]);if(type==='s'){const k=Number(raw);v=Number.isInteger(k)&&k>=0&&k<ss.length?ss[k]:'';}else if(type==='str'){v=raw;}else{const n=Number(raw);v=raw.trim()!==''&&Number.isFinite(n)?n:raw;}}}out[i]=v;}rows.push(out);}
   return rows;
 }
 
@@ -2028,6 +2029,62 @@ async function importFlexibleSf1FileRuntime(context){
   return{ok:true,path:filePath,fileName:ctx.path.basename(filePath),data};
 }
 
+function setSummaryTemplateCell(xml, ref, value){
+  const r=regexEscape(ref);let prefix='',attrs='',matched=null,m;
+  m=xml.match(new RegExp(`<([A-Za-z_][\\w.-]*):c\\b([^>]*\\br="${r}"[^>]*)\\/>`));
+  if(m){prefix=m[1]+':';attrs=m[2]||'';matched=m[0];}
+  if(!matched){m=xml.match(new RegExp(`<([A-Za-z_][\\w.-]*):c\\b([^>]*\\br="${r}"[^>]*)>([\\s\\S]*?)<\\/\\1:c>`));if(m){prefix=m[1]+':';attrs=m[2]||'';matched=m[0];}}
+  if(!matched){m=xml.match(new RegExp(`<c\\b([^>]*\\br="${r}"[^>]*)\\/>`));if(m){attrs=m[1]||'';matched=m[0];}}
+  if(!matched){m=xml.match(new RegExp(`<c\\b([^>]*\\br="${r}"[^>]*)>([\\s\\S]*?)<\\/c>`));if(m){attrs=m[1]||'';matched=m[0];}}
+  if(!matched)throw new Error(`Summary template cell ${ref} was not found.`);
+  const style=(attrs.match(/\\bs="([^"]+)"/)||[])[1],styleAttr=style?` s="${style}"`:'';
+  const text=String(value??'').normalize('NFC');
+  const replacement=text===''?`<${prefix}c r="${ref}"${styleAttr}/>`:`<${prefix}c r="${ref}"${styleAttr} t="inlineStr"><${prefix}is><${prefix}t xml:space="preserve">${xmlEscape(text)}</${prefix}t></${prefix}is></${prefix}c>`;
+  return xml.replace(matched,replacement);
+}
+function setSummaryTemplateColumnHidden(xml,colIndex,hidden){
+  const patterns=[
+    new RegExp(`<([A-Za-z_][\\w.-]*):col\\b([^>]*\\bmin="${colIndex}"[^>]*\\bmax="${colIndex}"[^>]*)\\/>`),
+    new RegExp(`<col\\b([^>]*\\bmin="${colIndex}"[^>]*\\bmax="${colIndex}"[^>]*)\\/>`)
+  ];
+  for(const re of patterns){const m=xml.match(re);if(!m)continue;const pref=m.length===3&&m[2]!==undefined?m[1]+':':'';let attrs=(pref?m[2]:m[1])||'';attrs=attrs.replace(/\\shidden="[^"]*"/g,'');if(hidden)attrs+=' hidden="1"';return xml.replace(m[0],`<${pref}col${attrs}/>`);}
+  return xml;
+}
+function buildSummaryImportTemplateBuffer(payload,ctx){
+  const meta=payload&&payload.meta||{},subjects=Array.isArray(payload&&payload.subjects)?payload.subjects:[],learners=Array.isArray(payload&&payload.learners)?payload.learners:[];
+  if(subjects.length<1||subjects.length>11)throw new Error('Summary template subject configuration is invalid.');
+  if(learners.length>100)throw new Error('Summary template supports up to 100 learners.');
+  for(const s of subjects)if(!s||typeof s.label!=='string'||!s.label.trim()||s.label.length>100)throw new Error('Summary template contains an invalid subject label.');
+  for(const l of learners)if(!l||typeof l.name!=='string'||l.name.length>180)throw new Error('Summary template contains an invalid learner name.');
+  const templatePath=ctx.resolveResource('templates/Summary Grade Import Template.xlsx');
+  if(!ctx.fs.existsSync(templatePath))throw new Error('The bundled Summary Grade import template is missing.');
+  const AdmZip=resolveAdmZip(),zip=new AdmZip(ctx.fs.readFileSync(templatePath)),entry=zip.getEntry('xl/worksheets/sheet1.xml');
+  if(!entry)throw new Error('The Summary Grade import template worksheet is missing.');
+  let xml=entry.getData().toString('utf8');
+  xml=setSummaryTemplateCell(xml,'B3',meta.className||[meta.gradeLevel,meta.section].filter(Boolean).join(' - ')||'Class');
+  xml=setSummaryTemplateCell(xml,'E3',payload.termLabel||`Term ${termNumber(payload.termKey)}`);
+  xml=setSummaryTemplateCell(xml,'H3',meta.schoolYear||'');
+  const cols=['B','C','D','E','F','G','H','I','J','K','L'];
+  for(let i=0;i<cols.length;i++){
+    xml=setSummaryTemplateCell(xml,`${cols[i]}5`,subjects[i]?subjects[i].label:'');
+    xml=setSummaryTemplateColumnHidden(xml,i+2,i>=subjects.length);
+  }
+  for(let i=0;i<100;i++)xml=setSummaryTemplateCell(xml,`A${i+6}`,learners[i]?learners[i].name:'');
+  zip.updateFile('xl/worksheets/sheet1.xml',Buffer.from(xml,'utf8'));
+  return zip.toBuffer();
+}
+async function saveSummaryImportTemplate(payload,context){
+  const ctx={...(startupContext||{}),...(context||{})},parent=typeof ctx.getMainWindow==='function'?ctx.getMainWindow():undefined;
+  if(!ctx.dialog||typeof ctx.dialog.showSaveDialog!=='function')throw new Error('The Windows Save dialog is unavailable.');
+  const meta=payload&&payload.meta||{},classPart=cleanFileName(meta.className||[meta.gradeLevel,meta.section].filter(Boolean).join(' - ')||'Class');
+  const termPart=cleanFileName(payload&&payload.termLabel||`Term ${termNumber(payload&&payload.termKey)}`);
+  const defaultName=`${classPart} - ${termPart} - Summary Grade Import Template.xlsx`;
+  const result=await ctx.dialog.showSaveDialog(parent,{title:'Save Summary Grade Import Template',defaultPath:ctx.path.join(ctx.app.getPath('documents'),defaultName),filters:[{name:'Excel Workbook',extensions:['xlsx']}]});
+  if(result.canceled||!result.filePath)return{ok:false,cancelled:true};
+  const buffer=buildSummaryImportTemplateBuffer(payload,ctx);ctx.fs.writeFileSync(result.filePath,buffer);
+  return{ok:true,path:result.filePath,xlsxPath:result.filePath};
+}
+
 async function importSummaryFile(context){
   const ctx={...(startupContext||{}),...(context||{})};const parent=typeof ctx.getMainWindow==='function'?ctx.getMainWindow():undefined;
   const r=await ctx.dialog.showOpenDialog(parent,{title:'Import Summary of Grades',properties:['openFile'],filters:[{name:'Summary Table',extensions:['xlsx','csv']}]});
@@ -2088,6 +2145,7 @@ module.exports = {
     if (action === 'summary:import-file') {
       if (payload && payload.kind === 'official-ecr') return importOfficialEcrFileRuntime(context);
       if (payload && payload.kind === 'sf1') return importFlexibleSf1FileRuntime(context);
+      if (payload && payload.kind === 'download-template') return saveSummaryImportTemplate(payload, context);
       return importSummaryFile(context);
     }
     if (action === 'sf9:preview-html') return openSf9HtmlPreview(payload, context);
