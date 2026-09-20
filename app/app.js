@@ -343,6 +343,11 @@ function catalogOptionHtml(options,selectedId,disabledId=""){
 function classRecordSubjectOptionHtml(selectedId){ return catalogOptionHtml(CLASS_RECORD_SUBJECT_OPTIONS,selectedId); }
 const ATT_MONTHS = ["Jun","Jul","Aug","Sep","Oct","Nov","Dec","Jan","Feb","Mar","Apr"];
 
+const SF1_PROFILE_KEYS=["motherTongue","ipEthnicGroup","religion","houseStreet","barangay","municipalityCity","province","fatherName","motherName","guardianName","guardianRelationship","contactNumber","learningModality","remarks"];
+function cleanSf1Profile(raw){const src=raw&&typeof raw==="object"&&!Array.isArray(raw)?raw:{};const out={};SF1_PROFILE_KEYS.forEach(k=>{out[k]=unicodeText(src[k]??"").trim();});return out;}
+function ensureSf1Profile(student){if(!student||typeof student!=="object")return cleanSf1Profile();student.sf1Profile={...cleanSf1Profile(),...cleanSf1Profile(student.sf1Profile)};if(student.birthDate===undefined||student.birthDate===null)student.birthDate="";return student.sf1Profile;}
+function sf1ProfileValue(student,key){const p=ensureSf1Profile(student);return unicodeText(p[key]??"");}
+
 function ensureStudentExtras(cls, sid){
   if(!cls.otherGrades) cls.otherGrades = {};
   if(!cls.attendance) cls.attendance = {};
@@ -1138,7 +1143,7 @@ function showOfficialSf1ImportDialog(data,fileName,cls){
         &nbsp;•&nbsp; <strong>School Year:</strong> ${esc(meta.schoolYear||"—")}
         ${data.detection?`&nbsp;•&nbsp; <strong>Detection:</strong> ${Math.round(Number(data.detection.confidence||0))}%`:""}
       </div>
-      <div class="hint" style="margin-top:8px;">SF1 will be treated as the authoritative source for <strong>learner name, LRN, age and sex</strong>. Existing learners are matched by LRN first, then by name. Their existing scores and SF9 data remain attached.</div>
+      <div class="hint" style="margin-top:8px;">SF1 will be treated as the authoritative source for <strong>learner identity and the available SF1 profile fields</strong> (birth date, language/religion, address, parents/guardian, contact, modality and remarks). Existing learners are matched by LRN first, then by name. Their existing scores and SF9 data remain attached.</div>
       <div class="scroll-x" style="margin-top:10px;max-height:340px;overflow-y:auto;">
         <table class="import-map-table">
           <thead><tr><th style="text-align:left;">Learner Name</th><th>LRN</th><th>Age</th><th>Sex</th></tr></thead>
@@ -1203,8 +1208,7 @@ function applyOfficialSf1Import(cls,data,options={}){
 
     if(!student){
       if(cls.students.length>=1000) throw new Error("SF1 import would exceed the 1,000-learner safety limit for one class.");
-      student={id:uid("s"),name,lrn,age:String(source.age||""),sex:source.sex==="F"?"F":"M"};
-      if(source.birthDate) student.birthDate=String(source.birthDate);
+      student={id:uid("s"),name,lrn,age:String(source.age||""),sex:source.sex==="F"?"F":"M",birthDate:String(source.birthDate||""),sf1Profile:cleanSf1Profile(source.sf1)};
       cls.students.push(student); ensureStudentExtras(cls,student.id); added++;
     }else{
       matched++;
@@ -1212,7 +1216,8 @@ function applyOfficialSf1Import(cls,data,options={}){
       student.lrn=lrn;
       student.age=String(source.age||"");
       student.sex=source.sex==="F"?"F":"M";
-      if(source.birthDate) student.birthDate=String(source.birthDate);
+      student.birthDate=String(source.birthDate||student.birthDate||"");
+      student.sf1Profile={...ensureSf1Profile(student),...cleanSf1Profile(source.sf1)};
       ensureStudentExtras(cls,student.id);
     }
     usedIds.add(student.id); ordered.push(student);
@@ -1271,7 +1276,21 @@ async function importOfficialSf1IntoClass(cls){
 function renderRoster(main, cls){
   const males = cls.students.filter(s=>s.sex==="M");
   const females = cls.students.filter(s=>s.sex==="F");
-  function rows(list){
+  cls.students.forEach(ensureSf1Profile);
+  const gradeLabel=/^grade\b/i.test(String(cls.meta.gradeLevel||""))?String(cls.meta.gradeLevel||""):(cls.meta.gradeLevel?`Grade ${cls.meta.gradeLevel}`:"");
+  const region=String(cls.meta.region||"");
+  function officialRow(s){
+    const p=ensureSf1Profile(s);
+    const c=(v,extra="")=>`<td class="${extra}">${esc(v||"")}</td>`;
+    return `<tr class="sf1-data-row" data-sf1-view-sid="${esc(s.id)}">
+      ${c(s.lrn,"center")}${c(s.name,"sf1-name")}${c(s.sex,"center")}${c(s.birthDate,"center")}${c(s.age,"center")}
+      ${c(p.motherTongue)}${c(p.ipEthnicGroup,"center")}${c(p.religion)}
+      ${c(p.houseStreet)}${c(p.barangay)}${c(p.municipalityCity)}${c(p.province)}
+      ${c(p.fatherName)}${c(p.motherName)}${c(p.guardianName)}${c(p.guardianRelationship)}
+      ${c(p.contactNumber,"center")}${c(p.learningModality,"center")}${c(p.remarks)}
+    </tr>`;
+  }
+  function editorRows(list){
     return list.map(s=>`
       <tr data-sid="${esc(s.id)}">
         <td><input type="text" class="s-name" value="${esc(s.name)}" style="width:220px;text-align:left;"></td>
@@ -1281,94 +1300,149 @@ function renderRoster(main, cls){
         <td><button class="small danger s-remove">Remove</button></td>
       </tr>`).join("");
   }
+  const legendRows=[
+    ["Transfered Out","T/O","Name of Public (P) / Private (PR) School & Effectivity Date","CCT Recipient","CCT","CCT Control/reference number & Effectivity Date"],
+    ["Transfered In","T/I","Name of Public (P) / Private (PR) School & Effectivity Date","Balik Aral","B/A","Name of school last attended & Year"],
+    ["Dropped","DRP","Reason and Effectivity Date","Special Needs Education","SNED","Specify"],
+    ["Late Enrollment","LE","Reason (Enrollment beyond 1st Friday of SY)","Accelerated","ACL","Specify Level & Effectivity Date"]
+  ];
   main.innerHTML = `
     <div class="card">
-      <h2>SF1 / Learner Masterlist <span class="badge-count">${cls.students.length} learners</span></h2>
-      <div class="sub">Grouped Male then Female, matching the standard class record layout.</div>
-      <div class="toolbar">
+      <div class="hub-title-row">
+        <div><h2>SF1 / School Register <span class="badge-count">${cls.students.length} learners</span></h2><div class="sub">Official-form working view based on the uploaded DepEd SF1 layout.</div></div>
+        <div class="hub-context">${males.length} Male • ${females.length} Female • ${cls.students.length} Total</div>
+      </div>
+      <div class="toolbar no-print">
         <button id="importSf1" class="primary">Import SF1 (.xls/.xlsx)</button>
         <button id="addStudent" class="ghost-alt" style="background:var(--paper-deep);">+ Add learner</button>
-        <button id="pasteNames" class="ghost-alt" style="background:var(--paper-deep);">Paste names (one per line)</button>
+        <button id="pasteNames" class="ghost-alt" style="background:var(--paper-deep);">Paste names</button>
         <button id="importCsv" class="ghost-alt" style="background:var(--paper-deep);">Import CSV</button>
         <button id="downloadTemplate" class="ghost-alt" style="background:var(--paper-deep);">Download CSV template</button>
         <input type="file" id="csvFile" accept=".csv,text/csv" style="display:none;">
       </div>
-      <div class="hint" style="margin-bottom:10px;"><strong>Preferred:</strong> import an SF1 Excel file so learner names, LRN, age and sex can be detected from the class register. The importer tolerates common layout variations but will not guess ambiguous learner data. CSV/manual entry remain available as alternatives.</div>
-      <div class="scroll-x">
-      <table class="data" id="rosterTable">
-        <thead><tr><th style="text-align:left;">Name</th><th>LRN</th><th>Age</th><th>Sex</th><th></th></tr></thead>
-        <tbody>
-          <tr class="group-row"><td colspan="5">MALE (${males.length})</td></tr>
-          ${rows(males)}
-          <tr class="group-row"><td colspan="5">FEMALE (${females.length})</td></tr>
-          ${rows(females)}
-        </tbody>
-      </table>
+      <div class="sf1-view-note"><strong>SF1 import now preserves the available profile fields from the official register</strong> in addition to learner name, LRN, sex and age. Horizontal scrolling is expected because the official form is very wide.</div>
+
+      <div class="sf1-official-wrap">
+        <div class="sf1-form">
+          <div class="sf1-form-title">School Form 1 (SF 1) School Register</div>
+          <div class="sf1-form-subtitle">(This replaces Form 1, Master List &amp; STS Form 2-Family Background and Profile)</div>
+          <div class="sf1-meta-grid row1">
+            <div class="label">School ID</div><div class="value">${esc(cls.meta.schoolId||"")}</div>
+            <div class="value">${esc(region)}</div>
+            <div class="label">Division</div><div class="value">${esc(cls.meta.division||"")}</div>
+          </div>
+          <div class="sf1-meta-grid row2">
+            <div class="label">School Name</div><div class="value">${esc(cls.meta.schoolName||"")}</div>
+            <div class="label">School Year</div><div class="value">${esc(cls.meta.schoolYear||"")}</div>
+            <div class="label">Grade Level</div><div class="value">${esc(gradeLabel)}</div>
+            <div class="label">Section</div><div class="value">${esc(cls.meta.section||"")}</div>
+          </div>
+          <table class="sf1-official">
+            <colgroup>
+              <col style="width:115px"><col style="width:250px"><col style="width:55px"><col style="width:100px"><col style="width:75px">
+              <col style="width:120px"><col style="width:80px"><col style="width:110px"><col style="width:150px"><col style="width:130px">
+              <col style="width:160px"><col style="width:120px"><col style="width:210px"><col style="width:210px"><col style="width:180px">
+              <col style="width:110px"><col style="width:140px"><col style="width:135px"><col style="width:210px">
+            </colgroup>
+            <thead>
+              <tr>
+                <th rowspan="2">LRN</th>
+                <th rowspan="2">NAME<br><span class="sf1-remarks-note">(Last Name, First Name, Middle Name)</span></th>
+                <th rowspan="2">Sex<br>(M/F)</th>
+                <th rowspan="2">BIRTH DATE<br><span class="sf1-remarks-note">(mm/dd/yyyy)</span></th>
+                <th rowspan="2">AGE as of<br>1st Friday June</th>
+                <th rowspan="2">MOTHER TONGUE<br><span class="sf1-remarks-note">(Grade 1 to 3 Only)</span></th>
+                <th rowspan="2">IP<br><span class="sf1-remarks-note">(Ethnic Group)</span></th>
+                <th rowspan="2">RELIGION</th>
+                <th colspan="4">ADDRESS</th>
+                <th colspan="2">PARENTS</th>
+                <th colspan="2">GUARDIAN<br><span class="sf1-remarks-note">(if Not Parent)</span></th>
+                <th rowspan="2">Contact Number of Parent or Guardian</th>
+                <th rowspan="2">Learning Modality</th>
+                <th>REMARKS</th>
+              </tr>
+              <tr>
+                <th>House # / Street / Sitio / Purok</th><th>Barangay</th><th>Municipality / City</th><th>Province</th>
+                <th>Father's Name<br><span class="sf1-remarks-note">(Last Name, First Name, Middle Name)</span></th>
+                <th>Mother's Maiden Name<br><span class="sf1-remarks-note">(Last Name, First Name, Middle Name)</span></th>
+                <th>Name</th><th>Relationship</th><th><span class="sf1-remarks-note">(Please refer to the legend below)</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              ${males.map(officialRow).join("")}
+              <tr class="sf1-total-row"><td class="center">${males.length}</td><td>&lt;=== TOTAL MALE</td><td colspan="17"></td></tr>
+              ${females.map(officialRow).join("")}
+              <tr class="sf1-total-row"><td class="center">${females.length}</td><td>&lt;=== TOTAL FEMALE</td><td colspan="17"></td></tr>
+              <tr class="sf1-combined-row"><td class="center">${cls.students.length}</td><td>&lt;=== COMBINED</td><td colspan="17"></td></tr>
+            </tbody>
+          </table>
+          <div class="sf1-footer-grid">
+            <div>
+              <div class="sf1-footer-title">List and Code of Indicators under REMARKS column</div>
+              <table class="sf1-legend"><thead><tr><th>Indicator</th><th>Code</th><th>Required Information</th><th>Indicator</th><th>Code</th><th>Required Information</th></tr></thead>
+              <tbody>${legendRows.map(r=>`<tr>${r.map(v=>`<td>${esc(v)}</td>`).join("")}</tr>`).join("")}</tbody></table>
+            </div>
+            <div>
+              <table class="sf1-counts"><thead><tr><th>REGISTERED</th><th>BoSY</th><th>EoSY</th></tr></thead><tbody>
+                <tr><td>MALE</td><td class="center">${males.length}</td><td></td></tr>
+                <tr><td>FEMALE</td><td class="center">${females.length}</td><td></td></tr>
+                <tr><td>TOTAL</td><td class="center">${cls.students.length}</td><td></td></tr>
+              </tbody></table>
+            </div>
+            <div class="sf1-signatures">
+              <div class="sf1-signature-box"><div class="cap">Prepared by:</div><div class="sf1-signature-name">${esc(cls.meta.adviser||"")}</div><div class="sf1-signature-label">(Signature of Adviser over Printed Name)</div><div class="sf1-date-row"><span>BoSY Date:</span><span>EoSY Date:</span></div></div>
+              <div class="sf1-signature-box"><div class="cap">Certified Correct:</div><div class="sf1-signature-name">${esc(cls.meta.schoolHead||"")}</div><div class="sf1-signature-label">(Signature of School Head over Printed Name)</div><div class="sf1-date-row"><span>BoSY Date:</span><span>EoSY Date:</span></div></div>
+            </div>
+          </div>
+        </div>
       </div>
+
+      <details class="sf1-editor no-print">
+        <summary>Manage learner names, LRN, age, sex, or remove a learner</summary>
+        <div class="sf1-editor-body">
+          <div class="hint" style="margin-bottom:8px;">The official-form view above is the working register. This compact editor remains available for roster maintenance.</div>
+          <div class="scroll-x"><table class="data" id="rosterTable"><thead><tr><th style="text-align:left;">Name</th><th>LRN</th><th>Age</th><th>Sex</th><th></th></tr></thead><tbody>
+            <tr class="group-row"><td colspan="5">MALE (${males.length})</td></tr>${editorRows(males)}
+            <tr class="group-row"><td colspan="5">FEMALE (${females.length})</td></tr>${editorRows(females)}
+          </tbody></table></div>
+        </div>
+      </details>
     </div>`;
   document.getElementById("importSf1").addEventListener("click", ()=>importOfficialSf1IntoClass(cls));
   document.getElementById("addStudent").addEventListener("click", ()=>{
     if(cls.students.length>=1000){alert("This class has reached the 1,000-learner safety limit.");return;}
-    cls.students.push({id:uid("s"), name:"", lrn:"", age:"", sex:"M"});
+    cls.students.push({id:uid("s"), name:"", lrn:"", age:"", sex:"M", birthDate:"", sf1Profile:cleanSf1Profile()});
     saveState(); render();
   });
   document.getElementById("pasteNames").addEventListener("click", async ()=>{
-    const text = await showTextEntryDialog({
-      title:"Paste learner names",
-      message:"Paste one learner name per line. Imported learners will initially be placed in the Male group; you can change Sex afterward.",
-      multiline:true,
-      confirmText:"Add learners",
-      required:true
-    });
+    const text = await showTextEntryDialog({title:"Paste learner names",message:"Paste one learner name per line. Imported learners will initially be placed in the Male group; you can change Sex afterward.",multiline:true,confirmText:"Add learners",required:true});
     if(!text) return;
     const names=text.split("\n").map(t=>unicodeText(t).trim()).filter(Boolean);
     if(cls.students.length+names.length>1000){alert("That paste would exceed the 1,000-learner safety limit for one class.");return;}
-    names.forEach(name=>{ cls.students.push({id:uid("s"), name, lrn:"", age:"", sex:"M"}); });
+    names.forEach(name=>{ cls.students.push({id:uid("s"), name, lrn:"", age:"", sex:"M", birthDate:"", sf1Profile:cleanSf1Profile()}); });
     saveState(); render();
   });
   document.getElementById("downloadTemplate").addEventListener("click", ()=>{
     const csv = 'Name,LRN,Age,Sex\n"Dela Cruz, Juan",123456789012,15,Male\n"Santos, Maria",123456789013,15,Female\n';
-    const blob = new Blob([csv], {type:"text/csv"});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url; a.download = "roster-template.csv"; a.click();
-    URL.revokeObjectURL(url);
+    const blob = new Blob([csv], {type:"text/csv"}); const url = URL.createObjectURL(blob); const a = document.createElement("a");
+    a.href = url; a.download = "roster-template.csv"; a.click(); URL.revokeObjectURL(url);
   });
-  document.getElementById("importCsv").addEventListener("click", ()=>{
-    document.getElementById("csvFile").click();
-  });
+  document.getElementById("importCsv").addEventListener("click", ()=>{ document.getElementById("csvFile").click(); });
   document.getElementById("csvFile").addEventListener("change", e=>{
     const file = e.target.files[0]; if(!file) return;
     if(file.size > 10 * 1024 * 1024){ alert("That CSV exceeds the 10 MB safety limit."); e.target.value=""; return; }
-    const reader = new FileReader();
-    reader.onload = ()=>{
-      try{
-        const added = importRosterCsv(cls, reader.result);
-        saveState(); render();
-        alert("Imported "+added+" learner(s) from the CSV.");
-      }catch(err){
-        alert("Could not read that CSV: "+err.message);
-      }
-    };
-    reader.readAsText(file);
-    e.target.value = "";
+    const reader = new FileReader(); reader.onload = ()=>{try{const added = importRosterCsv(cls, reader.result);saveState(); render();alert("Imported "+added+" learner(s) from the CSV.");}catch(err){alert("Could not read that CSV: "+err.message);}};
+    reader.readAsText(file); e.target.value = "";
   });
   document.querySelectorAll("#rosterTable tr[data-sid]").forEach(row=>{
-    const sid = row.dataset.sid;
-    const s = cls.students.find(x=>x.id===sid);
-    row.querySelector(".s-name").addEventListener("change", e=>{s.name=unicodeText(e.target.value); saveState(); renderClassPicker();});
-    row.querySelector(".s-lrn").addEventListener("change", e=>{s.lrn=e.target.value; saveState();});
-    row.querySelector(".s-age").addEventListener("change", e=>{s.age=e.target.value; saveState();});
+    const sid = row.dataset.sid; const s = cls.students.find(x=>x.id===sid);
+    row.querySelector(".s-name").addEventListener("change", e=>{s.name=unicodeText(e.target.value); saveState(); renderClassPicker(); render();});
+    row.querySelector(".s-lrn").addEventListener("change", e=>{s.lrn=e.target.value; saveState(); render();});
+    row.querySelector(".s-age").addEventListener("change", e=>{s.age=e.target.value; saveState(); render();});
     row.querySelector(".s-sex").addEventListener("change", e=>{s.sex=e.target.value; saveState(); render();});
-    row.querySelector(".s-remove").addEventListener("click", ()=>{
-      if(!confirm("Remove this learner and all their scores?")) return;
-      cls.students = cls.students.filter(x=>x.id!==sid);
-      deleteStudentEverywhere(cls,sid);
-      saveState(); render();
-    });
+    row.querySelector(".s-remove").addEventListener("click", ()=>{if(!confirm("Remove this learner and all their scores?")) return;cls.students = cls.students.filter(x=>x.id!==sid);deleteStudentEverywhere(cls,sid);saveState(); render();});
   });
 }
-
 
 function sf2Fmt(v,digits=2){
   const n=Number(v); return Number.isFinite(n)?n.toFixed(digits):"0.00";
