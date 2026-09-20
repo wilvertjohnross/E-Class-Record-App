@@ -2384,7 +2384,6 @@ function reportCardHtml(cls, s){
 
   const page1 = `
     <div class="rc-sheet">
-      <div class="rc-corner"></div>
       <div class="rc-sealrow">
         <div class="rc-seal"><img src="${schoolLogoDataUri()}" alt="School Seal"></div>
         <div class="rc-headtext">
