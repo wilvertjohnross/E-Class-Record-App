@@ -224,6 +224,27 @@ function setWorksheetCellStyle(xml, ref, styleIndex) {
 }
 
 
+function sf2CenterSummaryHeaderValueAreas(xml) {
+  // The official SF2 visually treats Month, its value, and the class-day count as
+  // two-row blocks beside the Summary subheader. In the generated copy only,
+  // formalize those already-blank areas as merged cells so Excel centers the
+  // dynamic values both horizontally and vertically without changing captions.
+  const wanted = ['AB64:AB65', 'AC64:AD65', 'AG64:AG65'];
+  const existing = new Set();
+  const block = xml.match(/<mergeCells\b([^>]*)>([\s\S]*?)<\/mergeCells>/);
+  if (!block) throw new Error('The official SF2 merged-cell table was not found.');
+  for (const m of block[2].matchAll(/<mergeCell\s+ref="([^"]+)"\s*\/>/g)) existing.add(m[1]);
+  const additions = wanted.filter(ref => !existing.has(ref));
+  if (!additions.length) return xml;
+  const countMatch = block[1].match(/\bcount="(\d+)"/);
+  const oldCount = countMatch ? Number(countMatch[1]) : existing.size;
+  const attrs = /\bcount="\d+"/.test(block[1])
+    ? block[1].replace(/\bcount="\d+"/, `count="${oldCount + additions.length}"`)
+    : `${block[1]} count="${oldCount + additions.length}"`;
+  const body = block[2] + additions.map(ref => `<mergeCell ref="${ref}"/>`).join('');
+  return xml.replace(block[0], `<mergeCells${attrs}>${body}</mergeCells>`);
+}
+
 function sf2FixSummaryHeaderStyles(zip, worksheetXml) {
   // Generated-copy-only alignment cleanup for the Month / Days / Summary block.
   // Keep every official caption and border in place; only make the existing cells readable.
@@ -253,7 +274,7 @@ function sf2FixSummaryHeaderStyles(zip, worksheetXml) {
   }
   const desired = new Map([
     [styleFor('AB64'), '<alignment horizontal="center" vertical="center" shrinkToFit="1"/>'],
-    [styleFor('AC64'), '<alignment horizontal="centerContinuous" vertical="center"/>'],
+    [styleFor('AC64'), '<alignment horizontal="center" vertical="center"/>'],
     [styleFor('AE64'), '<alignment horizontal="center" vertical="center" wrapText="1"/>'],
     [styleFor('AG64'), '<alignment horizontal="center" vertical="center"/>']
   ]);
@@ -390,7 +411,6 @@ function buildOfficialGsBuffer(payload, ctx) {
 
   // Only official data-bearing cells are changed. Static headings/labels,
   // merged ranges, sizing, formatting, logos/positions, and page setup remain.
-  sf2FixSummaryHeaderStyles(zip, xml);
 
   const headerValues = {
     A2: meta.region || '',
@@ -522,6 +542,11 @@ function buildOfficialSf2Buffer(payload, ctx) {
   const entry = zip.getEntry('xl/worksheets/sheet1.xml');
   if (!entry) throw new Error('The official SF2 worksheet was not found in the template.');
   let xml = entry.getData().toString('utf8');
+  // Generated-copy-only readability/alignment fix for the official SF2 Month /
+  // No. of Days of Classes / Summary header block. This must run against the
+  // SF2 workbook (not the Grading Sheet) so the month and class-day values
+  // are centered in their intended value areas without changing the template.
+  sf2FixSummaryHeaderStyles(zip, xml);
   const meta = payload.meta || {};
   const dayCols = ['D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z','AA','AB'];
 
@@ -536,6 +561,7 @@ function buildOfficialSf2Buffer(payload, ctx) {
     AG64: Number(payload.summary.schoolDays || payload.days.length || 0)
   };
   for (const [ref, value] of Object.entries(headerValues)) xml = setWorksheetCell(xml, ref, value, typeof value === 'number' ? 'number' : 'string');
+  xml = sf2CenterSummaryHeaderValueAreas(xml);
 
   // Calendar header: row 11 = date, row 12 = day of week. Row 13 remains intentionally blank.
   dayCols.forEach((col, i) => {
@@ -1367,7 +1393,7 @@ function sf2TemplateFingerprint(ctx) {
 function sf2PreviewSignature(payload, ctx) {
   const crypto = require('crypto');
   return crypto.createHash('sha256')
-    .update('sf2-preview-v1.1.5\n')
+    .update('sf2-preview-v1.1.6\n')
     .update(sf2TemplateFingerprint(ctx))
     .update('\n')
     .update(stableStringify(payload))
