@@ -854,6 +854,8 @@ function renderClassPicker(){
   const adviserMode=roleForTab(activeTab)==="adviser";
   if(sel) sel.style.display=adviserMode?"none":"";
   if(label) label.style.display=adviserMode?"none":"";
+  const actions=document.getElementById("sidebarClassActions");
+  if(actions) actions.style.display=adviserMode?"none":"";
   if(!sel) return;
   sel.innerHTML = "";
   Object.values(APP.classes||{}).sort((a,b)=>a.createdAt-b.createdAt).forEach(c=>{
@@ -877,7 +879,6 @@ function renderSubjectTeacherHome(main,cls){
         <div class="control-card"><div><div class="module-code">CLASS</div><h3>Class Setup</h3><p>Set the class name, subject, grade level, section, teacher, school details, and grading configuration.</p></div><div class="card-actions"><button class="primary" data-go-tab="setup">Open Class Setup</button></div></div>
         <div class="control-card"><div><div class="module-code">ROSTER</div><h3>Learner Roster</h3><p>Add, paste, or import learners for this class. This roster remains independent from Adviser records.</p></div><div class="card-actions"><button class="primary" data-go-tab="classroster">Manage Roster</button><span class="status-chip">${cls.students.length} learners</span></div></div>
       </div>
-      <div class="class-management no-print"><strong>Class management</strong><button class="small ghost-alt" data-click-id="btnNewClass">+ New Class</button><button class="small ghost-alt" data-click-id="btnDupClass">Duplicate Class</button><button class="small danger" data-click-id="btnDelClass">Delete Class</button></div>
     </div>`;
 }
 function renderAdviserHome(main,cls){
@@ -960,15 +961,15 @@ function classRosterManagerHtml(cls){
   const row=s=>`<tr data-class-roster-sid="${esc(s.id)}">
     <td><input type="text" class="crs-name" value="${esc(s.name)}" style="width:280px;text-align:left;" placeholder="Learner name"></td>
     <td><select class="crs-sex"><option value="M" ${s.sex==="M"?"selected":""}>Male</option><option value="F" ${s.sex==="F"?"selected":""}>Female</option></select></td>
-    <td><button class="small danger crs-remove">Remove</button></td>
+    <td><button class="small danger crs-remove icon-remove" type="button" aria-label="Remove learner" title="Remove learner"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 6h18M9 6V4h6v2M5 6l1 14h12l1-14M10 10v6M14 10v6"/></svg></button></td>
   </tr>`;
   return `<div class="card class-roster-card">
     <div class="hub-title-row"><div><h2>Subject Teacher Learner Roster</h2><div class="sub">Enroll learners by typing names, pasting a list, or importing a CSV. This roster belongs only to this teaching class and never modifies the Adviser SF1 masterlist.</div></div><div class="hub-context">${males.length} Male • ${females.length} Female • ${cls.students.length} Total</div></div>
     <div class="toolbar no-print">
       <button id="classAddStudent" class="primary">+ Add learner</button>
-      <button id="classPasteNames" class="ghost-alt" style="background:var(--paper-deep);">Paste names</button>
-      <button id="classImportCsv" class="ghost-alt" style="background:var(--paper-deep);">Import Names CSV</button>
-      <button id="classDownloadRosterTemplate" class="ghost-alt" style="background:var(--paper-deep);">Download Names CSV Template</button>
+      <button id="classPasteNames" class="ghost-alt">Paste names</button>
+      <button id="classImportCsv" class="ghost-alt">Import Names CSV</button>
+      <button id="classDownloadRosterTemplate" class="ghost-alt">Download Names CSV Template</button>
       <input type="file" id="classCsvFile" accept=".csv,text/csv" style="display:none;">
     </div>
     <div class="hint" style="margin-bottom:10px;">Only learner names are required. The downloadable CSV has a <strong>Learner Name (Required)</strong> column and an optional <strong>Sex (M/F)</strong> column. If Sex is left blank, the learner is placed in the Male group temporarily and can be changed afterward.</div>
@@ -1037,8 +1038,8 @@ function renderSetup(main, cls){
         <div class="field"><label>Grade Level</label><input type="text" id="f_gradeLevel" value="${esc(m.gradeLevel)}"></div>
         <div class="field"><label>Section</label><input type="text" id="f_section" value="${esc(m.section)}"></div>
       </div>
-      ${electiveMode?`<div class="field"><label>Elective Subject</label><select id="f_classRecordElective">${catalogOptionHtml(ELECTIVE_CATALOG,m.classRecordElectiveId)}</select><div class="hint">Electives are kept in a separate dropdown so the main subject list stays manageable as additional special-program electives are added.</div></div>`:""}
-      <div class="import-summary"><strong>Independent Subject Teacher record:</strong> this Class Record and its Summary of Grades remain within this teaching class and do not feed Adviser SF9/SF5/SF10.</div>
+      ${electiveMode?`<div class="field"><label>Elective Subject</label><select id="f_classRecordElective">${catalogOptionHtml(ELECTIVE_CATALOG,m.classRecordElectiveId)}</select><div class="hint">Select the elective subject for this class.</div></div>`:""}
+
       <div class="grid3">
         <div class="field"><label>Subject Teacher</label><input type="text" id="f_teacher" value="${esc(m.teacher)}"></div>
         <div class="field"><label>Class Adviser — optional, local only</label><input type="text" id="f_adviser" value="${esc(m.adviser)}"></div>
@@ -1088,11 +1089,12 @@ function renderSetup(main, cls){
       </div>
     </div>
 
-    <div class="card">
-      <h2>Grading Weights</h2>
-      <div class="sub">Written Works, Performance Tasks and Exams weights should add up to 100%. Configure them for the current Class Record subject.</div>
-      <div id="weightTotal" style="margin-bottom:14px;"></div>
-      ${["WW","PT","EXAM"].map(k=>renderCategoryEditor(cls,k)).join("")}
+    <div class="card grading-weights-card">
+      <div class="grading-weights-head">
+        <div><h2>Grading Weights</h2><div class="sub">Set the grading weights for this subject. Total must equal 100%.</div></div>
+        <div id="weightTotal"></div>
+      </div>
+      <div class="grading-category-grid">${["WW","PT","EXAM"].map(k=>renderCategoryEditor(cls,k)).join("")}</div>
     </div>
   `;
 
@@ -1220,29 +1222,31 @@ function renderSf9Setup(main, cls){
 
 function renderCategoryEditor(cls, key){
   const cat = cls.categories[key];
+  const allowCustomWeights = key === "EXAM";
   const rows = cat.components.map(c=>`
     <tr data-comp="${esc(c.id)}">
       <td><input type="text" class="comp-name" value="${esc(c.name)}" style="width:110px;"></td>
       <td><input type="number" class="comp-hps" value="${esc(c.hps)}" min="0" step="1" style="width:70px;"></td>
-      <td>${cat.mode==="custom" ? `<input type="number" class="comp-subweight" value="${esc(c.subWeight)}" min="0" step="1" style="width:70px;">` : `<span class="hint">auto</span>`}</td>
-      <td><button class="small danger comp-remove">Remove</button></td>
+      ${allowCustomWeights ? `<td>${cat.mode==="custom" ? `<input type="number" class="comp-subweight" value="${esc(c.subWeight)}" min="0" step="1" style="width:70px;">` : `<span class="hint">auto</span>`}</td>` : ""}
+      <td><button class="small danger comp-remove icon-remove" type="button" aria-label="Remove item" title="Remove item"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 6h18M9 6V4h6v2M5 6l1 14h12l1-14M10 10v6M14 10v6"/></svg></button></td>
     </tr>`).join("");
   return `
-    <div class="cat-editor" data-cat="${key}" style="margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid var(--paper-deep);">
-      <div class="toolbar">
-        <strong>${cat.label}</strong>
+    <section class="cat-editor" data-cat="${key}">
+      <div class="cat-editor-title">${cat.label}</div>
+      <div class="cat-controls">
         <label class="hint">Category weight (%)</label>
-        <input type="number" class="cat-weight" value="${Math.round(cat.weight*10000)/100}" min="0" max="100" step="1" style="width:70px;">
-        <label class="hint" style="margin-left:12px;">
-          <input type="checkbox" class="cat-mode" ${cat.mode==="custom"?"checked":""}> use custom item weights (like Summative Tests)
-        </label>
+        <input type="number" class="cat-weight" value="${Math.round(cat.weight*10000)/100}" min="0" max="100" step="1">
+        ${allowCustomWeights ? `<label class="hint cat-mode-row"><input type="checkbox" class="cat-mode" ${cat.mode==="custom"?"checked":""}> <span>Use custom item weights</span></label>` : ""}
       </div>
-      <table class="data comp-table">
-        <thead><tr><th style="text-align:left;">Item</th><th>Highest Possible Score</th><th>Item weight %</th><th></th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table>
-      <button class="small ghost-alt comp-add" style="margin-top:8px;background:var(--paper-deep);">+ Add item</button>
-    </div>`;
+      <div class="comp-table-wrap">
+        <table class="data comp-table">
+          <thead><tr><th style="text-align:left;">Item</th><th>HPS</th>${allowCustomWeights ? "<th>Item Weight %</th>" : ""}<th>Actions</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+      <div class="hint hps-legend">* HPS — Highest Possible Score</div>
+      <button class="small primary comp-add" type="button">+ Add item</button>
+    </section>`;
 }
 
 function bindCategoryEditorEvents(cls){
@@ -1255,7 +1259,7 @@ function bindCategoryEditorEvents(cls){
       if(!Number.isFinite(n)||n<0||n>100){alert("Category weight must be from 0% to 100%.");e.target.value=Math.round(Number(cat.weight||0)*10000)/100;return;}
       cat.weight=n/100;saveState();render();
     });
-    section.querySelector(".cat-mode").addEventListener("change", e=>{
+    section.querySelector(".cat-mode")?.addEventListener("change", e=>{
       cat.mode = e.target.checked ? "custom" : "simple";
       saveState(); render();
     });
@@ -1514,7 +1518,7 @@ function renderRoster(main, cls){
       </div>
       <div class="toolbar no-print" style="margin-top:16px;">
         <button id="sf1PreviewOfficial" class="primary" ${ready?"":"disabled"}>Preview Official SF1</button>
-        <button id="sf1PrintOfficial" class="ghost-alt" style="background:var(--paper-deep);" ${ready?"":"disabled"}>Print Official SF1</button>
+        <button id="sf1PrintOfficial" class="ghost-alt" ${ready?"":"disabled"}>Print Official SF1</button>
       </div>
       <div class="hint">SF1 is intentionally view-only in this module. Learner data is never edited here.</div>
     </div>`;
@@ -2716,9 +2720,9 @@ function renderTerm(main, cls, termKey, termLabel){
           <button class="small viewbtn ${mode==="record"?"active":""}" data-mode="record">Class Record</button>
           <button class="small viewbtn ${mode==="gs"?"active":""}" data-mode="gs">Grading Sheet</button>
         </div>
-        <button id="termImportOfficial" class="ghost-alt" style="background:var(--paper-deep);">Import ECR (.xlsx)</button>
-        <button id="termExportOfficial" class="ghost-alt" style="background:var(--paper-deep);">Download Official ECR (.xlsx)</button>
-        <button id="termPrint" class="ghost-alt" style="background:var(--paper-deep);">Print this view</button>
+        <button id="termImportOfficial" class="ghost-alt">Import ECR (.xlsx)</button>
+        <button id="termExportOfficial" class="ghost-alt">Download Official ECR (.xlsx)</button>
+        <button id="termPrint" class="ghost-alt">Print this view</button>
       </div>
     </div>
     <div id="termContainer"></div>`;
@@ -3151,7 +3155,7 @@ function renderSummary(main, cls){
         <div class="cr-viewtoggle">
           ${["term1","term2","term3"].map(t=>`<button class="small summary-termbtn ${SUMMARY_TERM.current===t?"active":""}" data-term="${t}">${SUMMARY_TERM_LABELS[t]}</button>`).join("")}
         </div>
-        <button id="summaryTemplate" class="ghost-alt" style="background:var(--paper-deep);">Download Adviser Grade Template (.xlsx)</button>
+        <button id="summaryTemplate" class="ghost-alt">Download Adviser Grade Template (.xlsx)</button>
         <button id="summaryImport" class="primary">Import Subject Grades (.xlsx/.csv)</button>
       </div>
       <div class="scroll-x" id="summaryTableWrap"></div>
@@ -3195,9 +3199,9 @@ function renderReport(main, cls){
       <div class="toolbar">
         <select id="rcStudent"></select>
         <button class="ghost-alt" data-go-tab="sf9setup">Modify SF9 Setup</button>
-        <button id="rcPreview" class="ghost-alt" style="background:var(--paper-deep);">SF9 Preview</button>
+        <button id="rcPreview" class="ghost-alt">SF9 Preview</button>
         <button id="rcPrint" class="primary">Print SF9 — This Learner</button>
-        <button id="rcPrintAll" class="ghost-alt" style="background:var(--paper-deep);">Print SF9 — All Learners</button>
+        <button id="rcPrintAll" class="ghost-alt">Print SF9 — All Learners</button>
       </div>
     </div>
     <div id="rcContainer"></div>`;
@@ -3809,7 +3813,7 @@ async function initLocalThreadUpdaterStatus(){
     versionEl.textContent = staged ? `v${ver} • update ${staged} ready` : `v${ver}`;
     versionEl.title = staged
       ? `Version ${staged} has been downloaded and staged. It will become active the next time you normally open the app.`
-      : `Current application version ${ver}. Downloaded .ecrupdate files placed in your Downloads folder are detected automatically.`;
+      : `Current application version ${ver}. Signed .ecrupdate files in ${info.downloadsFolder || "the update folder"} are detected automatically while KLAS is open.`;
   }
 
   try{ showInfo(await window.eclassAPI.getUpdateInfo()); }catch(err){ console.warn("Update status unavailable", err); }
