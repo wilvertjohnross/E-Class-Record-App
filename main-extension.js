@@ -1171,7 +1171,9 @@ try {
             $r = $sheetObj.Range($address)
             $t = $r
             if ($r.MergeCells) { $t = $r.MergeArea.Cells.Item(1,1) }
-            if ($null -eq $value -or [string]$value -eq '') { $t.ClearContents() }
+            if ($null -eq $value -or [string]$value -eq '') {
+              if ($r.MergeCells) { $r.MergeArea.ClearContents() } else { $r.ClearContents() }
+            }
             else { $t.Value2 = [string]$value }
             if ($t -ne $r) { try { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($t) } catch {} }
             try { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($r) } catch {}
@@ -1263,6 +1265,11 @@ try {
             $links = @($workbook.LinkSources(1))
             foreach ($lnk in $links) { if ($lnk) { $workbook.BreakLink([string]$lnk, 1) } }
           } catch {}
+          # Fit the complete register across one page; allow vertical pagination.
+          $sheet.PageSetup.Zoom = $false
+          $sheet.PageSetup.FitToPagesWide = 1
+          $sheet.PageSetup.FitToPagesTall = $false
+          $sheet.PageSetup.Orientation = 2
           $workbook.SaveAs($xls, 56)
           [void]$sheet.ExportAsFixedFormat(0, $pdf)
           $workbook.Close($false)
@@ -1674,7 +1681,7 @@ function sf1TemplateFingerprint(ctx) {
 function sf1PreviewSignature(payload, ctx) {
   const crypto = require('crypto');
   return crypto.createHash('sha256')
-    .update('sf1-preserved-template-viewer-v1.3.2\n')
+    .update('sf1-preserved-template-viewer-v1.4.20\n')
     .update(sf1TemplateFingerprint(ctx))
     .update('\n')
     .update(stableStringify(payload))
@@ -2428,6 +2435,9 @@ module.exports = {
 
   async invoke(action, payload, context) {
     if (action === 'ecr:official-pdf-preview' || action === 'ecr:official-popup-preview') {
+      // Older installed bootstraps allow this official-preview channel.
+      // Keep SF1 payload validation and rendering in the existing SF1 handler.
+      if (payload && payload.documentType === 'sf1') return createOfficialSf1PopupPreview(payload, context, payload.autoPrint === true);
       return createOfficialPopupPreview(payload, context);
     }
     if (action === 'ecr:official-save') return saveOfficialDocument('ecr', payload, context);

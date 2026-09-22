@@ -751,7 +751,7 @@ function studentFinalResult(cls, studentId){
 /* =========================================================================
    RENDER: shell
    ========================================================================= */
-const SUBJECT_WORKFLOW_TABS=new Set(["subjecthome","setup","term1","term2","term3","final","summary"]);
+const SUBJECT_WORKFLOW_TABS=new Set(["subjecthome","setup","term1","term2","term3","final"]);
 const ADVISER_WORKFLOW_TABS=new Set(["adviserhome","roster","sf2","advisersummary","sf5","report","sf9setup","sf10"]);
 function roleForTab(tab){
   if(ADVISER_WORKFLOW_TABS.has(tab)) return "adviser";
@@ -760,7 +760,6 @@ function roleForTab(tab){
 function subjectWorkflowKey(tab){
   if(tab==="setup") return "classes";
   if(["term1","term2","term3","final"].includes(tab)) return "record";
-  if(tab==="summary") return "summary";
   return "";
 }
 function adviserWorkflowKey(tab){
@@ -778,7 +777,6 @@ function workflowNavHtml(role,current){
     return `<div class="workflow-nav no-print"><span class="workflow-label">Subject Teacher</span>
       <button class="small ${key==="classes"?"active":""}" data-go-tab="setup">Classes</button>
       <button class="small ${key==="record"?"active":""}" data-go-tab="term1">Class Record</button>
-      <button class="small ${key==="summary"?"active":""}" data-go-tab="summary">Summary of Grades</button>
     </div>`;
   }
   const key=adviserWorkflowKey(current);
@@ -809,6 +807,7 @@ function prependWorkflowNavigation(main,current){
   }
 }
 function render(){
+  if(activeTab==="summary") activeTab="final";
   renderClassPicker();
   const subjectCls=activeClass();
   if(subjectCls){
@@ -818,6 +817,10 @@ function render(){
   }
   const adviserCls=ensureAdviserWorkspace();
   const role=roleForTab(activeTab);
+  const adviserReady=adviserSf1Ready(adviserCls);
+  const adviserNav=document.getElementById("adviserFunctions");
+  if(adviserNav) adviserNav.hidden=!adviserReady;
+  if(role==="adviser"&&!adviserReady) activeTab="adviserhome";
   document.querySelectorAll("nav.tabs .tab").forEach(b=>{
     b.classList.toggle("active", b.dataset.tab === activeTab);
   });
@@ -842,7 +845,6 @@ function render(){
   else if(activeTab==="term2") renderTerm(main, cls, "term2", "Term 2");
   else if(activeTab==="term3") renderTerm(main, cls, "term3", "Term 3");
   else if(activeTab==="final") renderFinal(main, cls);
-  else if(activeTab==="summary") renderSubjectSummary(main, cls);
   else if(activeTab==="report") renderReport(main, cls);
   else {activeTab=role==="adviser"?"adviserhome":"subjecthome";role==="adviser"?renderAdviserHome(main,adviserCls):renderSubjectTeacherHome(main,subjectCls);return;}
   prependWorkflowNavigation(main,activeTab);
@@ -882,6 +884,18 @@ function renderSubjectTeacherHome(main,cls){
     </div>`;
 }
 function renderAdviserHome(main,cls){
+  if(!adviserSf1Ready(cls)){
+    main.innerHTML=`
+      <section class="card adviser-gateway">
+        <h2>Advisory Overview</h2>
+        <h3>You are currently not an Adviser</h3>
+        <p class="sub">Upload your SF1 to set up your advisory class and access adviser functions.</p>
+        <button id="adviserImportSf1" class="primary" type="button">Upload SF1</button>
+      </section>`;
+    document.getElementById("adviserImportSf1").addEventListener("click",()=>importOfficialSf1IntoClass(cls));
+    return;
+  }
+
   const sf2On=!!(cls.meta&&cls.meta.sf2Enabled===true);
   const sc=ensureSubjectConfig(cls);
   const sourceStatus=String(cls.meta&&cls.meta.sf1SourceStatus||"not-imported");
@@ -1041,7 +1055,7 @@ function renderSetup(main, cls){
       ${electiveMode?`<div class="field"><label>Elective Subject</label><select id="f_classRecordElective">${catalogOptionHtml(ELECTIVE_CATALOG,m.classRecordElectiveId)}</select><div class="hint">Select the elective subject for this class.</div></div>`:""}
 
       <div class="grid3">
-        <div class="field"><label>Subject Teacher</label><input type="text" id="f_teacher" value="${esc(m.teacher)}"></div>
+        <div class="field"><label for="f_teacher">Subject Teacher</label><input type="text" id="f_teacher" value="${esc(m.teacher)}"></div>
         <div class="field"><label>Class Adviser — optional, local only</label><input type="text" id="f_adviser" value="${esc(m.adviser)}"></div>
         <div class="field"><label>School Head / Principal</label><input type="text" id="f_schoolHead" value="${esc(m.schoolHead)}"></div>
       </div>
@@ -1103,7 +1117,7 @@ function renderSetup(main, cls){
   const logoCard=setupSplit&&setupSplit.nextElementSibling;
   if(rosterCard) rosterCard.remove();
   if(setupSplit&&logoCard&&logoCard.querySelector("#schoolLogoPreview")) setupSplit.appendChild(logoCard);
-  ["f_teacher","f_adviser","f_schoolHead"].forEach(id=>document.getElementById(id)?.closest(".field")?.remove());
+  ["f_adviser","f_schoolHead"].forEach(id=>document.getElementById(id)?.closest(".field")?.remove());
 
   ["className","gradeLevel","section","teacher","adviser","schoolHead","region","division","schoolId","schoolName","schoolYear","schoolAddress","preparedByName","preparedByTitle","checkedByName","checkedByTitle","approvedByName","approvedByTitle"].forEach(f=>{
     const input=document.getElementById("f_"+f); if(!input) return;
@@ -1489,7 +1503,7 @@ async function openOfficialSf1Viewer(cls, autoPrint=false){
     alert("Official SF1 preview is available in the installed desktop app."); return;
   }
   try{
-    const result=await window.eclassAPI.runtimeInvoke(autoPrint?"sf1:official-print":"sf1:official-pdf-preview",sf1ViewerPayload(cls));
+    const result=await window.eclassAPI.runtimeInvoke("ecr:official-pdf-preview",{...sf1ViewerPayload(cls),documentType:"sf1",autoPrint:!!autoPrint});
     if(!result||!result.ok){
       alert("Could not render the official SF1: "+(result&&result.error?result.error:"Unknown error"));
     }
@@ -3113,30 +3127,8 @@ async function downloadSummaryTemplate(cls){
 ${result.path||result.xlsxPath||""}`);
 }
 
-function renderSubjectSummary(main, cls){
-  if(!cls.students.length){
-    main.innerHTML=`<div class="empty-state"><h2>No learners yet</h2><p>Add learner names manually or import a CSV from Subject Teacher Controls → Classes.</p></div>`;
-    return;
-  }
-  const row=s=>{
-    const t1=studentTermResult(cls,"term1",s.id).term,t2=studentTermResult(cls,"term2",s.id).term,t3=studentTermResult(cls,"term3",s.id).term;
-    const vals=[t1,t2,t3].filter(v=>v!==null&&v!==undefined),final=vals.length?averageWhole(vals):null;
-    const remark=final===null?"":(final>=75?"Passed":"Failed");
-    const f=v=>v===null||v===undefined?"":v;
-    return `<tr><td class="name-cell">${esc(s.name||"")}</td><td class="computed">${f(t1)}</td><td class="computed">${f(t2)}</td><td class="computed">${f(t3)}</td><td class="grade-final">${f(final)}</td><td>${remark}</td></tr>`;
-  };
-  const males=cls.students.filter(s=>s.sex==="M"),females=cls.students.filter(s=>s.sex==="F");
-  main.innerHTML=`<div class="card">
-    <div class="hub-title-row"><div><h2>Summary of Grades</h2><div class="sub">Class-specific grade summary for <strong>${esc(classRecordSubjectLabel(cls))}</strong>. Values are derived only from this Subject Teacher Class Record and do not feed Adviser official forms.</div></div><div class="hub-context">${esc(cls.meta.className||"Current Class")}</div></div>
-    <div class="scroll-x"><table class="data"><thead><tr><th style="text-align:left;">Learner</th><th>Term 1</th><th>Term 2</th><th>Term 3</th><th>Final Grade</th><th>Remarks</th></tr></thead><tbody>
-      <tr class="group-row"><td colspan="6">MALE</td></tr>${males.map(row).join("")||`<tr><td colspan="6" class="hint">No male learners</td></tr>`}
-      <tr class="group-row"><td colspan="6">FEMALE</td></tr>${females.map(row).join("")||`<tr><td colspan="6" class="hint">No female learners</td></tr>`}
-    </tbody></table></div>
-  </div>`;
-}
-
 function renderSummary(main, cls){
-  if(cls.domain!=="adviser"){renderSubjectSummary(main,cls);return;}
+  if(cls.domain!=="adviser"){renderFinal(main,cls);return;}
   if(!adviserSf1Ready(cls)){
     main.innerHTML=`<div class="empty-state"><h2>SF1 masterlist required</h2><p>The Adviser Summary of Subject Grades is available only after the official SF1 masterlist has been imported from Adviser Controls.</p></div>`;
     return;
@@ -3369,7 +3361,7 @@ function reportCardHtml(cls, s){
   const page1 = `
     <div class="rc-sheet">
       <div class="rc-sealrow">
-        <div class="rc-seal"><img src="${schoolLogoDataUri()}" alt="School Seal"></div>
+        <div class="rc-seal"><img src="${DEPED_SEAL_DATA_URI}" alt="DepEd Seal"></div>
         <div class="rc-headtext">
           <div class="l1 old-english">Republic of the Philippines</div>
           <div class="l1 old-english">Department of Education</div>
@@ -3380,7 +3372,7 @@ function reportCardHtml(cls, s){
           <div class="title">LEARNER'S PROGRESS REPORT</div>
           <div class="sy">School Year ${esc(m.schoolYear)}</div>
         </div>
-        <div class="rc-seal"><img src="${DEPED_SEAL_DATA_URI}" alt="DepEd Seal"></div>
+        <div class="rc-seal"><img src="${schoolLogoDataUri()}" alt="School Seal"></div>
       </div>
 
       <div class="rc-studentinfo">
