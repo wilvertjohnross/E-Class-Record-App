@@ -842,6 +842,36 @@
   .adviser-gateway h3{margin:24px 0 10px;}
   #adviserFunctions[hidden]{display:none;}
 </style>
+<style>
+  /* v1.4.22: brief, presentation-only feedback. */
+  @keyframes klas-view-enter{from{opacity:.65;}to{opacity:1;}}
+  @media screen{
+    main.view-enter{animation:klas-view-enter 160ms ease-out;}
+    button{transition:background-color 140ms ease,color 140ms ease,border-color 140ms ease,box-shadow 140ms ease,transform 100ms ease;}
+    button:enabled:active{transform:translateY(1px);box-shadow:none;}
+    .control-card{transition:border-color 160ms ease,box-shadow 160ms ease;}
+    .control-card:has(button:enabled):hover{border-color:var(--accent);box-shadow:0 8px 24px var(--shadow),0 0 0 1px var(--accent);}
+    input,select,textarea{transition:border-color 140ms ease,box-shadow 140ms ease;}
+    input:focus-visible,select:focus-visible,textarea:focus-visible,button:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
+    header.appbar button:focus-visible,header.appbar summary:focus-visible{outline-color:#a9dedd;}
+    .nav-disclosure summary::after{transition:transform 160ms ease;}
+  }
+  @media(prefers-reduced-motion:reduce){
+    *,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important;}
+    button:hover,button:active{transform:none!important;}
+  }
+  @media print{
+    *,*::before,*::after{animation:none!important;transition:none!important;}
+    main.view-enter{opacity:1;}
+    button:hover,button:active{transform:none!important;}
+  }
+</style>
+<link rel="stylesheet" href="welcome.css">
+<style>
+.class-overview-nav>summary{padding:0 12px 0 0;}
+.class-overview-nav>summary>button.tab{flex:1;min-width:0;}
+.class-overview-nav>summary:focus-visible{outline:2px solid #a9dedd;outline-offset:2px;}
+</style>
 </head>
 <body>
 
@@ -856,10 +886,12 @@
     <button id="btnDelClass" class="danger icon-remove" type="button" aria-label="Delete class" title="Delete class"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 6h18M9 6V4h6v2M5 6l1 14h12l1-14M10 10v6M14 10v6"/></svg></button></div>
   </div>
 <nav class="tabs role-tabs no-print" id="tabs">
+  <button class="tab" data-tab="welcome">Welcome</button>
   <div class="nav-group">Teaching</div>
-  <button class="tab" data-tab="subjecthome">Class Overview</button>
-  <button class="tab" data-tab="setup">Class Setup</button>
-  <button class="tab" data-tab="classroster">Learner Roster</button>
+  <details class="nav-disclosure class-overview-nav"><summary><button class="tab" data-tab="subjecthome">Class Overview</button></summary><div class="nav-submenu">
+    <button class="tab" data-tab="setup">Class Setup</button>
+    <button class="tab" data-tab="classroster">Learner Roster</button>
+  </div></details>
   <details class="nav-disclosure"><summary>Grading</summary><div class="nav-submenu">
     <button class="tab" data-tab="term1">Class Record — Term 1</button>
     <button class="tab" data-tab="term2">Class Record — Term 2</button>
@@ -887,6 +919,7 @@
   <span id="statusRight">Saved automatically to this device.</span>
 </footer>
 
+<script src="welcome.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

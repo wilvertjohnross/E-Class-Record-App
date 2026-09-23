@@ -88,7 +88,7 @@ function unicodeText(value){
 const STORE_KEY = "eclass_record_app_v1";
 const LEGACY_STORE_KEY = "ledger_gradebook_v1";
 let APP = loadState();
-let activeTab = "subjecthome";
+let activeTab = welcomeInitialTab(APP);
 
 function uid(prefix){
   if(window.crypto && typeof window.crypto.randomUUID === "function") return prefix + "_" + window.crypto.randomUUID();
@@ -806,6 +806,7 @@ function prependWorkflowNavigation(main,current){
     if(nav&&nav.nextSibling) main.insertBefore(term,nav.nextSibling); else main.appendChild(term);
   }
 }
+let lastAnimatedTab = null;
 function render(){
   if(activeTab==="summary") activeTab="final";
   renderClassPicker();
@@ -827,8 +828,17 @@ function render(){
   const activeSidebarTab=document.querySelector(`nav.tabs .tab[data-tab="${activeTab}"]`);
   const activeSection=activeSidebarTab&&activeSidebarTab.closest("details.nav-disclosure");
   if(activeSection) activeSection.open=true;
+  welcomeRememberView();
   const main = document.getElementById("main");
+  main.classList.toggle("view-enter", lastAnimatedTab !== activeTab);
+  if(lastAnimatedTab !== activeTab){
+    main.classList.remove("view-enter");
+    void main.offsetWidth;
+    main.classList.add("view-enter");
+    lastAnimatedTab = activeTab;
+  }
   main.innerHTML = "";
+  if(activeTab==="welcome"){renderWelcome(main);return;}
   if(activeTab==="subjecthome"){renderSubjectTeacherHome(main,subjectCls);return;}
   if(activeTab==="adviserhome"){renderAdviserHome(main,adviserCls);return;}
   if(role==="subject"&&!subjectCls){activeTab="subjecthome";renderSubjectTeacherHome(main,null);return;}
@@ -853,7 +863,7 @@ function render(){
 function renderClassPicker(){
   const sel = document.getElementById("classSelect");
   const label=document.getElementById("classPickerLabel");
-  const adviserMode=roleForTab(activeTab)==="adviser";
+  const adviserMode=roleForTab(activeTab)==="adviser"||activeTab==="welcome";
   if(sel) sel.style.display=adviserMode?"none":"";
   if(label) label.style.display=adviserMode?"none":"";
   const actions=document.getElementById("sidebarClassActions");
@@ -1237,12 +1247,13 @@ function renderSf9Setup(main, cls){
 function renderCategoryEditor(cls, key){
   const cat = cls.categories[key];
   const allowCustomWeights = key === "EXAM";
+  const fixedItems = key === "WW" || key === "PT";
   const rows = cat.components.map(c=>`
     <tr data-comp="${esc(c.id)}">
-      <td><input type="text" class="comp-name" value="${esc(c.name)}" style="width:110px;"></td>
+      <td><input type="text" class="comp-name" ${fixedItems?'readonly aria-readonly="true"':''} value="${esc(c.name)}" style="width:110px;"></td>
       <td><input type="number" class="comp-hps" value="${esc(c.hps)}" min="0" step="1" style="width:70px;"></td>
       ${allowCustomWeights ? `<td>${cat.mode==="custom" ? `<input type="number" class="comp-subweight" value="${esc(c.subWeight)}" min="0" step="1" style="width:70px;">` : `<span class="hint">auto</span>`}</td>` : ""}
-      <td><button class="small danger comp-remove icon-remove" type="button" aria-label="Remove item" title="Remove item"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 6h18M9 6V4h6v2M5 6l1 14h12l1-14M10 10v6M14 10v6"/></svg></button></td>
+      ${fixedItems ? "" : `<td><button class="small danger comp-remove icon-remove" type="button" aria-label="Remove item" title="Remove item"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 6h18M9 6V4h6v2M5 6l1 14h12l1-14M10 10v6M14 10v6"/></svg></button></td>`}
     </tr>`).join("");
   return `
     <section class="cat-editor" data-cat="${key}">
@@ -1254,12 +1265,12 @@ function renderCategoryEditor(cls, key){
       </div>
       <div class="comp-table-wrap">
         <table class="data comp-table">
-          <thead><tr><th style="text-align:left;">Item</th><th>HPS</th>${allowCustomWeights ? "<th>Item Weight %</th>" : ""}<th>Actions</th></tr></thead>
+          <thead><tr><th style="text-align:left;">Item</th><th>HPS</th>${allowCustomWeights ? "<th>Item Weight %</th>" : ""}${fixedItems ? "" : "<th>Actions</th>"}</tr></thead>
           <tbody>${rows}</tbody>
         </table>
       </div>
       <div class="hint hps-legend">* HPS — Highest Possible Score</div>
-      <button class="small primary comp-add" type="button">+ Add item</button>
+      ${fixedItems ? "" : `<button class="small primary comp-add" type="button">+ Add item</button>`}
     </section>`;
 }
 
@@ -1277,14 +1288,14 @@ function bindCategoryEditorEvents(cls){
       cat.mode = e.target.checked ? "custom" : "simple";
       saveState(); render();
     });
-    section.querySelector(".comp-add").addEventListener("click", ()=>{
+    section.querySelector(".comp-add")?.addEventListener("click", ()=>{
       cat.components.push({id:uid("c"), name:"Item "+(cat.components.length+1), hps:50, subWeight:0});
       saveState(); render();
     });
     section.querySelectorAll("tr[data-comp]").forEach(row=>{
       const cid = row.dataset.comp;
       const comp = cat.components.find(c=>c.id===cid);
-      row.querySelector(".comp-name").addEventListener("change", e=>{comp.name=e.target.value; saveState(); renderClassPicker();});
+      row.querySelector(".comp-name").addEventListener("change", e=>{if(key==="WW"||key==="PT")return;comp.name=e.target.value; saveState(); renderClassPicker();});
       row.querySelector(".comp-hps").addEventListener("change", e=>{
         const n=Number(e.target.value),old=Number(comp.hps||0);
         const maxScore=maxExistingScoreForComponent(cls,key,cid);
@@ -1300,7 +1311,7 @@ function bindCategoryEditorEvents(cls){
         if(!Number.isFinite(n)||n<0||n>100){alert("Item weight must be from 0% to 100%.");e.target.value=old;return;}
         comp.subWeight=n;saveState();updateWeightTotal(cls);
       });
-      row.querySelector(".comp-remove").addEventListener("click", ()=>{
+      row.querySelector(".comp-remove")?.addEventListener("click", ()=>{
         cat.components = cat.components.filter(c=>c.id!==cid);
         saveState(); render();
       });
@@ -3655,6 +3666,7 @@ document.getElementById("btnNewClass").addEventListener("click", async ()=>{
   if(name===null) return;
   const c = newClass(name);
   APP.classes[c.id] = c; APP.activeId = c.id;
+  if(activeTab==="welcome") activeTab="setup";
   saveState(); render();
 });
 document.getElementById("btnDupClass").addEventListener("click", ()=>{
@@ -3677,6 +3689,7 @@ document.getElementById("btnExport").addEventListener("click", async ()=>{
   if(window.eclassAPI && window.eclassAPI.exportBackup){
     const result = await window.eclassAPI.exportBackup(JSON.stringify(APP,null,2));
     if(result && result.ok){
+      welcomeMarkBackup();
       const el = document.getElementById("statusLeft");
       if(el) el.textContent = "Backup exported.";
     }
@@ -3687,6 +3700,8 @@ document.getElementById("btnExport").addEventListener("click", async ()=>{
   const a = document.createElement("a");
   a.href = url; a.download = "eclass-record-backup-"+new Date().toISOString().slice(0,10)+".json";
   a.click(); URL.revokeObjectURL(url);
+  const backupStatus=document.getElementById("welcomeBackupStatus");
+  if(backupStatus) backupStatus.textContent="Backup download requested. Check your browser downloads.";
 });
 function validateBackupForImport(data){
   if(!data || typeof data!=="object" || Array.isArray(data) || !data.classes || typeof data.classes!=="object" || Array.isArray(data.classes) || !Object.keys(data.classes).length) throw new Error("Not a valid E-Class Record backup file.");

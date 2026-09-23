@@ -1,0 +1,135 @@
+.welcome-page{position:relative;isolation:isolate;min-height:calc(100vh - 120px);overflow:hidden;border-radius:20px;background:var(--surface);border:1px solid var(--border);box-shadow:0 12px 40px var(--shadow);font-family:var(--sans);}
+.welcome-background{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:.23;z-index:-2;pointer-events:none;animation:welcome-photo-in 650ms ease-out;}
+.welcome-page::before{content:"";position:absolute;inset:0;background:linear-gradient(110deg,rgba(247,251,251,.94),rgba(247,251,251,.64) 60%,rgba(247,251,251,.35));z-index:-1;pointer-events:none;}
+.welcome-content{padding:clamp(20px,3vw,42px);color:var(--text-primary);}
+.welcome-brand{display:flex;align-items:center;gap:14px;flex-wrap:wrap;font-size:13px;color:var(--text-secondary);}
+.welcome-brand strong{font-size:27px;letter-spacing:2px;color:var(--accent);}
+.welcome-offline{margin-left:auto;font-size:11px;border:1px solid var(--border-strong);border-radius:20px;padding:5px 10px;}
+.welcome-hero{display:flex;justify-content:space-between;gap:24px;align-items:center;margin:44px 0 36px;}
+.welcome-person{display:flex;gap:20px;align-items:center;min-width:0;}
+.welcome-person>div:last-child{min-width:0;}
+.welcome-avatar{width:84px;height:84px;flex:0 0 84px;border-radius:50%;overflow:hidden;background:var(--accent-fill);color:var(--on-accent);display:flex;align-items:center;justify-content:center;font-size:28px;font-weight:750;border:4px solid var(--surface);box-shadow:0 4px 18px var(--shadow);}
+.welcome-avatar img{width:100%;height:100%;object-fit:cover;}
+.welcome-eyebrow{font-size:10px;letter-spacing:1.5px;font-weight:800;color:var(--accent);margin:0 0 8px;}
+.welcome-person h1{font-family:var(--sans);font-size:clamp(24px,2.4vw,36px);line-height:1.2;margin:0 0 10px;overflow-wrap:anywhere;}
+.welcome-school{font-size:13px;line-height:1.5;margin:0 0 12px;overflow-wrap:anywhere;}
+.welcome-time{flex:0 0 auto;text-align:right;}
+.welcome-time time{font-size:clamp(22px,2.5vw,34px);font-weight:650;font-variant-numeric:tabular-nums;white-space:nowrap;}
+.welcome-time p{font-size:12px;margin:7px 0;}
+.welcome-time span{font-size:10px;color:var(--text-secondary);}
+.welcome-actions{display:grid;grid-template-columns:1.2fr 1fr 1fr;gap:16px;}
+.welcome-action{display:flex;flex-direction:column;align-items:flex-start;padding:24px;border:1px solid var(--border);background:var(--surface-raised);border-radius:14px;box-shadow:0 5px 20px var(--shadow);min-width:0;}
+.welcome-action h2{font-family:var(--sans);font-size:20px;margin:3px 0 10px;}
+.welcome-action p{font-size:13px;line-height:1.55;margin:0 0 22px;overflow-wrap:anywhere;}
+.welcome-action button{margin-top:auto;white-space:normal;}
+.welcome-continue{border-top:3px solid var(--accent);}
+.welcome-tools{margin:24px 0;display:flex;justify-content:space-between;gap:16px;align-items:center;flex-wrap:wrap;}
+.welcome-tool-buttons{display:flex;gap:8px;flex-wrap:wrap;}
+.welcome-tools p{font-size:11px;color:var(--text-secondary);margin:0;}
+.welcome-profile{background:var(--surface-raised);border:1px solid var(--border);border-radius:12px;padding:16px 20px;}
+.welcome-profile summary{cursor:pointer;font-weight:700;font-size:13px;}
+.welcome-profile form>p{font-size:12px;line-height:1.5;}
+.welcome-profile-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px 20px;margin-top:20px;}
+.welcome-profile input:not([type=checkbox]),.welcome-profile select{width:100%;min-width:0;box-sizing:border-box;}
+.welcome-profile input[type=file]{font-size:12px;}
+.welcome-profile small,.welcome-local-note{font-size:11px;color:var(--text-secondary);}
+.welcome-local-note{margin-left:12px;}
+.welcome-profile .welcome-check,.welcome-check{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:400;text-transform:none;letter-spacing:0;margin-top:8px;}
+.welcome-error{color:var(--red-pen);min-height:18px;}
+.welcome-footer{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:24px;font-size:11px;color:var(--text-secondary);}
+html[data-theme="dark"] .welcome-page::before{background:linear-gradient(110deg,rgba(24,28,33,.96),rgba(24,28,33,.78) 60%,rgba(24,28,33,.6));}
+html[data-theme="dark"] .welcome-background{opacity:.3;}
+html[data-theme="dark"] .welcome-eyebrow,html[data-theme="dark"] .welcome-brand strong{color:#a9dedd;}
+@keyframes welcome-photo-in{from{opacity:0;}to{opacity:.23;}}
+@media(max-width:1180px){.welcome-hero{align-items:flex-start;flex-direction:column;margin-top:30px;}.welcome-time{text-align:left;}.welcome-actions{grid-template-columns:1fr;}.welcome-action{padding:20px;}}
+@media(max-width:500px){.welcome-person{align-items:flex-start;gap:12px;}.welcome-avatar{width:56px;height:56px;flex-basis:56px;font-size:20px;}.welcome-brand{gap:8px;}.welcome-brand span:not(.welcome-offline){width:100%;order:3;}.welcome-profile-grid{grid-template-columns:1fr;}.welcome-local-note{display:block;margin:10px 0 0;}.welcome-footer{align-items:flex-start;}.welcome-profile{padding:14px;}.welcome-content{padding:18px;}}
+@media(prefers-reduced-motion:reduce){.welcome-background{animation:none;}}
+@media print{.welcome-page{display:none!important;}}
+/* Welcome composition: open classroom at left, soft profile panel at right. */
+.welcome-background{opacity:.9;object-position:center;animation-name:welcome-scene-in;}
+.welcome-page::before{background:linear-gradient(90deg,rgba(247,251,251,.06) 0%,rgba(247,251,251,.16) 38%,rgba(247,251,251,.72) 100%);}
+.welcome-content{box-sizing:border-box;min-height:calc(100vh - 120px);display:flex;flex-direction:column;}
+.welcome-brand{align-self:flex-start;background:rgba(247,251,251,.9);border-radius:14px;padding:10px 16px;}
+.welcome-hero{box-sizing:border-box;align-self:flex-end;width:min(460px,52%);display:flex;flex-direction:column;align-items:stretch;gap:20px;margin:24px 0 32px;padding:28px;border-radius:28px;background:rgba(247,251,251,.88);border:1px solid rgba(255,255,255,.65);box-shadow:0 12px 40px rgba(17,52,61,.14);backdrop-filter:blur(8px);}
+.welcome-person{align-items:flex-start;gap:16px;}
+.welcome-person h1{font-size:clamp(23px,2vw,31px);}
+.welcome-avatar{width:64px;height:64px;flex-basis:64px;font-size:23px;}
+.welcome-time{text-align:left;border-top:1px solid var(--border);padding-top:16px;}
+.welcome-bottom{margin-top:auto;}
+.welcome-actions{grid-template-columns:repeat(3,minmax(0,1fr));}
+.welcome-action{padding:20px;background:rgba(247,251,251,.94);}
+.welcome-tools,.welcome-footer{background:rgba(247,251,251,.92);border-radius:12px;padding:10px 14px;margin:12px 0 0;}
+.welcome-profile{box-sizing:border-box;width:min(620px,calc(100vw - 32px));max-height:calc(100vh - 40px);overflow:auto;margin:auto;padding:24px;color:var(--text-primary);background:var(--surface-raised);box-shadow:0 24px 80px rgba(0,0,0,.3);border-radius:22px;}
+.welcome-profile::backdrop{background:rgba(10,28,34,.58);backdrop-filter:blur(4px);}
+.welcome-modal-heading{display:flex;align-items:center;justify-content:space-between;gap:16px;}
+.welcome-modal-heading h2{margin:0;font-size:23px;}
+html[data-theme="dark"] .welcome-background{opacity:.75;}
+html[data-theme="dark"] .welcome-page::before{background:linear-gradient(90deg,rgba(24,28,33,.1),rgba(24,28,33,.25) 40%,rgba(24,28,33,.6));}
+html[data-theme="dark"] .welcome-hero,html[data-theme="dark"] .welcome-brand,html[data-theme="dark"] .welcome-action,html[data-theme="dark"] .welcome-tools,html[data-theme="dark"] .welcome-footer{background:rgba(24,35,40,.94);border-color:var(--border);}
+@keyframes welcome-scene-in{from{opacity:0;}to{opacity:.9;}}
+@media(max-width:1000px){.welcome-hero{width:min(460px,75%);}.welcome-actions{gap:10px;}.welcome-action{padding:14px;}.welcome-action h2{font-size:17px;}}
+@media(max-width:700px){.welcome-hero{width:100%;margin-top:70px;padding:20px;}.welcome-actions{grid-template-columns:1fr;}.welcome-profile-grid{grid-template-columns:1fr;}.welcome-local-note{display:block;margin:10px 0 0;}}
+.welcome-button-icon{width:17px;height:17px;display:inline-block;vertical-align:-3px;margin-right:7px;flex-shrink:0;pointer-events:none;}
+
+/* Keep the navigation cards close to the bottom of the welcome screen. */
+.welcome-content{padding-bottom:16px;}
+.welcome-bottom{margin-top:auto;padding-top:24px;}
+
+/* Unboxed welcome branding with a larger title and stacked tagline. */
+.welcome-brand{display:flex;flex-direction:column;align-items:flex-start;gap:6px;background:transparent;padding:0;border:0;border-radius:0;box-shadow:none;}
+.welcome-brand strong{font-size:clamp(44px,5vw,68px);line-height:1.05;letter-spacing:3px;color:var(--accent);-webkit-text-stroke:1px rgba(255,255,255,.85);paint-order:stroke fill;text-shadow:0 2px 3px rgba(255,255,255,.9),0 4px 14px rgba(0,35,43,.45);}
+.welcome-brand>span:not(.welcome-offline){font-size:clamp(15px,1.5vw,20px);font-weight:600;color:var(--text-primary);-webkit-text-stroke:2px rgba(255,255,255,.8);paint-order:stroke fill;text-shadow:0 2px 8px rgba(255,255,255,.95);order:0;width:auto;}
+.welcome-brand .welcome-offline{margin:4px 0 0;border:0;padding:0;font-weight:600;color:var(--text-primary);text-shadow:0 0 3px #fff,0 0 7px #fff;}
+html[data-theme="dark"] .welcome-brand{background:transparent;border:0;}
+html[data-theme="dark"] .welcome-brand strong{color:#b5efeb;-webkit-text-stroke-color:rgba(13,39,45,.9);text-shadow:0 2px 4px #102c33,0 4px 16px rgba(0,0,0,.7);}
+html[data-theme="dark"] .welcome-brand>span:not(.welcome-offline){color:#edfafa;-webkit-text-stroke-color:rgba(13,39,45,.9);text-shadow:0 2px 8px #102c33;}
+html[data-theme="dark"] .welcome-brand .welcome-offline{color:#edfafa;text-shadow:0 0 3px #102c33,0 0 7px #102c33;}
+/* Stronger welcome branding contrast over the classroom image. */
+.welcome-brand strong{font-size:clamp(64px,7.5vw,104px);font-weight:900;letter-spacing:4px;color:#006774;-webkit-text-stroke:3px #fff;paint-order:stroke fill;text-shadow:0 3px 2px rgba(0,27,35,.65),0 6px 16px rgba(0,27,35,.65);}
+.welcome-brand>span:not(.welcome-offline){font-size:clamp(19px,2vw,28px);font-weight:800;color:#073e50;-webkit-text-stroke:3px #fff;paint-order:stroke fill;text-shadow:0 2px 3px rgba(0,27,35,.5),0 4px 10px rgba(0,27,35,.3);}
+html[data-theme="dark"] .welcome-brand strong{color:#b5fffa;-webkit-text-stroke:3px #07333d;text-shadow:0 3px 2px #031d25,0 6px 18px #031d25;}
+html[data-theme="dark"] .welcome-brand>span:not(.welcome-offline){color:#fff;-webkit-text-stroke:3px #07333d;text-shadow:0 3px 8px #031d25;}
+/* Enlarged banner with a bundled vector emblem and a slow text shimmer. */
+.welcome-brand{flex-direction:row;align-items:center;gap:24px;max-width:100%;}
+.welcome-logo{width:clamp(80px,12vw,170px);height:auto;flex-shrink:0;filter:drop-shadow(0 5px 8px rgba(0,30,40,.5));}
+.welcome-brand-copy{display:flex;flex-direction:column;align-items:flex-start;min-width:0;}
+.welcome-brand strong{font-size:clamp(64px,13.125vw,182px);line-height:1.05;}
+.welcome-brand .welcome-tagline{display:block;font-size:clamp(20px,3.5vw,49px);font-weight:800;line-height:1.2;color:#073e50;-webkit-text-stroke:3px #fff;paint-order:stroke fill;text-shadow:0 3px 7px rgba(0,27,35,.6);overflow-wrap:anywhere;}
+.welcome-brand .welcome-offline{display:block;margin-top:12px;}
+@supports(background-clip:text){.welcome-brand strong{background:linear-gradient(110deg,#006774 0%,#006774 40%,#e5ffff 49%,#58c8cb 53%,#006774 62%,#006774 100%);background-size:300% 100%;background-clip:text;-webkit-background-clip:text;color:transparent!important;animation:klas-shine 7s ease-in-out infinite;}}
+@keyframes klas-shine{0%,25%{background-position:100% 0;}65%,100%{background-position:0% 0;}}
+html[data-theme="dark"] .welcome-brand .welcome-tagline{color:#fff;-webkit-text-stroke-color:#07333d;}
+@media(max-width:700px){.welcome-brand{gap:12px;}.welcome-logo{width:64px;}.welcome-brand strong{font-size:clamp(44px,12vw,84px);letter-spacing:1px;}.welcome-brand .welcome-tagline{font-size:clamp(17px,4vw,26px);-webkit-text-stroke-width:2px;}}
+@media(prefers-reduced-motion:reduce){.welcome-brand strong{animation:none;background-position:100% 0;}}
+/* Approved 3D identity and expanded teacher profile. */
+.welcome-logo{width:clamp(100px,15vw,210px);}
+.welcome-brand strong{color:#087c88;text-shadow:0 5px 3px rgba(0,27,35,.7),0 12px 22px rgba(0,27,35,.65);}
+.welcome-brand .welcome-tagline{font-style:italic;}
+@supports(background-clip:text){.welcome-brand strong{background-image:linear-gradient(110deg,#087c88 0%,#087c88 40%,#f0ffff 49%,#8be6e5 53%,#087c88 62%,#087c88 100%);}}
+/* Moving the oversized gradient from right to left moves its highlight across the text left to right. */
+@keyframes klas-shine{0%,25%{background-position:100% 0;}65%,100%{background-position:0% 0;}}
+.welcome-hero{width:min(620px,62%);}
+.welcome-avatar{width:140px;height:140px;flex-basis:140px;font-size:44px;}
+.welcome-employee{font-size:13px;font-weight:600;margin:12px 0 0;overflow-wrap:anywhere;}
+.welcome-profile-details{margin-top:26px;}
+.welcome-bottom{border-top:2px solid rgba(0,103,116,.75);padding-top:20px;}
+html[data-theme="dark"] .welcome-bottom{border-top-color:#81c9cf;}
+@media(max-width:1000px){.welcome-hero{width:min(620px,85%);}.welcome-avatar{width:110px;height:110px;flex-basis:110px;font-size:36px;}}
+@media(max-width:700px){.welcome-logo{width:64px;}.welcome-hero{width:100%;}.welcome-avatar{width:76px;height:76px;flex-basis:76px;font-size:25px;}.welcome-person{flex-wrap:wrap;}.welcome-profile-details{margin-top:20px;}}
+/* Keep the emblem beside the wordmark even when other brand rules wrap. */
+.welcome-brand{display:flex;flex-direction:row;flex-wrap:nowrap;align-items:center;gap:20px;width:100%;}
+.welcome-brand-copy{flex:1;min-width:0;}
+.welcome-logo{flex:0 0 auto;align-self:center;}
+/* A narrow rising diagonal highlight, clipped to the title lettering. */
+@supports(background-clip:text){.welcome-brand strong{display:inline-block;background-image:linear-gradient(55deg,#087c88 0%,#087c88 46%,#59bfc8 48%,#efffff 49%,#9de6ec 50%,#087c88 53%,#087c88 100%);background-size:300% 100%;}}
+@media(max-width:700px){.welcome-brand{flex-wrap:nowrap;gap:10px;}.welcome-logo{width:56px;}.welcome-brand strong{font-size:clamp(36px,10vw,70px);}.welcome-brand .welcome-tagline{font-size:clamp(16px,3.5vw,24px);}}
+/* Section divider: short solid accent joined to a fine muted rule. */
+.welcome-bottom{position:relative;border-top:0;padding-top:32px;}
+.welcome-bottom::before{content:"";position:absolute;top:0;left:0;right:0;height:2px;background:#99aeb7;pointer-events:none;}
+.welcome-bottom::after{content:"";position:absolute;top:0;left:0;width:14.3%;max-width:128px;height:12px;background:#216e8a;pointer-events:none;}
+html[data-theme="dark"] .welcome-bottom::before{background:#738e9a;}
+html[data-theme="dark"] .welcome-bottom::after{background:#73bfd0;}
+/* Approved kattokong banner is one transparent, offline artwork asset. */
+.welcome-artwork{display:block;width:100%;}
+.welcome-banner{display:block;width:100%;height:auto;object-fit:contain;filter:drop-shadow(0 3px 4px rgba(0,35,43,.25));}
+@media(max-width:700px){.welcome-artwork{display:block;}.welcome-banner{width:100%;}}
