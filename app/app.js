@@ -292,6 +292,20 @@ function classHasEncodedScores(cls){
   };
   return walk(cls&&cls.scores);
 }
+function categoryHasEncodedScores(cls,catKey){
+  for(const termKey of ["term1","term2","term3"]){
+    const term=cls&&cls.scores&&cls.scores[termKey]||{};
+    for(const scoreSet of Object.values(term)){
+      const values=scoreSet&&scoreSet[catKey]||{};
+      if(Object.values(values).some(v=>v!==null&&v!==undefined&&v!==""&&Number.isFinite(Number(v)))) return true;
+    }
+  }
+  return false;
+}
+function replaceObjectContents(target,source){
+  for(const key of Object.keys(target)) delete target[key];
+  Object.assign(target,source);
+}
 function ensureSubjectConfig(cls){
   if(!cls.subjectConfig || typeof cls.subjectConfig!=="object" || Array.isArray(cls.subjectConfig)) cls.subjectConfig={};
   const c=cls.subjectConfig;
@@ -583,12 +597,17 @@ function saveState(){
   // survive input/import -> JSON -> official-output round trips consistently.
   const serialized=JSON.stringify(APP,(_k,v)=>typeof v==="string"?unicodeText(v):v);
 
+  let localSaveOk=true;
   try{ localStorage.setItem(STORE_KEY,serialized); }
-  catch(err){ console.warn("Local recovery save failed",err); }
+  catch(err){ localSaveOk=false; console.warn("Local recovery save failed",err); }
 
   if(!(window.eclassAPI && typeof window.eclassAPI.saveData==="function")){
-    setSaveStatus("Saved locally " + new Date().toLocaleTimeString());
-    return Promise.resolve({ok:true,localOnly:true});
+    if(localSaveOk){
+      setSaveStatus("Saved locally " + new Date().toLocaleTimeString());
+      return Promise.resolve({ok:true,localOnly:true});
+    }
+    setSaveStatus("⚠ NOT SAVED — browser storage is unavailable",true);
+    return Promise.resolve({ok:false,localOnly:true,error:"Local browser storage write failed."});
   }
 
   setSaveStatus("Saving…");
@@ -612,6 +631,9 @@ function schoolLogoDataUri(){
 
 function ensureAppSettings(){
   if(!APP.settings || typeof APP.settings !== "object") APP.settings = {};
+  if(APP.settings.welcome && typeof APP.settings.welcome==="object" && !Array.isArray(APP.settings.welcome)){
+    delete APP.settings.welcome.skipStartup;
+  }
   return APP.settings;
 }
 
@@ -626,7 +648,7 @@ function resizeSchoolLogo(file){
     }
     const reader = new FileReader();
     reader.onerror = ()=>reject(new Error("The selected image could not be read."));
-    reader.onload = ()=>{
+    reader.onload = async ()=>{
       const img = new Image();
       img.onerror = ()=>reject(new Error("The selected file is not a readable image."));
       img.onload = ()=>{
@@ -744,72 +766,121 @@ function studentFinalResult(cls, studentId){
   const terms = ["term1","term2","term3"].map(t=>studentTermResult(cls,t,studentId).term).filter(v=>v!==null && v!==undefined);
   if(!terms.length) return {final:null, band:null, count:0};
   const final = averageWhole(terms);
-  const t = transmute(final);
-  return {final, band: t?t.band:null, count: terms.length};
+  return {final, band: bandFor(final), count: terms.length};
 }
 
 /* =========================================================================
    RENDER: shell
    ========================================================================= */
-const SUBJECT_WORKFLOW_TABS=new Set(["subjecthome","setup","term1","term2","term3","final"]);
+const SUBJECT_WORKFLOW_TABS=new Set(["subjecthome","gradinghome","setup","classroster","term1","term2","term3","final"]);
 const ADVISER_WORKFLOW_TABS=new Set(["adviserhome","roster","sf2","advisersummary","sf5","report","sf9setup","sf10"]);
+const VALID_WORKFLOW_TABS=new Set(["welcome",...SUBJECT_WORKFLOW_TABS,...ADVISER_WORKFLOW_TABS]);
+const RETURN_PARENT_TAB={
+  setup:"subjecthome",
+  classroster:"subjecthome",
+  gradinghome:"subjecthome",
+  term1:"gradinghome",
+  term2:"gradinghome",
+  term3:"gradinghome",
+  final:"gradinghome",
+  roster:"adviserhome",
+  sf2:"adviserhome",
+  advisersummary:"adviserhome",
+  sf5:"adviserhome",
+  report:"adviserhome",
+  sf10:"adviserhome"
+};
+let sf9SetupReturnTab="adviserhome";
 function roleForTab(tab){
   if(ADVISER_WORKFLOW_TABS.has(tab)) return "adviser";
   return "subject";
 }
-function subjectWorkflowKey(tab){
-  if(tab==="setup") return "classes";
-  if(["term1","term2","term3","final"].includes(tab)) return "record";
-  return "";
+function sidebarLocationTabs(el){
+  return String(el&&el.dataset&&el.dataset.locationTabs||"").trim().split(/\s+/).filter(Boolean);
 }
-function adviserWorkflowKey(tab){
-  if(tab==="roster") return "sf1";
-  if(tab==="sf2") return "sf2";
-  if(tab==="advisersummary") return "summary";
-  if(tab==="sf5") return "sf5";
-  if(tab==="report"||tab==="sf9setup") return "sf9";
-  if(tab==="sf10") return "sf10";
-  return "";
+function updateSidebarLocation(){
+  document.querySelectorAll("#tabs [data-location-tabs]").forEach(el=>{
+    el.classList.toggle("active", sidebarLocationTabs(el).includes(activeTab));
+  });
+  const adviserNav=document.getElementById("adviserFunctions");
+  if(adviserNav) adviserNav.hidden=!adviserSf1Ready(ensureAdviserWorkspace());
 }
-function workflowNavHtml(role,current){
-  if(role==="subject"){
-    const key=subjectWorkflowKey(current);
-    return `<div class="workflow-nav no-print"><span class="workflow-label">Subject Teacher</span>
-      <button class="small ${key==="classes"?"active":""}" data-go-tab="setup">Classes</button>
-      <button class="small ${key==="record"?"active":""}" data-go-tab="term1">Class Record</button>
-    </div>`;
+function renderClassPicker(){
+  const sel=document.getElementById("workspaceClassSelect");
+  if(!sel) return;
+  const classes=Object.values(APP.classes||{}).sort((a,b)=>a.createdAt-b.createdAt);
+  sel.innerHTML=classes.map(c=>`<option value="${esc(c.id)}" ${c.id===APP.activeId?"selected":""}>${esc(c.meta&&c.meta.className||"(untitled class)")}</option>`).join("");
+  sel.disabled=!classes.length;
+}
+function returnTargetFor(tab){
+  if(tab==="sf9setup") return sf9SetupReturnTab==="report"?"report":"adviserhome";
+  return RETURN_PARENT_TAB[tab]||null;
+}
+function navigateToTab(next,{termView=""}={}){
+  next=String(next||"").trim();
+  if(!VALID_WORKFLOW_TABS.has(next)){
+    console.warn("KLAS navigation ignored unknown tab:",next);
+    return false;
   }
-  const key=adviserWorkflowKey(current);
-  return `<div class="workflow-nav no-print"><span class="workflow-label">Adviser</span>
-    <button class="small ${key==="sf1"?"active":""}" data-go-tab="roster">SF1</button>
-    <button class="small ${key==="sf2"?"active":""}" data-go-tab="sf2">SF2</button>
-    <button class="small ${key==="summary"?"active":""}" data-go-tab="advisersummary">Summary of Subject Grades</button>
-    <button class="small ${key==="sf5"?"active":""}" data-go-tab="sf5">SF5</button>
-    <button class="small ${key==="sf9"?"active":""}" data-go-tab="report">SF9</button>
-    <button class="small ${key==="sf10"?"active":""}" data-go-tab="sf10">SF10</button>
+  if(termView && Object.prototype.hasOwnProperty.call(TERM_VIEW_MODE,next)) TERM_VIEW_MODE[next]=termView;
+  if(next==="sf9setup") sf9SetupReturnTab=activeTab==="report"?"report":"adviserhome";
+
+  if(SUBJECT_WORKFLOW_TABS.has(next) && next!=="subjecthome" && !activeClass()){
+    next="subjecthome";
+  }
+  if(ADVISER_WORKFLOW_TABS.has(next) && next!=="adviserhome" && !adviserSf1Ready(ensureAdviserWorkspace())){
+    next="adviserhome";
+  }
+
+  activeTab=next;
+  render();
+  return true;
+}
+function shellNavHtml(current){
+  const parent=returnTargetFor(current);
+  if(current==="welcome") return "";
+  let returnLabel="← Return";
+  if(["term1","term2","term3","final"].includes(current)) returnLabel="← Return to Grading";
+  else if(["roster","sf2","advisersummary","sf5","report","sf10"].includes(current)) returnLabel="← Return to Advisory";
+  else if(current==="sf9setup"&&returnTargetFor(current)==="report") returnLabel="← Return to SF9";
+  return `<div class="page-shell-nav no-print" role="navigation" aria-label="Page navigation">
+    ${parent?`<button type="button" class="page-shell-btn return" data-shell-nav="return" aria-label="${esc(returnLabel.replace(/^←\s*/,""))}">${returnLabel}</button>`:"<span></span>"}
+    <button type="button" class="page-shell-btn home" data-shell-nav="home" aria-label="Go to KLAS Home">⌂ Home</button>
   </div>`;
 }
-function prependWorkflowNavigation(main,current){
-  const role=roleForTab(current);
+function prependPageNavigation(main,current){
+  const html=shellNavHtml(current);
+  if(!html) return;
   const wrap=document.createElement("div");
-  wrap.innerHTML=workflowNavHtml(role,current);
+  wrap.innerHTML=html;
   if(wrap.firstElementChild) main.insertBefore(wrap.firstElementChild,main.firstChild);
-  if(["term1","term2","term3","final"].includes(current)){
-    const term=document.createElement("div");
-    term.className="term-nav no-print";
-    term.innerHTML=`<span class="workflow-label">Class Record Period</span>
-      <button class="small ${current==="term1"?"active":""}" data-go-tab="term1">Term 1</button>
-      <button class="small ${current==="term2"?"active":""}" data-go-tab="term2">Term 2</button>
-      <button class="small ${current==="term3"?"active":""}" data-go-tab="term3">Term 3</button>
-      <button class="small ${current==="final"?"active":""}" data-go-tab="final">Final Grades</button>`;
-    const nav=main.querySelector(".workflow-nav");
-    if(nav&&nav.nextSibling) main.insertBefore(term,nav.nextSibling); else main.appendChild(term);
-  }
+}
+function subjectClassControlHtml(cls){
+  const classes=Object.values(APP.classes||{}).sort((a,b)=>a.createdAt-b.createdAt);
+  const options=classes.map(c=>`<option value="${esc(c.id)}" ${c.id===APP.activeId?"selected":""}>${esc(c.meta&&c.meta.className||"(untitled class)")}</option>`).join("");
+  return `<div class="workspace-class-controls no-print" aria-label="Subject class controls">
+    <label class="workspace-class-picker"><span>Subject class</span><select id="workspaceClassSelect" title="Active Subject Teacher class" ${classes.length?"":"disabled"}>${options}</select></label>
+    <div class="workspace-class-actions">
+      <button type="button" class="primary" data-class-action="new">+ New Class</button>
+      <button type="button" class="primary" data-class-action="duplicate" ${cls?"":"disabled"}>Duplicate Class</button>
+      <button type="button" class="danger icon-remove" data-class-action="delete" ${cls&&classes.length>1?"":"disabled"} aria-label="Delete class" title="Delete class"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 6h18M9 6V4h6v2M5 6l1 14h12l1-14M10 10v6M14 10v6"/></svg></button>
+    </div>
+  </div>`;
+}
+function prependSubjectClassControls(main,cls,current){
+  // The approved v1.5.0 mockup keeps overview/grading pages visually clean.
+  // Class switching/management stays available inside the class-management views.
+  if(!["setup","classroster"].includes(current)) return;
+  const wrap=document.createElement("div");
+  wrap.innerHTML=subjectClassControlHtml(cls);
+  const nav=main.querySelector(".page-shell-nav");
+  if(nav&&nav.nextSibling) main.insertBefore(wrap.firstElementChild,nav.nextSibling);
+  else if(nav) main.appendChild(wrap.firstElementChild);
+  else if(wrap.firstElementChild) main.insertBefore(wrap.firstElementChild,main.firstChild);
 }
 let lastAnimatedTab = null;
 function render(){
   if(activeTab==="summary") activeTab="final";
-  renderClassPicker();
   const subjectCls=activeClass();
   if(subjectCls){
     subjectCls.domain="subject";
@@ -817,19 +888,14 @@ function render(){
     ensureClassRecordSubject(subjectCls);
   }
   const adviserCls=ensureAdviserWorkspace();
-  const role=roleForTab(activeTab);
+  let role=roleForTab(activeTab);
   const adviserReady=adviserSf1Ready(adviserCls);
-  const adviserNav=document.getElementById("adviserFunctions");
-  if(adviserNav) adviserNav.hidden=!adviserReady;
-  if(role==="adviser"&&!adviserReady) activeTab="adviserhome";
-  document.querySelectorAll("nav.tabs .tab").forEach(b=>{
-    b.classList.toggle("active", b.dataset.tab === activeTab);
-  });
-  const activeSidebarTab=document.querySelector(`nav.tabs .tab[data-tab="${activeTab}"]`);
-  const activeSection=activeSidebarTab&&activeSidebarTab.closest("details.nav-disclosure");
-  if(activeSection) activeSection.open=true;
+  if(role==="adviser"&&!adviserReady&&activeTab!=="adviserhome") activeTab="adviserhome";
+  role=roleForTab(activeTab);
+  updateSidebarLocation();
   welcomeRememberView();
   const main = document.getElementById("main");
+  main.dataset.klasPage=activeTab;
   main.classList.toggle("view-enter", lastAnimatedTab !== activeTab);
   if(lastAnimatedTab !== activeTab){
     main.classList.remove("view-enter");
@@ -838,60 +904,110 @@ function render(){
     lastAnimatedTab = activeTab;
   }
   main.innerHTML = "";
-  if(activeTab==="welcome"){renderWelcome(main);return;}
-  if(activeTab==="subjecthome"){renderSubjectTeacherHome(main,subjectCls);return;}
-  if(activeTab==="adviserhome"){renderAdviserHome(main,adviserCls);return;}
-  if(role==="subject"&&!subjectCls){activeTab="subjecthome";renderSubjectTeacherHome(main,null);return;}
-  const cls=role==="adviser"?adviserCls:subjectCls;
-  if(activeTab==="setup") renderSetup(main, cls);
-  else if(activeTab==="classroster") renderClassRoster(main, cls);
-  else if(activeTab==="sf9setup") renderSf9Setup(main, cls);
-  else if(activeTab==="roster") renderRoster(main, cls);
-  else if(activeTab==="sf2") renderSf2(main, cls);
-  else if(activeTab==="advisersummary") renderSummary(main, cls);
-  else if(activeTab==="sf5") renderComingSoon(main,"SF5","School Form 5","The official template and computation logic will be added after we establish the SF5 specification. Its learner identity and subject-grade data will come from the Adviser SF1 domain.");
-  else if(activeTab==="sf10") renderComingSoon(main,"SF10","School Form 10","The official template and learner-record logic will be added after the new SF10 specification is established. Its learner identity will come from the Adviser SF1 domain.");
-  else if(activeTab==="term1") renderTerm(main, cls, "term1", "Term 1");
-  else if(activeTab==="term2") renderTerm(main, cls, "term2", "Term 2");
-  else if(activeTab==="term3") renderTerm(main, cls, "term3", "Term 3");
-  else if(activeTab==="final") renderFinal(main, cls);
-  else if(activeTab==="report") renderReport(main, cls);
-  else {activeTab=role==="adviser"?"adviserhome":"subjecthome";role==="adviser"?renderAdviserHome(main,adviserCls):renderSubjectTeacherHome(main,subjectCls);return;}
-  prependWorkflowNavigation(main,activeTab);
+  if(activeTab==="welcome"){
+    renderWelcome(main);
+    return;
+  }
+  try{
+  if(activeTab==="subjecthome") renderSubjectTeacherHome(main,subjectCls);
+  else if(activeTab==="gradinghome") renderGradingHome(main,subjectCls);
+  else if(activeTab==="adviserhome") renderAdviserHome(main,adviserCls);
+  else if(role==="subject"&&!subjectCls){
+    activeTab="subjecthome";
+    main.dataset.klasPage=activeTab;
+    updateSidebarLocation();
+    renderSubjectTeacherHome(main,null);
+  }else{
+    const cls=role==="adviser"?adviserCls:subjectCls;
+    if(activeTab==="setup") renderSetup(main, cls);
+    else if(activeTab==="classroster") renderClassRoster(main, cls);
+    else if(activeTab==="sf9setup") renderSf9Setup(main, cls);
+    else if(activeTab==="roster") renderRoster(main, cls);
+    else if(activeTab==="sf2") renderSf2(main, cls);
+    else if(activeTab==="advisersummary") renderSummary(main, cls);
+    else if(activeTab==="sf5") renderComingSoon(main,"SF5","School Form 5","The official template and computation logic will be added after we establish the SF5 specification. Its learner identity and subject-grade data will come from the Adviser SF1 domain.");
+    else if(activeTab==="sf10") renderComingSoon(main,"SF10","School Form 10","The official template and learner-record logic will be added after the new SF10 specification is established. Its learner identity will come from the Adviser SF1 domain.");
+    else if(activeTab==="term1") renderTerm(main, cls, "term1", "Term 1");
+    else if(activeTab==="term2") renderTerm(main, cls, "term2", "Term 2");
+    else if(activeTab==="term3") renderTerm(main, cls, "term3", "Term 3");
+    else if(activeTab==="final") renderFinal(main, cls);
+    else if(activeTab==="report") renderReport(main, cls);
+    else{
+      activeTab=role==="adviser"?"adviserhome":"subjecthome";
+      main.dataset.klasPage=activeTab;
+      updateSidebarLocation();
+      role==="adviser"?renderAdviserHome(main,adviserCls):renderSubjectTeacherHome(main,subjectCls);
+    }
+  }
+  }catch(err){
+    console.error("KLAS page render failed:",activeTab,err);
+    main.innerHTML=`<div class="card coming-soon-panel"><h2>Could not open this page</h2><p class="sub">${esc(err&&err.message?err.message:"A page error occurred.")}</p><div class="toolbar"><button type="button" data-go-tab="welcome">Home</button></div></div>`;
+  }
+  prependPageNavigation(main,activeTab);
+  prependSubjectClassControls(main,activeClass(),activeTab);
 }
 
-function renderClassPicker(){
-  const sel = document.getElementById("classSelect");
-  const label=document.getElementById("classPickerLabel");
-  const adviserMode=roleForTab(activeTab)==="adviser"||activeTab==="welcome";
-  if(sel) sel.style.display=adviserMode?"none":"";
-  if(label) label.style.display=adviserMode?"none":"";
-  const actions=document.getElementById("sidebarClassActions");
-  if(actions) actions.style.display=adviserMode?"none":"";
-  if(!sel) return;
-  sel.innerHTML = "";
-  Object.values(APP.classes||{}).sort((a,b)=>a.createdAt-b.createdAt).forEach(c=>{
-    const opt = document.createElement("option");
-    opt.value = c.id;
-    opt.textContent = c.meta.className || "(untitled class)";
-    if(c.id === APP.activeId) opt.selected = true;
-    sel.appendChild(opt);
-  });
+function workspaceIconSvg(kind){
+  switch(kind){
+    case "continue": return `<svg viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="22" fill="currentColor" opacity=".12"></circle><path d="M19 32h25M36 23l9 9-9 9" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"></path><path d="M19 23v18" stroke="currentColor" stroke-width="3" stroke-linecap="round" opacity=".55"></path></svg>`;
+    case "class": return `<svg viewBox="0 0 64 64" aria-hidden="true"><rect x="10" y="12" width="44" height="34" rx="4" fill="none" stroke="currentColor" stroke-width="3"></rect><path d="M16 19h32M18 50h28" stroke="currentColor" stroke-width="3" stroke-linecap="round"></path><circle cx="24" cy="29" r="5" fill="currentColor"></circle><circle cx="40" cy="29" r="5" fill="currentColor" opacity=".75"></circle><path d="M17 41c1-5 4-8 9-8s8 3 9 8M33 41c1-5 4-8 9-8s8 3 9 8" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"></path></svg>`;
+    case "adviser": return `<svg viewBox="0 0 64 64" aria-hidden="true"><circle cx="24" cy="23" r="7" fill="currentColor"></circle><circle cx="43" cy="25" r="6" fill="currentColor" opacity=".65"></circle><path d="M11 48c1.7-8 7-12 14-12s12.3 4 14 12" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"></path><path d="M37 46c1.2-5.4 4.9-8.3 9.5-8.3 3.4 0 6.6 1.8 8.5 5" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" opacity=".7"></path><path d="M46 12v10M41 17h10" stroke="currentColor" stroke-width="3" stroke-linecap="round"></path></svg>`;
+    case "setup": return `<svg viewBox="0 0 64 64" aria-hidden="true"><path d="M10 18h18l6 6h20v22a4 4 0 0 1-4 4H14a4 4 0 0 1-4-4V22a4 4 0 0 1 4-4Z" fill="currentColor" opacity=".16"></path><path d="M10 20a4 4 0 0 1 4-4h16l6 6h14a4 4 0 0 1 4 4v20a4 4 0 0 1-4 4H14a4 4 0 0 1-4-4V20Z" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round"></path><circle cx="43" cy="39" r="6.5" fill="none" stroke="currentColor" stroke-width="3"></circle><path d="M43 29v3M43 46v3M53 39h-3M36 39h-3M49.8 32.2l-2.1 2.1M38.3 43.7l-2.1 2.1M49.8 45.8l-2.1-2.1M38.3 34.3l-2.1-2.1" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"></path></svg>`;
+    case "roster": return `<svg viewBox="0 0 64 64" aria-hidden="true"><circle cx="23" cy="24" r="7" fill="currentColor"></circle><circle cx="41" cy="22" r="6" fill="currentColor" opacity=".78"></circle><circle cx="49" cy="31" r="4.5" fill="currentColor" opacity=".55"></circle><path d="M11 48c1.8-8 8-12 16-12s14.2 4 16 12" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"></path><path d="M34 47c1.4-5.7 6-8.8 11-8.8 4.2 0 8.1 2.1 10 5.8" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" opacity=".78"></path></svg>`;
+    case "grading": return `<svg viewBox="0 0 64 64" aria-hidden="true"><rect x="17" y="12" width="30" height="40" rx="4" fill="none" stroke="currentColor" stroke-width="3"></rect><path d="M24 12.5h16v7H24z" fill="currentColor" opacity=".18"></path><path d="M24 12.5h16v7H24z" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round"></path><path d="M24 29h16M24 37h10" stroke="currentColor" stroke-width="3" stroke-linecap="round"></path><path d="M39 41.5l3 3 7-8" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"></path></svg>`;
+    case "final": return `<svg viewBox="0 0 64 64" aria-hidden="true"><path d="M10 24 32 14l22 10-22 10-22-10Z" fill="currentColor" opacity=".16"></path><path d="M10 24 32 14l22 10-22 10-22-10Z" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round"></path><path d="M18 29v9c0 4 7 9 14 9s14-5 14-9v-9" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round"></path><path d="M54 25v12" stroke="currentColor" stroke-width="3" stroke-linecap="round"></path><circle cx="54" cy="40" r="3.5" fill="currentColor"></circle></svg>`;
+    case "sf1": return `<svg viewBox="0 0 64 64" aria-hidden="true"><rect x="15" y="12" width="34" height="40" rx="4" fill="none" stroke="currentColor" stroke-width="3"></rect><path d="M24 22h16M24 30h16M24 38h10" stroke="currentColor" stroke-width="3" stroke-linecap="round"></path><circle cx="20" cy="22" r="2" fill="currentColor"></circle><circle cx="20" cy="30" r="2" fill="currentColor"></circle><circle cx="20" cy="38" r="2" fill="currentColor"></circle></svg>`;
+    case "sf2": return `<svg viewBox="0 0 64 64" aria-hidden="true"><rect x="12" y="16" width="40" height="34" rx="5" fill="none" stroke="currentColor" stroke-width="3"></rect><path d="M20 12v8M44 12v8M12 26h40" stroke="currentColor" stroke-width="3" stroke-linecap="round"></path><path d="M24 37l5 5 11-12" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"></path></svg>`;
+    case "summary": return `<svg viewBox="0 0 64 64" aria-hidden="true"><path d="M16 48V18M16 48h32" stroke="currentColor" stroke-width="3" stroke-linecap="round"></path><rect x="22" y="31" width="6" height="11" rx="1.5" fill="currentColor" opacity=".55"></rect><rect x="31" y="25" width="6" height="17" rx="1.5" fill="currentColor" opacity=".75"></rect><rect x="40" y="19" width="6" height="23" rx="1.5" fill="currentColor"></rect><path d="M22 22c4-7 8-6 12-2s8 4 12-3" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"></path></svg>`;
+    case "sf5": return `<svg viewBox="0 0 64 64" aria-hidden="true"><path d="M20 15h24v14c0 10-7 17-12 20-5-3-12-10-12-20V15Z" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round"></path><path d="m32 23 2.6 5.3 5.9.9-4.2 4.1 1 5.8-5.3-2.8-5.3 2.8 1-5.8-4.2-4.1 5.9-.9L32 23Z" fill="currentColor" opacity=".22" stroke="currentColor" stroke-width="2" stroke-linejoin="round"></path></svg>`;
+    case "sf9": return `<svg viewBox="0 0 64 64" aria-hidden="true"><path d="M18 12h20l10 10v28a4 4 0 0 1-4 4H18a4 4 0 0 1-4-4V16a4 4 0 0 1 4-4Z" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round"></path><path d="M38 12v10h10" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round"></path><path d="M23 31h16M23 38h16M23 45h10" stroke="currentColor" stroke-width="3" stroke-linecap="round"></path></svg>`;
+    case "sf10": return `<svg viewBox="0 0 64 64" aria-hidden="true"><rect x="16" y="14" width="32" height="36" rx="4" fill="none" stroke="currentColor" stroke-width="3"></rect><path d="M23 24h18M23 31h18M23 38h12" stroke="currentColor" stroke-width="3" stroke-linecap="round"></path><path d="M42 42l3 3 6-8" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"></path></svg>`;
+    default: return `<svg viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="12" fill="none" stroke="currentColor" stroke-width="3"></circle></svg>`;
+  }
 }
-
+function workspaceLauncherTile({tab,title,badge="",tone="cyan",icon="setup",termView="",disabled=false}){
+  const attrs=[`type="button"`,`class="workspace-launcher tone-${tone}${disabled?" is-disabled":""}"`,`data-go-tab="${esc(tab)}"`];
+  if(termView) attrs.push(`data-term-view="${esc(termView)}"`);
+  if(disabled) attrs.push("disabled",'aria-disabled="true"');
+  return `<button ${attrs.join(" ")}><span class="workspace-launcher-icon" aria-hidden="true">${workspaceIconSvg(icon)}</span><span class="workspace-launcher-title">${esc(title)}</span>${badge?`<span class="workspace-launcher-badge">${esc(badge)}</span>`:""}</button>`;
+}
+function workspaceStat(label,value,tone="cyan",icon="roster") {
+  return `<div class="workspace-stat tone-${tone}"><span class="workspace-stat-icon" aria-hidden="true">${workspaceIconSvg(icon)}</span><span><strong>${esc(String(value))}</strong><small>${esc(label)}</small></span></div>`;
+}
 function renderSubjectTeacherHome(main,cls){
   if(!cls){
-    main.innerHTML=`<div class="card coming-soon-panel"><div class="module-code">CLASS</div><h2>No Subject Teacher class yet</h2><p class="sub">Create your first teaching class, then encode learner names or import a CSV roster.</p><button class="primary" data-click-id="btnNewClass">+ Create New Class</button></div>`;
+    main.innerHTML=`<div class="card coming-soon-panel"><div class="module-code">CLASS</div><h2>No Subject Teacher class yet</h2><p class="sub">Create your first teaching class, then encode learner names or import a CSV roster.</p><button class="primary" data-class-action="new">+ Create New Class</button></div>`;
     return;
   }
   main.innerHTML=`
-    <div class="card">
-      <div class="hub-title-row"><div><h2>Class Overview</h2><div class="sub">Manage this teaching class, its learner roster, and its independent grading workspace.</div></div><div class="hub-context"><strong>${esc(cls.meta.className||"Current Class")}</strong><br>${esc(cls.meta.gradeLevel||"")} ${esc(cls.meta.section||"")}</div></div>
-      <div class="control-hub">
-        <div class="control-card"><div><div class="module-code">CLASS</div><h3>Class Setup</h3><p>Set the class name, subject, grade level, section, teacher, school details, and grading configuration.</p></div><div class="card-actions"><button class="primary" data-go-tab="setup">Open Class Setup</button></div></div>
-        <div class="control-card"><div><div class="module-code">ROSTER</div><h3>Learner Roster</h3><p>Add, paste, or import learners for this class. This roster remains independent from Adviser records.</p></div><div class="card-actions"><button class="primary" data-go-tab="classroster">Manage Roster</button><span class="status-chip">${cls.students.length} learners</span></div></div>
+    <section class="workspace-overview class-dashboard">
+      <div class="workspace-hero">
+        <h2>Class Overview</h2>
+        <p class="sub">Manage your class information and records.</p>
       </div>
-    </div>`;
+      <div class="workspace-launch-grid four-up">
+        ${workspaceLauncherTile({tab:"setup",title:"Class Setup",tone:"cyan",icon:"setup"})}
+        ${workspaceLauncherTile({tab:"classroster",title:"Learner Roster",tone:"blue",icon:"roster"})}
+        ${workspaceLauncherTile({tab:"gradinghome",title:"Grading",tone:"gold",icon:"grading"})}
+        ${workspaceLauncherTile({tab:"final",title:"Final Grades",tone:"red",icon:"final"})}
+      </div>
+    </section>`;
+}
+function renderGradingHome(main,cls){
+  if(!cls){ renderSubjectTeacherHome(main,null); return; }
+  main.innerHTML=`
+    <section class="workspace-overview grading-dashboard">
+      <div class="workspace-hero">
+        <h2>Grading</h2>
+        <p class="sub">Select a term to manage class records.</p>
+      </div>
+      <div class="workspace-launch-grid four-up">
+        ${workspaceLauncherTile({tab:"term1",title:"Term 1 Class Records",tone:"green",icon:"grading"})}
+        ${workspaceLauncherTile({tab:"term2",title:"Term 2 Class Records",tone:"gold",icon:"grading"})}
+        ${workspaceLauncherTile({tab:"term3",title:"Term 3 Class Records",tone:"blue",icon:"grading"})}
+        ${workspaceLauncherTile({tab:"final",title:"Final Grades and Reports",tone:"purple",icon:"final"})}
+      </div>
+    </section>`;
 }
 function renderAdviserHome(main,cls){
   if(!adviserSf1Ready(cls)){
@@ -908,140 +1024,23 @@ function renderAdviserHome(main,cls){
 
   const sf2On=!!(cls.meta&&cls.meta.sf2Enabled===true);
   const sc=ensureSubjectConfig(cls);
-  const sourceStatus=String(cls.meta&&cls.meta.sf1SourceStatus||"not-imported");
-  const sf1Ready=sourceStatus==="imported";
   main.innerHTML=`
-    <div class="card">
-      <div class="hub-title-row"><div><h2>Adviser Controls</h2><div class="sub">Independent official-forms workspace. The SF1 masterlist is the authoritative learner source for SF2, SF5, SF9, SF10, and the Adviser grade summary.</div></div><div class="hub-context"><strong>${esc(cls.meta.className||"Advisory Class")}</strong><br>${esc(cls.meta.adviser||"Adviser")}</div></div>
-      <div class="toolbar no-print">
-        <button id="adviserImportSf1" class="primary">${sf1Ready?"Update Adviser Masterlist from SF1":"Import Adviser SF1 Masterlist"}</button>
-        <span class="status-chip ${sf1Ready?"ok":"warn"}">${sf1Ready?"SF1 masterlist established":sourceStatus==="migrated"?"Legacy data copied — import SF1 to make it authoritative":"SF1 not imported yet"}</span>
+    <section class="workspace-overview adviser-dashboard">
+      <div class="workspace-hero">
+        <h2>Advisory Overview</h2>
+        <p class="sub">Access your advisory tools and records.</p>
       </div>
-      <div class="control-hub">
-        <div class="control-card"><div><div class="module-code">SF1</div><h3>School Form 1</h3><p>Read-only official School Register viewer. This is the source masterlist for all Adviser official forms.</p></div><div class="card-actions"><button class="primary" data-go-tab="roster">Open SF1 Viewer</button><span class="status-chip">${cls.students.length} learners</span></div></div>
-        <div class="control-card"><div><div class="module-code">SF2</div><h3>School Form 2</h3><p>Daily attendance for learners originating from the Adviser SF1 masterlist.</p></div><div class="card-actions"><button class="primary" data-go-tab="sf2">Open SF2</button><span class="status-chip ${sf2On?"ok":"warn"}">${sf2On?"Enabled":"Not enabled"}</span></div></div>
-        <div class="control-card"><div><div class="module-code">GRADES</div><h3>Summary of Subject Grades</h3><p>Consolidated learning-area grades for the advisory class. This grade matrix feeds SF9 and future SF5/SF10 logic.</p></div><div class="card-actions"><button class="primary" data-go-tab="advisersummary">Open Adviser Summary</button></div></div>
-        <div class="control-card coming-soon"><div><div class="module-code">SF5</div><h3>School Form 5</h3><p>Promotion, retention, and end-of-year reporting. Learner identity and grades will come from the Adviser domain.</p></div><div class="card-actions"><button class="ghost-alt" data-go-tab="sf5">View Placeholder</button><span class="status-chip">Coming Soon</span></div></div>
-        <div class="control-card"><div><div class="module-code">SF9</div><h3>School Form 9</h3><p>Generate report cards from the Adviser Summary of Subject Grades and SF2 attendance. Curriculum: <strong>${esc(sc.classType)}</strong>.</p></div><div class="card-actions"><button class="primary" data-go-tab="report">Open SF9</button></div></div>
-        <div class="control-card coming-soon"><div><div class="module-code">SF10</div><h3>School Form 10</h3><p>Permanent learner record. Learner identity will come from the Adviser SF1 masterlist.</p></div><div class="card-actions"><button class="ghost-alt" data-go-tab="sf10">View Placeholder</button><span class="status-chip">Coming Soon</span></div></div>
+      <div class="workspace-launch-grid">
+        ${workspaceLauncherTile({tab:"roster",title:"Learner Roster (SF1)",tone:"cyan",icon:"sf1"})}
+        ${workspaceLauncherTile({tab:"sf2",title:"Attendance (SF2)",tone:"blue",icon:"sf2"})}
+        ${workspaceLauncherTile({tab:"advisersummary",title:"Summary of Subject Grades",tone:"gold",icon:"summary"})}
+        ${workspaceLauncherTile({tab:"sf5",title:"SF5",tone:"green",icon:"sf5"})}
+        ${workspaceLauncherTile({tab:"report",title:"Report Cards (SF9)",tone:"purple",icon:"sf9"})}
+        ${workspaceLauncherTile({tab:"sf10",title:"Class Records (SF10)",tone:"red",icon:"sf10"})}
       </div>
-      <div class="hint">Subject Teacher classes are intentionally separate. Their manually/CSV-created rosters and grades do not alter this Adviser masterlist.</div>
-    </div>`;
+      <div class="dashboard-quiet-action no-print"><button id="adviserImportSf1" class="ghost-alt" type="button">Update SF1 Masterlist</button></div>
+    </section>`;
   document.getElementById("adviserImportSf1").addEventListener("click",()=>importOfficialSf1IntoClass(cls));
-}
-
-function renderComingSoon(main,code,title,message){
-  main.innerHTML=`<div class="card coming-soon-panel"><div class="module-code">${esc(code)}</div><h2>${esc(title)}</h2><p class="sub">${esc(message)}</p><div class="hint">No placeholder calculations or unofficial form logic have been added.</div></div>`;
-}
-
-/* =========================================================================
-   RENDER: Setup tab
-   ========================================================================= */
-function splitPastedLearnerNames(value){
-  return unicodeText(value)
-    .replace(/[\u2028\u2029]/g,"\n")
-    .split(/\r\n|\n|\r/)
-    .map(name=>unicodeText(name).trim())
-    .filter(Boolean);
-}
-
-/* v1.4.2 migration repair: v1.4.1 accidentally treated pasted line breaks as
-   literal "\\n" text, allowing an entire multiline roster to be saved as one
-   learner name. A learner name cannot validly contain a line break, so split
-   any such legacy record once while preserving the original record/id for the
-   first learner (and therefore preserving any data already attached to it). */
-function repairMultilineSubjectRoster(cls){
-  if(!cls||!Array.isArray(cls.students)) return 0;
-  const existing=new Set();
-  cls.students.forEach(s=>{
-    if(!/[\r\n\u2028\u2029]/.test(String(s&&s.name||""))){
-      const nk=normalizeLearnerName(s&&s.name); if(nk) existing.add(nk);
-    }
-  });
-  const additions=[];
-  let repaired=0;
-  for(const s of cls.students){
-    const raw=String(s&&s.name||"");
-    if(!/[\r\n\u2028\u2029]/.test(raw)) continue;
-    const parts=splitPastedLearnerNames(raw);
-    if(!parts.length){s.name="";repaired++;continue;}
-    s.name=parts[0];
-    const firstKey=normalizeLearnerName(parts[0]); if(firstKey) existing.add(firstKey);
-    for(const name of parts.slice(1)){
-      if(cls.students.length+additions.length>=1000) break;
-      const nk=normalizeLearnerName(name);
-      if(!nk||existing.has(nk)) continue;
-      existing.add(nk);
-      additions.push({id:uid("s"),name,lrn:"",age:"",sex:s.sex==="F"?"F":"M",birthDate:"",sf1Profile:cleanSf1Profile()});
-    }
-    repaired++;
-  }
-  if(additions.length) cls.students.push(...additions);
-  return repaired+additions.length;
-}
-
-function classRosterManagerHtml(cls){
-  const males=cls.students.filter(s=>s.sex==="M"), females=cls.students.filter(s=>s.sex==="F");
-  const row=s=>`<tr data-class-roster-sid="${esc(s.id)}">
-    <td><input type="text" class="crs-name" value="${esc(s.name)}" style="width:280px;text-align:left;" placeholder="Learner name"></td>
-    <td><select class="crs-sex"><option value="M" ${s.sex==="M"?"selected":""}>Male</option><option value="F" ${s.sex==="F"?"selected":""}>Female</option></select></td>
-    <td><button class="small danger crs-remove icon-remove" type="button" aria-label="Remove learner" title="Remove learner"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 6h18M9 6V4h6v2M5 6l1 14h12l1-14M10 10v6M14 10v6"/></svg></button></td>
-  </tr>`;
-  return `<div class="card class-roster-card">
-    <div class="hub-title-row"><div><h2>Subject Teacher Learner Roster</h2><div class="sub">Enroll learners by typing names, pasting a list, or importing a CSV. This roster belongs only to this teaching class and never modifies the Adviser SF1 masterlist.</div></div><div class="hub-context">${males.length} Male • ${females.length} Female • ${cls.students.length} Total</div></div>
-    <div class="toolbar no-print">
-      <button id="classAddStudent" class="primary">+ Add learner</button>
-      <button id="classPasteNames" class="ghost-alt">Paste names</button>
-      <button id="classImportCsv" class="ghost-alt">Import Names CSV</button>
-      <button id="classDownloadRosterTemplate" class="ghost-alt">Download Names CSV Template</button>
-      <input type="file" id="classCsvFile" accept=".csv,text/csv" style="display:none;">
-    </div>
-    <div class="hint" style="margin-bottom:10px;">Only learner names are required. The downloadable CSV has a <strong>Learner Name (Required)</strong> column and an optional <strong>Sex (M/F)</strong> column. If Sex is left blank, the learner is placed in the Male group temporarily and can be changed afterward.</div>
-    <div class="scroll-x class-roster-scroll"><table class="data" id="classRosterTable"><thead><tr><th style="text-align:left;">Learner Name</th><th>Sex</th><th></th></tr></thead><tbody>
-      <tr class="group-row"><td colspan="3">MALE (${males.length})</td></tr>${males.map(row).join("")}
-      <tr class="group-row"><td colspan="3">FEMALE (${females.length})</td></tr>${females.map(row).join("")}
-    </tbody></table></div>
-  </div>`;
-}
-
-function bindClassRosterManager(cls){
-  document.getElementById("classAddStudent").addEventListener("click",()=>{
-    if(cls.students.length>=1000){alert("This class has reached the 1,000-learner safety limit.");return;}
-    cls.students.push({id:uid("s"),name:"",lrn:"",age:"",sex:"M",birthDate:"",sf1Profile:cleanSf1Profile()});
-    saveState();render();
-  });
-  document.getElementById("classPasteNames").addEventListener("click",async()=>{
-    const value=await showTextEntryDialog({title:"Paste learner names",message:"Paste one learner name per line. These names are added only to this Subject Teacher class. Learners will initially be placed in the Male group; you can change Sex afterward.",multiline:true,confirmText:"Add learners",required:true});
-    if(!value)return;
-    const existing=new Set((cls.students||[]).map(s=>normalizeLearnerName(s.name)).filter(Boolean));
-    const seen=new Set();
-    const names=splitPastedLearnerNames(value).filter(name=>{const nk=normalizeLearnerName(name);if(!nk||existing.has(nk)||seen.has(nk))return false;seen.add(nk);return true;});
-    if(cls.students.length+names.length>1000){alert("That paste would exceed the 1,000-learner safety limit for one class.");return;}
-    if(!names.length){alert("No new learner names were found. Blank lines and names already in this class are ignored.");return;}
-    names.forEach(name=>cls.students.push({id:uid("s"),name,lrn:"",age:"",sex:"M",birthDate:"",sf1Profile:cleanSf1Profile()}));
-    saveState();render();alert("Added "+names.length+" learner"+(names.length===1?"":"s")+" to this class.");
-  });
-  document.getElementById("classDownloadRosterTemplate").addEventListener("click",()=>{
-    // Keep the roster template intentionally simple: one required learner-name
-    // column and one optional Sex column. UTF-8 BOM lets Excel display Ñ/ñ
-    // and other Unicode names correctly when the CSV is opened directly.
-    const csv="\uFEFFLearner Name (Required),Sex (M/F - Optional; blank = M until changed)\r\n";
-    const blob=new Blob([csv],{type:"text/csv;charset=utf-8"}),url=URL.createObjectURL(blob),a=document.createElement("a");
-    a.href=url;a.download="Subject Teacher Learner Names Template.csv";a.click();URL.revokeObjectURL(url);
-  });
-  document.getElementById("classImportCsv").addEventListener("click",()=>document.getElementById("classCsvFile").click());
-  document.getElementById("classCsvFile").addEventListener("change",e=>{
-    const file=e.target.files[0];if(!file)return;
-    if(file.size>10*1024*1024){alert("That CSV exceeds the 10 MB safety limit.");e.target.value="";return;}
-    const reader=new FileReader();reader.onload=()=>{try{const added=importRosterCsv(cls,reader.result);saveState();render();alert("Imported "+added+" learner(s) from the CSV.");}catch(err){alert("Could not read that CSV: "+err.message);}};
-    reader.readAsText(file);e.target.value="";
-  });
-  document.querySelectorAll("#classRosterTable tr[data-class-roster-sid]").forEach(row=>{
-    const sid=row.dataset.classRosterSid,s=cls.students.find(x=>x.id===sid);if(!s)return;
-    row.querySelector(".crs-name").addEventListener("change",e=>{s.name=unicodeText(e.target.value);saveState();renderClassPicker();render();});
-    row.querySelector(".crs-sex").addEventListener("change",e=>{s.sex=e.target.value;saveState();render();});
-    row.querySelector(".crs-remove").addEventListener("click",()=>{if(!confirm("Remove this learner and all their scores?"))return;cls.students=cls.students.filter(x=>x.id!==sid);deleteStudentEverywhere(cls,sid);saveState();render();});
-  });
 }
 
 function renderSetup(main, cls){
@@ -1079,9 +1078,10 @@ function renderSetup(main, cls){
         <div class="field"><label>School Year</label><input type="text" id="f_schoolYear" value="${esc(m.schoolYear)}"></div>
       </div>
       <div class="field"><label>School Address</label><input type="text" id="f_schoolAddress" value="${esc(m.schoolAddress||"")}"></div>
+      <div class="toolbar no-print" style="margin-top:14px;">
+        <button type="button" data-go-tab="classroster">Open Learner Roster</button>
+      </div>
     </div>
-
-    ${classRosterManagerHtml(cls)}
     </div>
 
     <div class="card">
@@ -1194,6 +1194,182 @@ function renderSetup(main, cls){
   bindCategoryEditorEvents(cls);
 }
 
+
+function repairMultilineSubjectRoster(cls){
+  if(!cls || !Array.isArray(cls.students)) return 0;
+  const original=[...cls.students];
+  const seen=new Set();
+  const rebuilt=[];
+  let repaired=0;
+
+  for(const student of original){
+    if(!student || typeof student!=="object") continue;
+    const raw=unicodeText(student.name||"");
+    const parts=raw.split(/\r\n|\n|\r|\u2028|\u2029/g).map(v=>v.trim()).filter(Boolean);
+    if(parts.length<=1){
+      const key=normalizeLearnerName(raw);
+      if(key && seen.has(key)) continue;
+      if(key) seen.add(key);
+      student.name=raw.trim();
+      rebuilt.push(student);
+      continue;
+    }
+
+    const first=parts.shift();
+    const firstKey=normalizeLearnerName(first);
+    if(firstKey && !seen.has(firstKey)){
+      student.name=first;
+      seen.add(firstKey);
+      rebuilt.push(student);
+    }
+    repaired++;
+
+    for(const name of parts){
+      if(rebuilt.length>=1000) break;
+      const key=normalizeLearnerName(name);
+      if(!key || seen.has(key)) continue;
+      seen.add(key);
+      const clone={id:uid("s"),name,lrn:"",age:"",sex:student.sex==="F"?"F":"M"};
+      rebuilt.push(clone);
+      ensureStudentExtras(cls,clone.id);
+      repaired++;
+    }
+  }
+
+  if(repaired){
+    cls.students=rebuilt;
+    if(cls.students.length>1000) cls.students=cls.students.slice(0,1000);
+  }
+  return repaired;
+}
+
+function classRosterManagerHtml(cls){
+  const students=Array.isArray(cls&&cls.students)?cls.students:[];
+  const rows=students.map((s,i)=>`
+    <tr data-roster-row="${esc(s.id)}">
+      <td>${i+1}</td>
+      <td><input type="text" class="roster-name" data-sid="${esc(s.id)}" value="${esc(s.name||"")}" aria-label="Learner name ${i+1}"></td>
+      <td><select class="roster-sex" data-sid="${esc(s.id)}" aria-label="Sex of ${esc(s.name||`learner ${i+1}`)}"><option value="M" ${s.sex==="F"?"":"selected"}>Male</option><option value="F" ${s.sex==="F"?"selected":""}>Female</option></select></td>
+      <td><input type="text" class="roster-lrn" data-sid="${esc(s.id)}" value="${esc(s.lrn||"")}" aria-label="LRN of ${esc(s.name||`learner ${i+1}`)}"></td>
+      <td><input type="text" class="roster-age" data-sid="${esc(s.id)}" value="${esc(s.age||"")}" aria-label="Age of ${esc(s.name||`learner ${i+1}`)}"></td>
+      <td><button type="button" class="danger icon-remove" data-roster-remove="${esc(s.id)}" aria-label="Remove ${esc(s.name||"learner")}" title="Remove learner">×</button></td>
+    </tr>`).join("");
+
+  return `<div class="card class-roster-card">
+    <div class="hub-title-row">
+      <div>
+        <h2>Learner Roster</h2>
+        <div class="sub">This roster belongs only to the active Subject Teacher class. Grade records remain attached to each learner ID.</div>
+      </div>
+      <div class="workspace-meta-row"><strong>${students.length}</strong> learner${students.length===1?"":"s"}</div>
+    </div>
+
+    <div class="toolbar no-print">
+      <button type="button" class="primary" data-roster-action="add">+ Add Learner</button>
+      <button type="button" data-roster-action="paste">Paste Names</button>
+      <button type="button" data-roster-action="csv">Import CSV</button>
+      <input type="file" data-roster-file accept=".csv,text/csv" hidden>
+    </div>
+
+    ${students.length?`
+      <div class="scroll-x class-roster-scroll">
+        <table class="roster-table">
+          <thead><tr><th>#</th><th>Learner Name</th><th>Sex</th><th>LRN</th><th>Age</th><th class="no-print">Remove</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`:
+      `<div class="empty-state"><h3>No learners yet</h3><p>Add learners manually, paste a list of names, or import a CSV roster.</p></div>`}
+  </div>`;
+}
+
+function bindClassRosterManager(cls){
+  const main=document.getElementById("main");
+  if(!main || !cls) return;
+
+  const findStudent=sid=>(cls.students||[]).find(s=>String(s.id)===String(sid))||null;
+  const saveRosterField=(target,field)=>{
+    const student=findStudent(target.dataset.sid);
+    if(!student) return;
+    let value=unicodeText(target.value||"").trim();
+    if(field==="sex") value=target.value==="F"?"F":"M";
+    if(field==="lrn") value=String(value).replace(/[^\d-]/g,"").slice(0,20);
+    student[field]=value;
+    saveState();
+  };
+
+  main.querySelectorAll(".roster-name").forEach(el=>el.addEventListener("change",()=>saveRosterField(el,"name")));
+  main.querySelectorAll(".roster-sex").forEach(el=>el.addEventListener("change",()=>saveRosterField(el,"sex")));
+  main.querySelectorAll(".roster-lrn").forEach(el=>el.addEventListener("change",()=>saveRosterField(el,"lrn")));
+  main.querySelectorAll(".roster-age").forEach(el=>el.addEventListener("change",()=>saveRosterField(el,"age")));
+
+  main.querySelectorAll("[data-roster-remove]").forEach(btn=>btn.addEventListener("click",()=>{
+    const sid=btn.dataset.rosterRemove;
+    const student=findStudent(sid);
+    if(!student) return;
+    if(!confirm(`Remove ${student.name||"this learner"} from this Subject Teacher class? Existing grades for this learner in this class will also be removed.`)) return;
+    deleteStudentEverywhere(cls,sid);
+    cls.students=cls.students.filter(s=>String(s.id)!==String(sid));
+    saveState();
+    render();
+  }));
+
+  const addBtn=main.querySelector('[data-roster-action="add"]');
+  if(addBtn) addBtn.addEventListener("click",()=>{
+    if((cls.students||[]).length>=1000){ alert("This class has reached the 1,000-learner safety limit."); return; }
+    const name=unicodeText(prompt("Learner name:","")||"").trim();
+    if(!name) return;
+    const key=normalizeLearnerName(name);
+    if(key && cls.students.some(s=>normalizeLearnerName(s.name)===key)){ alert("That learner name is already in this class."); return; }
+    const student={id:uid("s"),name,lrn:"",age:"",sex:"M"};
+    cls.students.push(student);
+    ensureStudentExtras(cls,student.id);
+    saveState();
+    render();
+  });
+
+  const pasteBtn=main.querySelector('[data-roster-action="paste"]');
+  if(pasteBtn) pasteBtn.addEventListener("click",()=>{
+    const raw=prompt("Paste one learner name per line:","");
+    if(raw===null) return;
+    const names=unicodeText(raw).split(/\r\n|\n|\r|\u2028|\u2029/g).map(v=>v.trim()).filter(Boolean);
+    if(!names.length) return;
+    const existing=new Set(cls.students.map(s=>normalizeLearnerName(s.name)).filter(Boolean));
+    let added=0;
+    for(const name of names){
+      if(cls.students.length>=1000) break;
+      const key=normalizeLearnerName(name);
+      if(!key || existing.has(key)) continue;
+      existing.add(key);
+      const student={id:uid("s"),name,lrn:"",age:"",sex:"M"};
+      cls.students.push(student);
+      ensureStudentExtras(cls,student.id);
+      added++;
+    }
+    if(!added){ alert("No new learner names were added."); return; }
+    saveState();
+    render();
+    alert(`${added} learner${added===1?"":"s"} added.`);
+  });
+
+  const fileInput=main.querySelector("[data-roster-file]");
+  const csvBtn=main.querySelector('[data-roster-action="csv"]');
+  if(csvBtn && fileInput) csvBtn.addEventListener("click",()=>fileInput.click());
+  if(fileInput) fileInput.addEventListener("change",async()=>{
+    const file=fileInput.files&&fileInput.files[0];
+    if(!file) return;
+    try{
+      const added=importRosterCsv(cls,await file.text());
+      saveState();
+      render();
+      alert(`${added} learner${added===1?"":"s"} imported.`);
+    }catch(err){
+      alert(err&&err.message?err.message:"Could not import the learner roster.");
+    }finally{
+      fileInput.value="";
+    }
+  });
+}
+
 function renderClassRoster(main, cls){
   const repairedRosterEntries=repairMultilineSubjectRoster(cls);
   if(repairedRosterEntries) saveState();
@@ -1248,6 +1424,11 @@ function renderCategoryEditor(cls, key){
   const cat = cls.categories[key];
   const allowCustomWeights = key === "EXAM";
   const fixedItems = key === "WW" || key === "PT";
+  const maxItems = key === "WW" ? 5 : key === "PT" ? 3 : null;
+  const overCapacity = fixedItems && cat.components.length>maxItems;
+  const legacyCustomMode = fixedItems && cat.mode==="custom";
+  const excessCount = overCapacity ? cat.components.length-maxItems : 0;
+  const removableLegacy = excessCount ? cat.components.slice(maxItems).filter(c=>maxExistingScoreForComponent(cls,key,c.id)===null) : [];
   const rows = cat.components.map(c=>`
     <tr data-comp="${esc(c.id)}">
       <td><input type="text" class="comp-name" ${fixedItems?'readonly aria-readonly="true"':''} value="${esc(c.name)}" style="width:110px;"></td>
@@ -1270,6 +1451,9 @@ function renderCategoryEditor(cls, key){
         </table>
       </div>
       <div class="hint hps-legend">* HPS — Highest Possible Score</div>
+      ${overCapacity ? `<div class="hint" style="margin-top:10px;"><strong>Legacy setup:</strong> this class has ${cat.components.length} ${key} items; the official template supports a maximum of ${maxItems}. Existing scored items are preserved.</div>` : ""}
+      ${overCapacity ? `<button class="small legacy-remove-unscored" type="button" ${removableLegacy.length<excessCount?'disabled title="Some extra items contain recorded scores and cannot be removed safely."':''}>Remove unscored extra ${key} item${excessCount===1?"":"s"}</button>` : ""}
+      ${legacyCustomMode ? `<div class="hint" style="margin-top:10px;"><strong>Legacy custom weighting:</strong> ${key} custom item weights are preserved. ${categoryHasEncodedScores(cls,key)?"They cannot be converted automatically because recorded scores exist.":"You may switch this empty category to standard weighting."}</div>${categoryHasEncodedScores(cls,key)?"":`<button class="small legacy-use-simple" type="button">Use standard ${key} weighting</button>`}` : ""}
       ${fixedItems ? "" : `<button class="small primary comp-add" type="button">+ Add item</button>`}
     </section>`;
 }
@@ -1291,6 +1475,20 @@ function bindCategoryEditorEvents(cls){
     section.querySelector(".comp-add")?.addEventListener("click", ()=>{
       cat.components.push({id:uid("c"), name:"Item "+(cat.components.length+1), hps:50, subWeight:0});
       saveState(); render();
+    });
+    section.querySelector(".legacy-remove-unscored")?.addEventListener("click", ()=>{
+      const maxItems=key==="WW"?5:3,excess=Math.max(0,cat.components.length-maxItems);
+      if(!excess)return;
+      const removable=cat.components.slice(maxItems).filter(c=>maxExistingScoreForComponent(cls,key,c.id)===null);
+      if(removable.length<excess){alert("Extra items with recorded scores cannot be removed automatically. Existing grades were left unchanged.");return;}
+      const ids=new Set(removable.map(c=>c.id));
+      cat.components=cat.components.filter(c=>!ids.has(c.id));
+      saveState();render();
+    });
+    section.querySelector(".legacy-use-simple")?.addEventListener("click", ()=>{
+      if(categoryHasEncodedScores(cls,key)){alert("This legacy weighting mode cannot be changed automatically because recorded scores exist.");return;}
+      cat.mode="simple";
+      saveState();render();
     });
     section.querySelectorAll("tr[data-comp]").forEach(row=>{
       const cid = row.dataset.comp;
@@ -1381,7 +1579,7 @@ function deleteStudentEverywhere(cls,sid){
   }
 }
 
-function applyOfficialSf1Import(cls,data,options={}){
+function applyOfficialSf1ImportMutable(cls,data,options={}){
   const sources=Array.isArray(data.learners)?data.learners:[];
   if(!sources.length) throw new Error("No learners were found in the SF1 data.");
   if(sources.length>1000) throw new Error("SF1 contains more than the 1,000-learner safety limit for one class.");
@@ -1414,7 +1612,6 @@ function applyOfficialSf1Import(cls,data,options={}){
     }
 
     if(!student){
-      if(cls.students.length>=1000) throw new Error("SF1 import would exceed the 1,000-learner safety limit for one class.");
       student={id:uid("s"),name,lrn,age:String(source.age||""),sex:source.sex==="F"?"F":"M",birthDate:String(source.birthDate||""),sf1Profile:cleanSf1Profile(source.sf1)};
       cls.students.push(student); ensureStudentExtras(cls,student.id); added++;
     }else{
@@ -1443,8 +1640,15 @@ function applyOfficialSf1Import(cls,data,options={}){
     // in the uploaded SF1. This preserves their data without mixing the order.
     cls.students=[...ordered,...unmatchedOriginal];
   }
+  if(cls.students.length>1000) throw new Error("SF1 import would exceed the 1,000-learner safety limit for one class.");
 
   return {learners:ordered.length,matched,added,removed,warnings:(data.warnings||[]).length};
+}
+function applyOfficialSf1Import(cls,data,options={}){
+  const candidate=cloneJson(cls);
+  const stats=applyOfficialSf1ImportMutable(candidate,data,options);
+  replaceObjectContents(cls,candidate);
+  return stats;
 }
 
 async function importOfficialSf1IntoClass(cls){
@@ -2394,7 +2598,7 @@ function showOfficialEcrImportDialog(data,fileName,currentTermKey){
           </tbody>
         </table>
       </div>
-      <p style="margin-top:12px;">The app will update the class information available in the workbook, match learners against the existing Subject Teacher roster by name, copy the HPS/weights, and <strong>replace the raw scores for the detected term</strong>. Learners not already enrolled in this class are skipped; use Classes → Learner Roster or CSV import to enroll them first.</p>
+      <p style="margin-top:12px;">The app will update the class information available in the workbook, match learners against the existing Subject Teacher roster by name, copy the HPS/weights, and <strong>replace the raw scores for the detected term</strong>. Learners not already enrolled in this class are skipped; use Class Overview → Learner Roster or CSV import to enroll them first.</p>
       <div class="hint">PS, WS, Initial Grade, Term Grade and Descriptor are not blindly copied from Excel. They are recalculated using this app's grading logic from the imported raw scores. LRN and age remain unchanged because they are not fields in this official ECR template.</div>
       ${warnings.length?`<div class="app-modal-error" style="margin-top:10px;">${warnings.map(w=>esc(w)).join("<br>")}</div>`:""}
       <div class="app-modal-actions"><button type="button" class="cancel" id="offImpCancel">Cancel</button><button type="button" class="primary" id="offImpConfirm">Import Official ECR</button></div>`;
@@ -2408,77 +2612,131 @@ function showOfficialEcrImportDialog(data,fileName,currentTermKey){
   });
 }
 
-function applyOfficialEcrImport(cls,data){
+function ecrMatchedStudentIds(cls,data){
+  const idx=buildStudentImportIndexes(cls),ids=new Set();
+  for(const source of (data.students||[])){
+    const name=unicodeText(source.name).trim();if(!name)continue;
+    let student=null;const nk=normalizeLearnerName(name);
+    if(nk&&idx.byName.has(nk)) student=idx.byName.get(nk);
+    if(!student){const tk=learnerTokenKey(name),list=tk?idx.byTokens.get(tk):null;if(list&&list.length===1)student=list[0];}
+    if(student) ids.add(String(student.id));
+  }
+  return ids;
+}
+function protectedScoreExists(cls,targetTermKey,matchedIds,{catKey=null,compId=null}={}){
+  for(const termKey of ["term1","term2","term3"]){
+    const term=cls.scores&&cls.scores[termKey]||{};
+    for(const [sid,scoreSet] of Object.entries(term)){
+      if(termKey===targetTermKey&&matchedIds.has(String(sid))) continue;
+      const cats=catKey?[catKey]:["WW","PT","EXAM"];
+      for(const key of cats){
+        const values=scoreSet&&scoreSet[key]||{};
+        if(compId){const v=values[compId];if(v!==undefined&&v!==null&&v!==""&&Number.isFinite(Number(v)))return true;}
+        else if(Object.values(values).some(v=>v!==undefined&&v!==null&&v!==""&&Number.isFinite(Number(v)))) return true;
+      }
+    }
+  }
+  return false;
+}
+function importNumberOrNull(raw){
+  if(raw===""||raw===null||raw===undefined) return null;
+  const n=Number(raw);return Number.isFinite(n)?n:null;
+}
+function preflightOfficialEcrSharedConfig(cls,data,targetTermKey){
+  const matchedIds=ecrMatchedStudentIds(cls,data),cats=cls.categories||{};
+  const incoming=data.categories||{};
+  for(const key of ["WW","PT","EXAM"]){
+    const cat=cats[key],src=incoming[key]||{};if(!cat)continue;
+    const nextWeight=importNumberOrNull(src.weight);
+    if(nextWeight!==null&&nextWeight>=0&&Math.abs(nextWeight-Number(cat.weight||0))>0.0000001&&protectedScoreExists(cls,targetTermKey,matchedIds)){
+      throw new Error(`${key} category weight differs from this class, but another term or unmatched learner already has recorded scores. Import was cancelled to avoid silently recalculating existing grades.`);
+    }
+    const hps=Array.isArray(src.hps)?src.hps:[];
+    cat.components.forEach((comp,i)=>{
+      const n=importNumberOrNull(hps[i]);if(n===null||n<0||Math.abs(n-Number(comp.hps||0))<0.0000001)return;
+      if(protectedScoreExists(cls,targetTermKey,matchedIds,{catKey:key,compId:comp.id})){
+        throw new Error(`${comp.name||key+(i+1)} HPS differs from this class, but protected scores already exist in another term or for a learner not being replaced. Import was cancelled to preserve earlier grades.`);
+      }
+    });
+    if(key==="EXAM"){
+      const sw=Array.isArray(src.subWeights)?src.subWeights:[];
+      cat.components.forEach((comp,i)=>{
+        const n=importNumberOrNull(sw[i]);if(n===null||n<0||Math.abs(n-Number(comp.subWeight||0))<0.0000001)return;
+        if(protectedScoreExists(cls,targetTermKey,matchedIds,{catKey:"EXAM"})){
+          throw new Error(`Examination item weights differ from this class, but protected Examination scores already exist. Import was cancelled to avoid silently recalculating existing grades.`);
+        }
+      });
+    }
+  }
+}
+function applyOfficialEcrImportMutable(cls,data){
   const targetTermKey=officialImportTermKey(data.termNo);
   const ww=cls.categories&&cls.categories.WW, pt=cls.categories&&cls.categories.PT, ex=cls.categories&&cls.categories.EXAM;
-  if(!ww||!pt||!ex||ww.components.length!==5||pt.components.length!==3||ex.components.length!==3){
-    throw new Error("This official ECR importer requires the class setup to contain exactly 5 WW, 3 PT and 3 Examination components.");
+  if(!ww||!pt||!ex||ww.components.length>5||pt.components.length>3||ex.components.length!==3){
+    throw new Error("This official ECR importer supports up to 5 WW and up to 3 PT components; Examination must retain the 3-component official structure.");
   }
+  const extraSourceSlotHasData=(catKey,localCount)=>{
+    const src=data.categories&&data.categories[catKey]||{};
+    const hps=Array.isArray(src.hps)?src.hps:[];
+    for(let i=localCount;i<hps.length;i++){
+      const n=importNumberOrNull(hps[i]);
+      if(n!==null&&n>0)return true;
+    }
+    for(const st of (data.students||[])){
+      const scores=st&&st.scores&&Array.isArray(st.scores[catKey])?st.scores[catKey]:[];
+      for(let i=localCount;i<scores.length;i++){
+        const v=scores[i];
+        if(v!==""&&v!==null&&v!==undefined)return true;
+      }
+    }
+    return false;
+  };
+  if(extraSourceSlotHasData("WW",ww.components.length)||extraSourceSlotHasData("PT",pt.components.length)){
+    throw new Error("The imported ECR contains scores/HPS in WW or PT slots that do not exist in this class setup. Import was cancelled to avoid discarding component data.");
+  }
+  preflightOfficialEcrSharedConfig(cls,data,targetTermKey);
 
-  // Import the metadata that actually exists on the official Class Record.
   const m=data.meta||{};
   ["region","division","schoolId","schoolName","schoolYear","gradeLevel","teacher","section"].forEach(k=>{
     if(m[k]!==undefined && m[k]!==null && String(m[k]).trim()!=="") cls.meta[k]=String(m[k]).trim();
   });
-  if(m.subject!==undefined && m.subject!==null && String(m.subject).trim()!==""){
-    setClassRecordSubjectFromLabel(cls,String(m.subject).trim());
-  }
+  if(m.subject!==undefined && m.subject!==null && String(m.subject).trim()!=="") setClassRecordSubjectFromLabel(cls,String(m.subject).trim());
   ensureClassRecordSubject(cls);
 
-  // The official form is authoritative for HPS and component weighting.
   const applyHps=(cat,vals)=>cat.components.forEach((c,i)=>{
-    const n=Number(vals&&vals[i]); if(Number.isFinite(n)&&n>=0) c.hps=n;
+    const n=importNumberOrNull(vals&&vals[i]);
+    if(n!==null&&n>=0) c.hps=n;
   });
   applyHps(ww,data.categories&&data.categories.WW&&data.categories.WW.hps);
   applyHps(pt,data.categories&&data.categories.PT&&data.categories.PT.hps);
   applyHps(ex,data.categories&&data.categories.EXAM&&data.categories.EXAM.hps);
-  const setWeight=(cat,v)=>{
-    if(v===""||v===null||v===undefined) return;
-    const n=Number(v); if(Number.isFinite(n)&&n>=0) cat.weight=n;
-  };
+  const setWeight=(cat,v)=>{const n=importNumberOrNull(v);if(n!==null&&n>=0)cat.weight=n;};
   setWeight(ww,data.categories&&data.categories.WW&&data.categories.WW.weight);
   setWeight(pt,data.categories&&data.categories.PT&&data.categories.PT.weight);
   setWeight(ex,data.categories&&data.categories.EXAM&&data.categories.EXAM.weight);
   const sw=data.categories&&data.categories.EXAM&&data.categories.EXAM.subWeights;
-  ex.components.forEach((c,i)=>{
-    const raw=sw&&sw[i]; if(raw===""||raw===null||raw===undefined) return;
-    const n=Number(raw); if(Number.isFinite(n)&&n>=0) c.subWeight=n;
-  });
+  ex.components.forEach((c,i)=>{const n=importNumberOrNull(sw&&sw[i]);if(n!==null&&n>=0)c.subWeight=n;});
 
   if(!cls.scores[targetTermKey]) cls.scores[targetTermKey]={};
   const idx=buildStudentImportIndexes(cls);
   let matched=0,added=0,unmatched=0,importedScores=0,invalid=0,unresolvedSex=0,gradeChecks=0,gradeMismatches=0;
   const importedStudentIds=[];
-
   for(const source of (data.students||[])){
     const name=unicodeText(source.name).trim(); if(!name) continue;
-    let student=null;
-    const nk=normalizeLearnerName(name);
+    let student=null;const nk=normalizeLearnerName(name);
     if(nk&&idx.byName.has(nk)) student=idx.byName.get(nk);
-    if(!student){
-      const tk=learnerTokenKey(name), list=tk?idx.byTokens.get(tk):null;
-      if(list&&list.length===1) student=list[0];
-    }
+    if(!student){const tk=learnerTokenKey(name),list=tk?idx.byTokens.get(tk):null;if(list&&list.length===1)student=list[0];}
     const sourceSex=source.sex==="F"?"F":source.sex==="M"?"M":"";
-    if(!student){
-      unmatched++;
-      continue;
-    }else{
-      matched++;
-      student.name=name;
-      if(sourceSex) student.sex=sourceSex;
-      ensureStudentExtras(cls,student.id);
-    }
+    if(!student){unmatched++;continue;}
+    matched++;student.name=name;if(sourceSex)student.sex=sourceSex;ensureStudentExtras(cls,student.id);
 
-    // Replace this learner's raw scores in the imported term. Blank official
-    // cells intentionally clear old values in the same term.
     const sm={WW:{},PT:{},EXAM:{}};
     const importCat=(catKey,cat,values)=>{
       (values||[]).forEach((raw,i)=>{
-        if(i>=cat.components.length||raw===""||raw===null||raw===undefined) return;
-        const n=Number(raw), h=Number(cat.components[i].hps||0);
-        if(!Number.isFinite(n)||n<0||(h>0&&n>h)){ invalid++; return; }
-        sm[catKey][cat.components[i].id]=n; importedScores++;
+        if(i>=cat.components.length||raw===""||raw===null||raw===undefined)return;
+        const n=Number(raw),h=Number(cat.components[i].hps||0);
+        if(!Number.isFinite(n)||n<0||(h>0&&n>h)||(h===0&&n!==0)){invalid++;return;}
+        sm[catKey][cat.components[i].id]=n;importedScores++;
       });
     };
     importCat("WW",ww,source.scores&&source.scores.WW);
@@ -2488,18 +2746,22 @@ function applyOfficialEcrImport(cls,data){
     importedStudentIds.push({student,source});
   }
 
-  // When the workbook has a cached official term grade, compare it against
-  // the app's recomputation as a verification signal only; never overwrite.
-  importedStudentIds.forEach(({student,source})=>{
-    const official=Number(source.officialTermGrade);
-    if(!Number.isFinite(official)) return;
-    const computed=studentTermResult(cls,targetTermKey,student.id).term;
-    if(computed===null||computed===undefined) return;
-    gradeChecks++;
-    if(Number(computed)!==official) gradeMismatches++;
-  });
+  const configErrors=validateGradingConfiguration(cls,{official:false});
+  if(configErrors.length) throw new Error("Imported ECR data would make the Class Record invalid:\n\n• "+configErrors.slice(0,8).join("\n• "));
 
+  importedStudentIds.forEach(({student,source})=>{
+    if(source.officialTermGrade===""||source.officialTermGrade===null||source.officialTermGrade===undefined)return;
+    const official=Number(source.officialTermGrade);if(!Number.isFinite(official))return;
+    const computed=studentTermResult(cls,targetTermKey,student.id).term;if(computed===null||computed===undefined)return;
+    gradeChecks++;if(Number(computed)!==official)gradeMismatches++;
+  });
   return {termKey:targetTermKey,matched,added,unmatched,learners:importedStudentIds.length,importedScores,invalid,unresolvedSex,gradeChecks,gradeMismatches,warnings:(data.warnings||[]).length};
+}
+function applyOfficialEcrImport(cls,data){
+  const candidate=cloneJson(cls);
+  const stats=applyOfficialEcrImportMutable(candidate,data);
+  replaceObjectContents(cls,candidate);
+  return stats;
 }
 
 async function importOfficialEcrIntoClass(cls,currentTermKey){
@@ -2571,8 +2833,10 @@ function validateGradingConfiguration(cls,{official=false,termKey=null}={}){
     if(!Number.isFinite(weight) || weight<0 || weight>1) errors.push(`${key}: category weight must be from 0% to 100%.`);
     else totalWeight+=weight;
     if(official){
-      const expected=key==="WW"?5:3;
-      if(cat.components.length!==expected) errors.push(`${key}: official template requires exactly ${expected} components.`);
+      if(key==="WW"&&cat.components.length>5) errors.push(`WW: official template supports a maximum of 5 components.`);
+      if(key==="PT"&&cat.components.length>3) errors.push(`PT: official template supports a maximum of 3 components.`);
+      if(key==="EXAM"&&cat.components.length!==3) errors.push(`EXAM: official template requires the existing 3-component examination structure.`);
+      if((key==="WW"||key==="PT")&&cat.mode==="custom") errors.push(`${key}: this legacy custom item-weight mode is preserved but cannot be represented faithfully in the fixed official template. Use the legacy repair option only if the category has no recorded scores.`);
     }
     let customTotal=0;
     cat.components.forEach((c,i)=>{
@@ -2613,14 +2877,19 @@ function validateGradingConfiguration(cls,{official=false,termKey=null}={}){
   return errors;
 }
 
+function effectiveExamSubWeights(ex){
+  if(ex&&ex.mode==="custom") return ex.components.map(c=>Number(c.subWeight||0));
+  const active=ex&&Array.isArray(ex.components)?ex.components:[],total=active.reduce((sum,c)=>sum+(Number(c.hps)>0?Number(c.hps):0),0);
+  return active.map(c=>Number(c.hps)>0&&total>0?Number(c.hps)/total*100:0);
+}
 function officialEcrPayload(cls, termKey){
   const validationErrors=validateGradingConfiguration(cls,{official:true,termKey});
   if(validationErrors.length) throw new Error("Please correct the grading setup/data before creating an official form:\n\n• "+validationErrors.slice(0,8).join("\n• "));
   const cats=cls.categories || {};
   const ww=cats.WW, pt=cats.PT, ex=cats.EXAM;
   if(!ww || !pt || !ex) throw new Error("The Class Record grading components are incomplete.");
-  if(ww.components.length!==5 || pt.components.length!==3 || ex.components.length!==3){
-    throw new Error("The official ECR template has fixed columns for 5 Written/Oral Works, 3 Performance Tasks, and 3 Examination components. Adjust the Class Record setup to 5 WW, 3 PT and 3 EX components before exporting.");
+  if(ww.components.length>5 || pt.components.length>3 || ex.components.length!==3){
+    throw new Error("The official ECR template supports up to 5 Written/Oral Works and up to 3 Performance Tasks; Examination must retain the 3-component official structure.");
   }
   const males=cls.students.filter(s=>s.sex==="M"), females=cls.students.filter(s=>s.sex==="F");
   if(males.length>50 || females.length>50){
@@ -2634,6 +2903,7 @@ function officialEcrPayload(cls, termKey){
   const anyRaw=(arr)=>arr.some(v=>v!=="");
   const round2=(v)=>Math.round(Number(v)*100)/100;
 
+  const effectiveExWeights=effectiveExamSubWeights(ex);
   const students=cls.students.map(st=>{
     const sm=(cls.scores[termKey] && cls.scores[termKey][st.id]) || {WW:{},PT:{},EXAM:{}};
     const result=studentTermResult(cls,termKey,st.id);
@@ -2641,7 +2911,7 @@ function officialEcrPayload(cls, termKey){
     const wwAny=anyRaw(wwRaw), ptAny=anyRaw(ptRaw), exAny=anyRaw(exRaw);
     const componentPs=ex.components.map((c,i)=>{
       if(exRaw[i]==="") return "";
-      const h=Number(c.hps||0), sw=Number(c.subWeight||0);
+      const h=Number(c.hps||0), sw=Number(effectiveExWeights[i]||0);
       return h>0 ? round2(Number(exRaw[i])/h*sw) : "";
     });
     return {
@@ -2659,9 +2929,9 @@ function officialEcrPayload(cls, termKey){
     schoolLogoDataUri:schoolLogoDataUri(),
     meta:{...cls.meta},
     categories:{
-      WW:{weight:Number(ww.weight||0),components:ww.components.map(c=>({name:c.name,hps:Number(c.hps||0),subWeight:Number(c.subWeight||0)}))},
-      PT:{weight:Number(pt.weight||0),components:pt.components.map(c=>({name:c.name,hps:Number(c.hps||0),subWeight:Number(c.subWeight||0)}))},
-      EXAM:{weight:Number(ex.weight||0),components:ex.components.map(c=>({name:c.name,hps:Number(c.hps||0),subWeight:Number(c.subWeight||0)}))}
+      WW:{mode:ww.mode||"simple",weight:Number(ww.weight||0),components:ww.components.map(c=>({name:c.name,hps:Number(c.hps||0),subWeight:Number(c.subWeight||0)}))},
+      PT:{mode:pt.mode||"simple",weight:Number(pt.weight||0),components:pt.components.map(c=>({name:c.name,hps:Number(c.hps||0),subWeight:Number(c.subWeight||0)}))},
+      EXAM:{mode:ex.mode==="simple"?"simple":"custom",weight:Number(ex.weight||0),components:ex.components.map((c,i)=>({name:c.name,hps:Number(c.hps||0),subWeight:Number(effectiveExWeights[i]||0)}))}
     },
     students
   };
@@ -2730,7 +3000,7 @@ function renderTerm(main, cls, termKey, termLabel){
       <div class="card no-print">
         <h2>${termLabel}</h2>
         <div class="sub">Create this Subject Teacher roster first by encoding learner names or importing a CSV from Classes.</div>
-        <div class="toolbar"><button class="primary" data-go-tab="setup">Go to Classes & Roster</button></div>
+        <div class="toolbar"><button class="primary" data-go-tab="classroster">Go to Learner Roster</button></div>
       </div>
       <div class="empty-state"><h2>No learners yet</h2><p>Subject Teacher rosters are enrolled from Classes by manual entry or CSV. ECR imports only apply scores to learners already enrolled in this class.</p></div>`;
     return;
@@ -2738,8 +3008,8 @@ function renderTerm(main, cls, termKey, termLabel){
 
   main.innerHTML = `
     <div class="card no-print">
-      <h2>${termLabel}</h2>
-      <div class="sub">Class Record is where you enter raw scores. Class Record and Grading Sheet previews are rendered from their required official Excel templates, using the Setup information and signatories.</div>
+      <h2>${termLabel} Class Records</h2>
+      <div class="sub">Manage grades, switch record views, and generate the official Class Record or Grading Sheet.</div>
       <div class="toolbar">
         <div class="cr-viewtoggle">
           <button class="small viewbtn ${mode==="record"?"active":""}" data-mode="record">Class Record</button>
@@ -2757,13 +3027,13 @@ function renderTerm(main, cls, termKey, termLabel){
     container.innerHTML = `
       <div class="cr-page">
         <div class="cr-topbar">
-          <div class="cr-seal"><img src="${schoolLogoDataUri()}" alt="School Seal"></div>
+          <div class="cr-seal wordmark"><img src="${DEPED_WORDMARK_DATA_URI}" alt="DepEd"></div>
           <div class="cr-head-center">
             <div class="gov-line old-english">Republic of the Philippines</div>
             <div class="dep-line old-english">Department of Education</div>
             <div class="cr-title">CLASS RECORD - ${esc(TERM_LABELS[termKey])}</div>
           </div>
-          <div class="cr-seal wordmark"><img src="${DEPED_WORDMARK_DATA_URI}" alt="DepEd"></div>
+          <div class="cr-seal"><img src="${schoolLogoDataUri()}" alt="School Seal"></div>
         </div>
         <div class="cr-fieldrow">
           <div class="f"><label>REGION</label><div class="box">${esc(m.region)}</div></div>
@@ -2807,7 +3077,7 @@ function renderTerm(main, cls, termKey, termLabel){
     container.innerHTML = `
       <div class="gs-page">
         <div class="gs-topbar">
-          <div class="cr-seal"><img src="${schoolLogoDataUri()}" alt="School Seal"></div>
+          <div class="cr-seal"><img src="${DEPED_SEAL_DATA_URI}" alt="DepEd Seal"></div>
           <div class="gs-headtext">
             <div class="republic-script old-english">Republic of the Philippines</div>
             <div class="deped-script old-english">Department of Education</div>
@@ -2817,7 +3087,7 @@ function renderTerm(main, cls, termKey, termLabel){
             <div class="schoolid">SCHOOL ID: ${esc(m.schoolId)}</div>
             <div class="sy">School Year ${esc(m.schoolYear)}</div>
           </div>
-          <div class="cr-seal"><img src="${DEPED_SEAL_DATA_URI}" alt="DepEd Seal"></div>
+          <div class="cr-seal"><img src="${schoolLogoDataUri()}" alt="School Seal"></div>
         </div>
         <div class="gs-inforow-wrap">${gsInfoRowHtml(cls)}</div>
         <div class="cr-navybar"></div>
@@ -2867,7 +3137,7 @@ function renderTerm(main, cls, termKey, termLabel){
    ========================================================================= */
 function renderFinal(main, cls){
   if(!cls.students.length){
-    main.innerHTML = `<div class="empty-state"><h2>No learners yet</h2><p>Add learners in Subject Teacher Controls → Classes first.</p></div>`;
+    main.innerHTML = `<div class="empty-state"><h2>No learners yet</h2><p>Add learners in Class Overview → Learner Roster first.</p></div>`;
     return;
   }
   const males = cls.students.filter(s=>s.sex==="M");
@@ -2890,8 +3160,8 @@ function renderFinal(main, cls){
   }
   main.innerHTML = `
     <div class="card">
-      <h2>Final Grades</h2>
-      <div class="sub">Final Grade is the average of the term grades that have been entered so far (not assumed to be 3).</div>
+      <h2>Final Grades and Reports</h2>
+      <div class="sub">Review consolidated term grades and final results for the current class.</div>
       <div class="scroll-x">
       <table class="data">
         <thead><tr><th style="text-align:left;">Learner</th><th>Term 1</th><th>Term 2</th><th>Term 3</th><th>Final Grade</th><th>Descriptor</th><th>Progress</th></tr></thead>
@@ -3625,13 +3895,24 @@ async function refreshFullscreenControl(){
 /* =========================================================================
    TOP-LEVEL EVENTS
    ========================================================================= */
-document.getElementById("tabs").addEventListener("click", e=>{
-  const btn = e.target.closest("button.tab");
-  if(!btn) return;
-  activeTab = btn.dataset.tab;
-  render();
+document.getElementById("sidebarHomeBrand").addEventListener("click",()=>{
+  navigateToTab("welcome");
 });
-document.getElementById("main").addEventListener("click",e=>{
+document.getElementById("main").addEventListener("click",async e=>{
+  const shell=e.target.closest("[data-shell-nav]");
+  if(shell){
+    if(shell.dataset.shellNav==="home") navigateToTab("welcome");
+    else if(shell.dataset.shellNav==="return") navigateToTab(returnTargetFor(activeTab)||"welcome");
+    return;
+  }
+  const classAction=e.target.closest("[data-class-action]");
+  if(classAction&&!classAction.disabled){
+    const action=classAction.dataset.classAction;
+    if(action==="new") await createSubjectClass();
+    else if(action==="duplicate") duplicateSubjectClass();
+    else if(action==="delete") deleteSubjectClass();
+    return;
+  }
   const clickTarget=e.target.closest("[data-click-id]");
   if(clickTarget){
     const target=document.getElementById(clickTarget.dataset.clickId);
@@ -3640,11 +3921,14 @@ document.getElementById("main").addEventListener("click",e=>{
   }
   const go=e.target.closest("[data-go-tab]");
   if(!go||go.disabled)return;
-  activeTab=go.dataset.goTab;
-  render();
+  navigateToTab(go.dataset.goTab,{termView:go.dataset.termView||""});
 });
-document.getElementById("classSelect").addEventListener("change", e=>{
-  APP.activeId = e.target.value; saveState(); render();
+document.getElementById("main").addEventListener("change",e=>{
+  if(e.target&&e.target.id==="workspaceClassSelect"){
+    APP.activeId=e.target.value;
+    saveState();
+    render();
+  }
 });
 document.getElementById("btnTheme").addEventListener("click",()=>{
   ensureAppSettings();
@@ -3655,7 +3939,7 @@ document.getElementById("restoreWindowBtn").addEventListener("click",async ()=>{
   if(window.eclassAPI&&typeof window.eclassAPI.runtimeInvoke==="function") await window.eclassAPI.runtimeInvoke("window:exit-fullscreen",{});
   setTimeout(refreshFullscreenControl,150);
 });
-document.getElementById("btnNewClass").addEventListener("click", async ()=>{
+async function createSubjectClass(){
   const name = await showTextEntryDialog({
     title:"Create New Class",
     message:"Enter the class name (for example: Grade 10 Science — Gomez).",
@@ -3665,26 +3949,28 @@ document.getElementById("btnNewClass").addEventListener("click", async ()=>{
   });
   if(name===null) return;
   const c = newClass(name);
-  APP.classes[c.id] = c; APP.activeId = c.id;
+  APP.classes[c.id] = c;
+  APP.activeId = c.id;
   if(activeTab==="welcome") activeTab="setup";
-  saveState(); render();
-});
-document.getElementById("btnDupClass").addEventListener("click", ()=>{
+  saveState();
+  render();
+}
+function duplicateSubjectClass(){
   const src = activeClass(); if(!src) return;
   const copy = JSON.parse(JSON.stringify(src));
   copy.id = uid("cls"); copy.createdAt = Date.now();
   copy.meta.className = copy.meta.className + " (copy)";
   APP.classes[copy.id] = copy; APP.activeId = copy.id;
   saveState(); render();
-});
-document.getElementById("btnDelClass").addEventListener("click", ()=>{
-  const ids = Object.keys(APP.classes);
+}
+function deleteSubjectClass(){
+  const ids = Object.keys(APP.classes||{});
   if(ids.length<=1){ alert("You need at least one class."); return; }
   if(!confirm("Delete this class and all its data? This cannot be undone.")) return;
   delete APP.classes[APP.activeId];
   APP.activeId = Object.keys(APP.classes)[0];
   saveState(); render();
-});
+}
 document.getElementById("btnExport").addEventListener("click", async ()=>{
   if(window.eclassAPI && window.eclassAPI.exportBackup){
     const result = await window.eclassAPI.exportBackup(JSON.stringify(APP,null,2));
@@ -3716,6 +4002,8 @@ function validateBackupForImport(data){
     for(const [k,x] of Object.entries(v)){if(forbidden.has(k))throw new Error("Backup contains a prohibited property.");if(k.length>256)throw new Error("Backup contains an invalid property name.");walk(x,depth+1);}
   };
   walk(data);
+  data=cloneJson(data);
+  if(data.settings&&data.settings.welcome&&typeof data.settings.welcome==="object"&&!Array.isArray(data.settings.welcome)) delete data.settings.welcome.skipStartup;
   if(Object.keys(data.classes).length>2000) throw new Error("Backup contains too many classes.");
   const roleRecords=Object.entries(data.classes);
   if(data.adviserWorkspace!==undefined){
@@ -3724,13 +4012,46 @@ function validateBackupForImport(data){
   }
   for(const [cid,cls] of roleRecords){
     if(!safeId.test(cid)||!cls||typeof cls!=="object"||Array.isArray(cls)) throw new Error("Backup contains an invalid class record.");
+    const isAdviser=cid==="adviserWorkspace"||cls.domain==="adviser";
+    if(!cls.meta||typeof cls.meta!=="object"||Array.isArray(cls.meta)) throw new Error("Backup contains a class with missing or invalid metadata.");
     if(!Array.isArray(cls.students)||cls.students.length>1000) throw new Error("Backup contains an invalid learner list.");
+    if(!isAdviser){
+      if(!cls.categories||typeof cls.categories!=="object"||Array.isArray(cls.categories)) throw new Error("Backup contains a teaching class with missing grading categories.");
+      for(const key of ["WW","PT","EXAM"]){
+        const cat=cls.categories[key];
+        if(!cat||typeof cat!=="object"||Array.isArray(cat)||!Array.isArray(cat.components)||!cat.components.length) throw new Error(`Backup contains an incomplete ${key} grading category.`);
+      }
+      if(!cls.scores||typeof cls.scores!=="object"||Array.isArray(cls.scores)) throw new Error("Backup contains a teaching class with missing score records.");
+      for(const termKey of ["term1","term2","term3"]){
+        if(cls.scores[termKey]===undefined) cls.scores[termKey]={};
+        if(!cls.scores[termKey]||typeof cls.scores[termKey]!=="object"||Array.isArray(cls.scores[termKey])) throw new Error(`Backup contains invalid ${termKey} score records.`);
+      }
+    }
+    if(!cls.id&&cid!=="adviserWorkspace") cls.id=cid;
+    if(cls.id!==undefined&&!safeId.test(String(cls.id))) throw new Error("Backup contains an invalid class identifier inside a class record.");
     for(const st of cls.students){if(!st||typeof st!=="object"||Array.isArray(st)||!st.id||!safeId.test(String(st.id)))throw new Error("Backup contains an invalid learner identifier.");}
     if(cls.categories!==undefined){
       if(!cls.categories||typeof cls.categories!=="object"||Array.isArray(cls.categories))throw new Error("Backup contains invalid grading categories.");
       for(const [key,cat] of Object.entries(cls.categories)){
         if(!safeId.test(key)||!cat||typeof cat!=="object"||Array.isArray(cat))throw new Error("Backup contains an invalid grading category.");
         if(cat.components!==undefined){if(!Array.isArray(cat.components)||cat.components.length>200)throw new Error("Backup contains an invalid component list.");for(const c of cat.components){if(!c||typeof c!=="object"||Array.isArray(c)||!c.id||!safeId.test(String(c.id)))throw new Error("Backup contains an invalid assessment-component identifier.");}}
+      }
+    }
+    if(cls.scores!==undefined){
+      if(!cls.scores||typeof cls.scores!=="object"||Array.isArray(cls.scores)) throw new Error("Backup contains invalid score records.");
+      for(const [termKey,term] of Object.entries(cls.scores)){
+        if(!safeId.test(String(termKey))||!term||typeof term!=="object"||Array.isArray(term)) throw new Error("Backup contains an invalid term score collection.");
+        for(const [sid,scoreSet] of Object.entries(term)){
+          if(!safeId.test(String(sid))||!scoreSet||typeof scoreSet!=="object"||Array.isArray(scoreSet)) throw new Error("Backup contains an invalid learner score record.");
+          for(const [catKey,values] of Object.entries(scoreSet)){
+            if(!safeId.test(String(catKey))||!values||typeof values!=="object"||Array.isArray(values)) throw new Error("Backup contains invalid assessment scores.");
+            for(const [compId,raw] of Object.entries(values)){
+              if(!safeId.test(String(compId))) throw new Error("Backup contains an invalid assessment-component score key.");
+              if(raw===null||raw===""||raw===undefined) continue;
+              const n=Number(raw);if(!Number.isFinite(n)||n<0) throw new Error("Backup contains an invalid raw score.");
+            }
+          }
+        }
       }
     }
     if(cls.sf2!==undefined){
@@ -3776,6 +4097,21 @@ function validateBackupForImport(data){
   return data;
 }
 
+async function commitImportedBackup(data){
+  const previous=cloneJson(APP);
+  APP=data;
+  if(!APP.activeId || !APP.classes[APP.activeId]) APP.activeId=Object.keys(APP.classes)[0];
+  try{
+    render();
+    const saved=await saveState();
+    if(!saved||!saved.ok) throw new Error(saved&&saved.error?saved.error:"The imported backup could not be saved.");
+  }catch(err){
+    APP=previous;
+    try{render();await saveState();}catch(rollbackErr){console.error("Could not restore the pre-import state after a failed backup import",rollbackErr);}
+    throw err;
+  }
+}
+
 document.getElementById("btnImport").addEventListener("click", async ()=>{
   if(window.eclassAPI && window.eclassAPI.importBackup){
     const result = await window.eclassAPI.importBackup();
@@ -3784,9 +4120,7 @@ document.getElementById("btnImport").addEventListener("click", async ()=>{
     try{
       const data=validateBackupForImport(JSON.parse(result.text));
       if(!confirm("Import will replace all data currently in this app. Continue?")) return;
-      APP = data;
-      if(!APP.activeId || !APP.classes[APP.activeId]) APP.activeId = Object.keys(APP.classes)[0];
-      saveState(); render();
+      await commitImportedBackup(data);
     }catch(err){ alert("Could not read that file: "+err.message); }
     return;
   }
@@ -3796,13 +4130,11 @@ document.getElementById("fileImport").addEventListener("change", e=>{
   const file = e.target.files[0]; if(!file) return;
   if(file.size > 64 * 1024 * 1024){ alert("That backup exceeds the 64 MB safety limit."); e.target.value=""; return; }
   const reader = new FileReader();
-  reader.onload = ()=>{
+  reader.onload = async ()=>{
     try{
       const data=validateBackupForImport(JSON.parse(reader.result));
       if(!confirm("Import will replace all data currently in this app. Continue?")) return;
-      APP = data;
-      if(!APP.activeId || !APP.classes[APP.activeId]) APP.activeId = Object.keys(APP.classes)[0];
-      saveState(); render();
+      await commitImportedBackup(data);
     }catch(err){ alert("Could not read that file: "+err.message); }
   };
   reader.readAsText(file);

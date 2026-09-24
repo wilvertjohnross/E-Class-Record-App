@@ -86,27 +86,36 @@ function parseAndValidateAppState(text) {
     throw new Error('This is not a valid E-Class Record data file.');
   }
   if (Object.keys(safe.classes).length > 2000) throw new Error('The data file contains too many classes.');
-  for (const [classId, cls] of Object.entries(safe.classes)) {
-    if (!SAFE_ID_RE.test(classId)) throw new Error('The data file contains an invalid class identifier.');
+  const records = Object.entries(safe.classes).map(([id, value]) => ({ id, value, adviser: false }));
+  if (safe.adviserWorkspace !== undefined) {
+    if (!isPlainObject(safe.adviserWorkspace)) throw new Error('The data file contains an invalid Adviser workspace.');
+    records.push({ id: 'adviserWorkspace', value: safe.adviserWorkspace, adviser: true });
+  }
+  for (const { id: classId, value: cls, adviser } of records) {
+    if (!adviser && !SAFE_ID_RE.test(classId)) throw new Error('The data file contains an invalid class identifier.');
     if (!isPlainObject(cls)) throw new Error(`Class ${classId} has an invalid structure.`);
-    if (!Array.isArray(cls.students)) cls.students = [];
+    if (!isPlainObject(cls.meta)) throw new Error(`Class ${classId} has missing or invalid metadata.`);
+    if (!Array.isArray(cls.students)) throw new Error(`Class ${classId} has a missing or invalid learner list.`);
     if (cls.students.length > 1000) throw new Error(`Class ${classId} contains too many learners.`);
     for (const student of cls.students) {
       if (!isPlainObject(student)) throw new Error(`Class ${classId} contains an invalid learner record.`);
-      if (student.id !== undefined && !SAFE_ID_RE.test(String(student.id))) throw new Error('The data file contains an invalid learner identifier.');
+      if (!student.id || !SAFE_ID_RE.test(String(student.id))) throw new Error('The data file contains an invalid learner identifier.');
     }
-    if (cls.categories !== undefined) {
-      if (!isPlainObject(cls.categories)) throw new Error(`Class ${classId} has an invalid grading-category structure.`);
-      for (const [categoryKey, category] of Object.entries(cls.categories)) {
-        if (!SAFE_ID_RE.test(String(categoryKey))) throw new Error('The data file contains an invalid grading-category identifier.');
-        if (!isPlainObject(category)) throw new Error(`Class ${classId} contains an invalid grading category.`);
-        if (category.components !== undefined) {
-          if (!Array.isArray(category.components) || category.components.length > 200) throw new Error(`Class ${classId} contains an invalid component list.`);
-          for (const component of category.components) {
-            if (!isPlainObject(component)) throw new Error(`Class ${classId} contains an invalid assessment component.`);
-            if (!component.id || !SAFE_ID_RE.test(String(component.id))) throw new Error('The data file contains an invalid assessment-component identifier.');
-          }
+    if (!adviser) {
+      if (!isPlainObject(cls.categories)) throw new Error(`Class ${classId} has a missing or invalid grading-category structure.`);
+      for (const categoryKey of ['WW','PT','EXAM']) {
+        const category = cls.categories[categoryKey];
+        if (!isPlainObject(category) || !Array.isArray(category.components) || !category.components.length || category.components.length > 200) {
+          throw new Error(`Class ${classId} contains an incomplete ${categoryKey} grading category.`);
         }
+        for (const component of category.components) {
+          if (!isPlainObject(component) || !component.id || !SAFE_ID_RE.test(String(component.id))) throw new Error('The data file contains an invalid assessment-component identifier.');
+        }
+      }
+      if (!isPlainObject(cls.scores)) throw new Error(`Class ${classId} has missing score records.`);
+      for (const termKey of ['term1','term2','term3']) {
+        if (cls.scores[termKey] === undefined) cls.scores[termKey] = {};
+        if (!isPlainObject(cls.scores[termKey])) throw new Error(`Class ${classId} has invalid ${termKey} score records.`);
       }
     }
   }

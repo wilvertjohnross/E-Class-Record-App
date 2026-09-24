@@ -1,17 +1,18 @@
 /* KLAS welcome/profile: optional local settings, separate from official records. */
-const WELCOME_TABS = {subjecthome:'Class Overview',setup:'Class Setup',classroster:'Learner Roster',term1:'Class Record — Term 1',term2:'Class Record — Term 2',term3:'Class Record — Term 3',final:'Final Grades',adviserhome:'Advisory Overview',roster:'SF1',sf2:'SF2',advisersummary:'Summary of Subject Grades',sf9setup:'SF9 Setup',report:'SF9',sf5:'SF5',sf10:'SF10'};
+const WELCOME_TABS = {subjecthome:'Class Overview',gradinghome:'Grading',setup:'Class Setup',classroster:'Learner Roster',term1:'Class Record — Term 1',term2:'Class Record — Term 2',term3:'Class Record — Term 3',final:'Final Grades',adviserhome:'Advisory Overview',roster:'SF1',sf2:'SF2',advisersummary:'Summary of Subject Grades',sf9setup:'SF9 Setup',report:'SF9',sf5:'SF5',sf10:'SF10'};
 let welcomeClockTimer = null;
 function welcomeSettings(state=APP){
   const value=state.settings&&state.settings.welcome;
-  return value&&typeof value==='object'&&!Array.isArray(value)?value:{};
+  if(!(value&&typeof value==='object'&&!Array.isArray(value)))return{};
+  const {skipStartup:_retiredSkipStartup,...current}=value;
+  return current;
 }
 function welcomeProfile(){
   const p=APP.settings&&APP.settings.teacherProfile;
   return p&&typeof p==='object'&&!Array.isArray(p)?p:{};
 }
-function welcomeInitialTab(state){
-  const w=welcomeSettings(state);
-  return w.skipStartup===true ? (Object.hasOwn(WELCOME_TABS,w.lastTab)?w.lastTab:'subjecthome') : 'welcome';
+function welcomeInitialTab(_state){
+  return 'welcome';
 }
 function welcomeRememberView(){
   if(activeTab==='welcome')return;
@@ -48,16 +49,20 @@ function welcomeBackupLabel(){
   return Number.isFinite(date.getTime())?`Last successful backup: ${date.toLocaleString()}`:'No successful backup recorded yet.';
 }
 function welcomeButtonIcons(root){
-  const paths={profile:'M20 21v-2a7 7 0 0 0-14 0v2 M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8',continue:'M5 12h14 M13 6l6 6-6 6',teaching:'M3 4h7l2 2 2-2h7v15h-7l-2 2-2-2H3z M12 6v15',adviser:'M16 21v-2a6 6 0 0 0-12 0v2 M10 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8 M17 4a4 4 0 0 1 0 8 M20 15a5 5 0 0 1 2 4v2',add:'M12 5v14 M5 12h14',upload:'M12 16V3 M7 8l5-5 5 5 M4 15v6h16v-6',download:'M12 3v13 M7 11l5 5 5-5 M4 17v4h16v-4',save:'M5 3h12l4 4v14H3V3z M7 3v6h10V3 M7 21v-8h10v8',close:'M6 6l12 12 M6 18L18 6'};
-  const targets={'#welcomeEditProfile':'profile','#welcomeContinue':'continue','[data-go-tab="subjecthome"]':'teaching','#welcomeAdviser':'adviser','[data-click-id="btnNewClass"]':'add','[data-click-id="btnImport"]':'upload','[data-click-id="btnExport"]':'download','#profileSave':'save','#profileClose':'close'};
+  const paths={profile:'M20 21v-2a7 7 0 0 0-14 0v2 M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8',save:'M5 3h12l4 4v14H3V3z M7 3v6h10V3 M7 21v-8h10v8',close:'M6 6l12 12 M6 18L18 6'};
+  const targets={'#welcomeEditProfile':'profile','#profileSave':'save','#profileClose':'close'};
   for(const [selector,name] of Object.entries(targets)){const button=root.querySelector(selector);if(button)button.insertAdjacentHTML('afterbegin','<svg class="welcome-button-icon" aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="'+paths[name]+'"/></svg>');}
 }
+function welcomeLauncher({id='',tab='',title,badge='',tone='cyan',icon='class',ariaLabel=''}){
+  const attrs=['type="button"',`class="workspace-launcher welcome-launcher tone-${tone}"`];
+  if(id)attrs.push(`id="${id}"`);
+  if(tab)attrs.push(`data-go-tab="${tab}"`);
+  if(ariaLabel)attrs.push(`aria-label="${esc(ariaLabel)}"`);
+  return `<button ${attrs.join(' ')}><span class="workspace-launcher-icon" aria-hidden="true">${workspaceIconSvg(icon)}</span><span class="workspace-launcher-title">${esc(title)}</span>${badge?`<span class="workspace-launcher-badge">${esc(badge)}</span>`:''}</button>`;
+}
 function renderWelcome(main){
-  const profile=welcomeProfile(),settings=welcomeSettings(),cls=activeClass(),adviser=adviserClass();
+  const profile=welcomeProfile(),cls=activeClass(),adviser=adviserClass();
   const hasProfile=!!String(profile.displayName||'').trim();
-  const lastCls=APP.classes[settings.lastClassId]||cls;
-  const lastTab=Object.hasOwn(WELCOME_TABS,settings.lastTab)?settings.lastTab:'subjecthome';
-  const hasLast=!!settings.lastTab;
   const initials=String(profile.displayName||'Teacher').trim().split(/\s+/).slice(0,2).map(s=>Array.from(s)[0]||'').join('').toUpperCase();
   main.innerHTML=`<section class="welcome-page">
     <img class="welcome-background" src="assets/welcome-classroom.png" alt="" aria-hidden="true">
@@ -69,10 +74,14 @@ function renderWelcome(main){
         </div>
         <div class="welcome-time"><time id="welcomeClock"></time><p id="welcomeDate"></p><span>Computer’s local time</span></div>
       </div>
-      <div class="welcome-bottom"><div class="welcome-actions">
-        <div class="welcome-action welcome-continue"><span class="welcome-eyebrow">${hasLast?'PICK UP WHERE YOU LEFT OFF':'READY WHEN YOU ARE'}</span><h2>${hasLast?'Continue working':'Start your teaching day'}</h2><p>${hasLast?esc((roleForTab(lastTab)==='adviser'?'Advisory workspace':lastCls?.meta?.className||'Teaching class')+' · '+WELCOME_TABS[lastTab]):'Create a teaching class or restore an existing backup.'}</p><button id="welcomeContinue" class="primary" type="button">${hasLast?'Continue Working':'Open Class Overview'}</button></div>
-        <div class="welcome-action"><span class="welcome-eyebrow">TEACHING</span><h2>Subject Teacher</h2><p>Manage your classes, learners and grading.</p><button class="ghost-alt" data-go-tab="subjecthome" type="button">Open Teaching Classes</button></div>
-        <div class="welcome-action"><span class="welcome-eyebrow">ADVISORY</span><h2>Adviser</h2><p>${adviserSf1Ready(adviser)?'Your SF1 masterlist is ready. Open your advisory records.':'Set up your advisory class with an SF1 masterlist.'}</p><button id="welcomeAdviser" class="ghost-alt" type="button">${adviserSf1Ready(adviser)?'Open Advisory Workspace':'Upload SF1'}</button></div>
+      <div class="welcome-bottom">
+        <div class="welcome-launch-heading">
+          <div><span class="welcome-eyebrow">WORKSPACES</span><h2>Select a workspace to continue.</h2></div>
+        </div>
+        <div class="welcome-launch-grid welcome-launch-grid-primary">
+          ${welcomeLauncher({tab:'subjecthome',title:'Class Overview',badge:"See Sections I'm Handling",tone:'blue',icon:'class',ariaLabel:'Open Class Overview'})}
+          ${welcomeLauncher({id:'welcomeAdviser',title:'Advisory Overview',badge:'See My Advisory Class',tone:'purple',icon:'adviser',ariaLabel:'Open Advisory Overview'})}
+        </div>
       </div>
       <dialog id="welcomeProfilePanel" class="welcome-profile" aria-labelledby="welcomeProfileTitle"><div class="welcome-modal-heading"><h2 id="welcomeProfileTitle">Teacher profile</h2><button type="button" id="profileClose" class="ghost-alt" aria-label="Close profile setup">Close</button></div>
         <form id="welcomeProfileForm"><p>Your display profile is separate from official teacher names and signatories.</p>
@@ -91,8 +100,7 @@ function renderWelcome(main){
   welcomeTick();if(welcomeClockTimer)clearInterval(welcomeClockTimer);welcomeClockTimer=setInterval(welcomeTick,1000);
   document.getElementById('welcomeEditProfile').onclick=()=>{const p=document.getElementById('welcomeProfilePanel');p.showModal();document.getElementById('profileDisplayName').focus();};
   document.getElementById('profileClose').onclick=()=>document.getElementById('welcomeProfilePanel').close();
-  document.getElementById('welcomeContinue').onclick=()=>{if(lastCls)APP.activeId=lastCls.id;activeTab=hasLast?lastTab:'subjecthome';render();};
-  document.getElementById('welcomeAdviser').onclick=()=>{activeTab='adviserhome';render();if(!adviserSf1Ready(adviser))importOfficialSf1IntoClass(adviser);};
+  document.getElementById('welcomeAdviser').onclick=()=>{navigateToTab('adviserhome');if(!adviserSf1Ready(adviser))importOfficialSf1IntoClass(adviser);};
   document.getElementById('welcomeProfileForm').onsubmit=async e=>{
     e.preventDefault();const form=e.currentTarget,button=document.getElementById('profileSave'),error=document.getElementById('profileError');
     if(!form.reportValidity())return;const displayName=document.getElementById('profileDisplayName').value.trim();

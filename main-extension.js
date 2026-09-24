@@ -466,6 +466,20 @@ function replacePngMediaFromDataUri(zip, entryName, dataUri) {
   } catch {}
 }
 
+function placeDepEdLeftAndSchoolRight(zip, leftEntryName, rightEntryName, schoolLogoDataUri) {
+  // The bundled official templates currently keep the DepEd artwork in the
+  // right-hand media slot. Move that exact bundled artwork to the left slot,
+  // then place the user-selected school/custom logo in the right slot.
+  const depedEntry = zip.getEntry(rightEntryName);
+  if (depedEntry) {
+    try {
+      const depedBytes = Buffer.from(depedEntry.getData());
+      if (depedBytes.length > 100) zip.updateFile(leftEntryName, depedBytes);
+    } catch {}
+  }
+  replacePngMediaFromDataUri(zip, rightEntryName, schoolLogoDataUri);
+}
+
 function divisionHeading(value) {
   const text = String(value || '').trim();
   if (!text) return '';
@@ -517,10 +531,10 @@ function buildOfficialGsBuffer(payload, ctx) {
   for (const [ref, value] of Object.entries(headerValues)) xml = setWorksheetCell(xml, ref, value, 'string');
 
   const hpsMap = {};
-  ['F','G','H','I','J'].forEach((c,i)=>hpsMap[`${c}13`] = Number(ww.components[i].hps || 0));
+  ['F','G','H','I','J'].forEach((c,i)=>{ const comp=ww.components[i]; hpsMap[`${c}13`] = comp ? Number(comp.hps || 0) : ''; });
   hpsMap.K13 = ww.components.reduce((a,c)=>a+Number(c.hps||0),0);
   hpsMap.L13 = 100; hpsMap.M13 = Number(ww.weight || 0);
-  ['N','O','P'].forEach((c,i)=>hpsMap[`${c}13`] = Number(pt.components[i].hps || 0));
+  ['N','O','P'].forEach((c,i)=>{ const comp=pt.components[i]; hpsMap[`${c}13`] = comp ? Number(comp.hps || 0) : ''; });
   hpsMap.Q13 = pt.components.reduce((a,c)=>a+Number(c.hps||0),0);
   hpsMap.R13 = 100; hpsMap.S13 = Number(pt.weight || 0);
   ['T','U','V'].forEach((c,i)=>hpsMap[`${c}13`] = Number(ex.components[i].hps || 0));
@@ -569,9 +583,9 @@ function buildOfficialGsBuffer(payload, ctx) {
   xml = compactUnusedGsLearnerRows(xml, payload);
   zip.updateFile('xl/worksheets/sheet1.xml', Buffer.from(xml, 'utf8'));
 
-  // The uploaded GS template uses its first image as the school logo and its
-  // second image as the fixed DepEd seal. Replace only the school logo image.
-  replacePngMediaFromDataUri(zip, 'xl/media/image1.png', payload.schoolLogoDataUri);
+  // Final logo order: DepEd on the left, user-selected school/custom logo on the right.
+  // In the bundled GS template image1 is left and image2 is right.
+  placeDepEdLeftAndSchoolRight(zip, 'xl/media/image1.png', 'xl/media/image2.png', payload.schoolLogoDataUri);
 
   const wbEntry = zip.getEntry('xl/workbook.xml');
   if (wbEntry) {
@@ -786,8 +800,8 @@ function validatePayload(payload) {
   const ww = payload.categories.WW || {};
   const pt = payload.categories.PT || {};
   const ex = payload.categories.EXAM || {};
-  if ((ww.components || []).length !== 5 || (pt.components || []).length !== 3 || (ex.components || []).length !== 3) {
-    throw new Error('The official ECR template requires exactly 5 WW, 3 PT and 3 Examination components.');
+  if ((ww.components || []).length > 5 || (pt.components || []).length > 3 || (ex.components || []).length !== 3) {
+    throw new Error('The official ECR/GS templates support up to 5 WW and up to 3 PT components; Examination must retain the 3-component official structure.');
   }
   const cats = [['WW',ww],['PT',pt],['EXAM',ex]];
   let totalWeight = 0;
@@ -804,11 +818,13 @@ function validatePayload(payload) {
       if (key === 'EXAM') {
         const sw=Number(c && c.subWeight);
         if (!Number.isFinite(sw) || sw < 0 || sw > 100) throw new Error('EXAM contains an invalid item weight.');
-        if (h > 0) { customTotal += sw; activeCustomItems++; }
-        else if (Math.abs(sw) > 0.001) throw new Error('An inactive EXAM item (HPS 0) must have 0% item weight.');
+        if ((ex.mode || 'custom') === 'custom') {
+          if (h > 0) { customTotal += sw; activeCustomItems++; }
+          else if (Math.abs(sw) > 0.001) throw new Error('An inactive EXAM item (HPS 0) must have 0% item weight.');
+        }
       }
     }
-    if (key === 'EXAM' && activeCustomItems > 0 && Math.abs(customTotal - 100) > 0.001) throw new Error('Active EXAM item weights must total exactly 100%.');
+    if (key === 'EXAM' && (ex.mode || 'custom') === 'custom' && activeCustomItems > 0 && Math.abs(customTotal - 100) > 0.001) throw new Error('Active EXAM item weights must total exactly 100%.');
   }
   if (Math.abs(totalWeight - 1) > 0.0001) throw new Error('Category weights must total exactly 100%.');
   for (const st of payload.students) {
@@ -879,10 +895,10 @@ function buildOfficialEcrBuffer(payload, ctx) {
   for (const [ref, value] of Object.entries(headerValues)) xml = setWorksheetCell(xml, ref, value, 'string');
 
   const hpsMap = {};
-  ['F','G','H','I','J'].forEach((c,i)=>hpsMap[`${c}15`] = Number(ww.components[i].hps || 0));
+  ['F','G','H','I','J'].forEach((c,i)=>{ const comp=ww.components[i]; hpsMap[`${c}15`] = comp ? Number(comp.hps || 0) : ''; });
   hpsMap.K15 = ww.components.reduce((a,c)=>a+Number(c.hps||0),0);
   hpsMap.L15 = 100; hpsMap.M15 = Number(ww.weight || 0);
-  ['N','O','P'].forEach((c,i)=>hpsMap[`${c}15`] = Number(pt.components[i].hps || 0));
+  ['N','O','P'].forEach((c,i)=>{ const comp=pt.components[i]; hpsMap[`${c}15`] = comp ? Number(comp.hps || 0) : ''; });
   hpsMap.Q15 = pt.components.reduce((a,c)=>a+Number(c.hps||0),0);
   hpsMap.R15 = 100; hpsMap.S15 = Number(pt.weight || 0);
   ['T','U','V'].forEach((c,i)=>hpsMap[`${c}15`] = Number(ex.components[i].hps || 0));
@@ -933,9 +949,9 @@ function buildOfficialEcrBuffer(payload, ctx) {
 
   zip.updateFile('xl/worksheets/sheet1.xml', Buffer.from(xml, 'utf8'));
 
-  // Keep the official template fixed but replace its school-logo image with
-  // the global logo selected in Setup, just as the official GS does.
-  replacePngMediaFromDataUri(zip, 'xl/media/image1.png', payload.schoolLogoDataUri);
+  // Final logo order: DepEd on the left, user-selected school/custom logo on the right.
+  // In the bundled ECR template image1 is left and image2 is right.
+  placeDepEdLeftAndSchoolRight(zip, 'xl/media/image1.png', 'xl/media/image2.png', payload.schoolLogoDataUri);
 
   const wbEntry = zip.getEntry('xl/workbook.xml');
   if (wbEntry) {

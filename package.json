@@ -1,59 +1,59 @@
-﻿{
-    "name":  "e-class-record-app-gs-sf9",
-    "version":  "1.4.31",
-    "description":  "Offline-first E-Class Record App with official ECR, Grading Sheet, compliant SF2 Daily Attendance, SF9, SF1 import, secure local backups/updates, and app-owned grading/attendance logic",
-    "main":  "main.js",
-    "author":  "",
-    "license":  "UNLICENSED",
-    "private":  true,
-    "scripts":  {
-                    "start":  "electron .",
-                    "dist":  "electron-builder --win nsis",
-                    "dist:portable":  "electron-builder --win portable"
-                },
-    "devDependencies":  {
-                            "electron":  "44.2.0",
-                            "electron-builder":  "26.15.3"
-                        },
-    "build":  {
-                  "appId":  "ph.edu.eclassrecord.gs.sf9",
-                  "productName":  "E-Class Record App with GS and SF9",
-                  "artifactName":  "E-Class Record App with GS and SF9 Setup ${version}.${ext}",
-                  "directories":  {
-                                      "output":  "dist"
-                                  },
-                  "files":  [
-                                "main.js",
-                                "preload.js",
-                                "sf1-parser.js",
-                                "flex-importers.js",
-                                "thread-updater.js",
-                                "main-extension.js",
-                                "app/**/*",
-                                "assets/**/*",
-                                "templates/**/*"
-                            ],
-                  "win":  {
-                              "target":  [
-                                             {
-                                                 "target":  "nsis",
-                                                 "arch":  [
-                                                              "x64"
-                                                          ]
-                                             }
-                                         ],
-                              "icon":  "assets/app.ico"
-                          },
-                  "nsis":  {
-                               "oneClick":  false,
-                               "allowToChangeInstallationDirectory":  true,
-                               "createDesktopShortcut":  true,
-                               "createStartMenuShortcut":  true,
-                               "shortcutName":  "E-Class Record App with GS and SF9",
-                               "deleteAppDataOnUninstall":  false
-                           }
-              },
-    "dependencies":  {
-                         "adm-zip":  "0.6.0"
-                     }
+{
+  "name": "e-class-record-app-gs-sf9",
+  "version": "1.5.0",
+  "description": "Offline-first E-Class Record App with official ECR, Grading Sheet, compliant SF2 Daily Attendance, SF9, SF1 import, secure local backups/updates, and app-owned grading/attendance logic",
+  "main": "main.js",
+  "author": "",
+  "license": "UNLICENSED",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win nsis",
+    "dist:portable": "electron-builder --win portable"
+  },
+  "devDependencies": {
+    "electron": "44.2.0",
+    "electron-builder": "26.15.3"
+  },
+  "build": {
+    "appId": "ph.edu.eclassrecord.gs.sf9",
+    "productName": "E-Class Record App with GS and SF9",
+    "artifactName": "E-Class Record App with GS and SF9 Setup ${version}.${ext}",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "sf1-parser.js",
+      "flex-importers.js",
+      "thread-updater.js",
+      "main-extension.js",
+      "app/**/*",
+      "assets/**/*",
+      "templates/**/*"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "assets/app.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "E-Class Record App with GS and SF9",
+      "deleteAppDataOnUninstall": false
+    }
+  },
+  "dependencies": {
+    "adm-zip": "0.6.0"
+  }
 }
