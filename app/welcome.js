@@ -11,7 +11,8 @@ function welcomeProfile(){
 }
 function welcomeInitialTab(state){
   const w=welcomeSettings(state);
-  return w.skipStartup===true ? (Object.hasOwn(WELCOME_TABS,w.lastTab)?w.lastTab:'subjecthome') : 'welcome';
+  delete w.skipStartup;
+  return 'welcome';
 }
 function welcomeRememberView(){
   if(activeTab==='welcome')return;

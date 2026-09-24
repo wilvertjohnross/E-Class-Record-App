@@ -1,0 +1,53 @@
+PASS Blank/null/missing/whitespace HPS preserved
+PASS Explicit zero remains distinct
+PASS Cross-term HPS conflict rejects without mutation
+PASS Valid shared HPS change requires explicit cross-term confirmation
+PASS Confirmed cross-term change applied
+PASS Invalid imported raw score rolls back metadata and scores
+PASS SF1 over-capacity merge leaves all records untouched
+PASS SF1 replacement counts final roster rather than temporary combined roster
+PASS SF1 invalid trailing learner leaves earlier matches and metadata unchanged
+PASS SF1 duplicate LRN rejected transactionally
+PASS Final 75 uses Connecting without second transmutation
+PASS Legacy missing empty term normalized on detached copy
+PASS Malformed backup rejected without mutation
+PASS Failed browser backup save restores in-memory and stored state
+PASS Successful backup import retains recoverable pre-import snapshot
+PASS Retired startup preference no longer hides Welcome
+PASS Simple examination payload has mode and proportional component contributions
+PASS Legacy scored item protected; unscored repair returns to fixed five controls
+PASS Simple EX accepted by backend; ECR and GS contain proportional values without formulas
+PASS Compact and spaced SF1 headers preserve duplicate/LRN/sex checks
+PASS Desktop atomic save preserves previous and dedicated pre-import backups
+PASS Malformed and interrupted disk writes leave primary records intact
+PASS Installed-bootstrap-compatible handlers enforce sender identity and shared validation
+PASS No renderer errors
+{
+  "passed": 24,
+  "results": [
+    "Blank/null/missing/whitespace HPS preserved",
+    "Explicit zero remains distinct",
+    "Cross-term HPS conflict rejects without mutation",
+    "Valid shared HPS change requires explicit cross-term confirmation",
+    "Confirmed cross-term change applied",
+    "Invalid imported raw score rolls back metadata and scores",
+    "SF1 over-capacity merge leaves all records untouched",
+    "SF1 replacement counts final roster rather than temporary combined roster",
+    "SF1 invalid trailing learner leaves earlier matches and metadata unchanged",
+    "SF1 duplicate LRN rejected transactionally",
+    "Final 75 uses Connecting without second transmutation",
+    "Legacy missing empty term normalized on detached copy",
+    "Malformed backup rejected without mutation",
+    "Failed browser backup save restores in-memory and stored state",
+    "Successful backup import retains recoverable pre-import snapshot",
+    "Retired startup preference no longer hides Welcome",
+    "Simple examination payload has mode and proportional component contributions",
+    "Legacy scored item protected; unscored repair returns to fixed five controls",
+    "Simple EX accepted by backend; ECR and GS contain proportional values without formulas",
+    "Compact and spaced SF1 headers preserve duplicate/LRN/sex checks",
+    "Desktop atomic save preserves previous and dedicated pre-import backups",
+    "Malformed and interrupted disk writes leave primary records intact",
+    "Installed-bootstrap-compatible handlers enforce sender identity and shared validation",
+    "No renderer errors"
+  ]
+}

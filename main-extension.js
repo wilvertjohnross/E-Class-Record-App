@@ -524,7 +524,7 @@ function buildOfficialGsBuffer(payload, ctx) {
   hpsMap.Q13 = pt.components.reduce((a,c)=>a+Number(c.hps||0),0);
   hpsMap.R13 = 100; hpsMap.S13 = Number(pt.weight || 0);
   ['T','U','V'].forEach((c,i)=>hpsMap[`${c}13`] = Number(ex.components[i].hps || 0));
-  ['W','X','Y'].forEach((c,i)=>hpsMap[`${c}13`] = Number(ex.components[i].subWeight || 0));
+  ['W','X','Y'].forEach((c,i)=>hpsMap[`${c}13`] = examinationWeight(ex,i));
   hpsMap.Z13 = 100; hpsMap.AA13 = Number(ex.weight || 0);
   for (const [ref, value] of Object.entries(hpsMap)) xml = setWorksheetCell(xml, ref, value, 'number');
 
@@ -768,6 +768,10 @@ function buildOfficialDocumentBuffer(kind, payload, ctx) {
   return buildOfficialEcrBuffer(payload, ctx);
 }
 
+function examinationWeight(cat,index){
+  const h=Number(cat.components[index].hps||0),total=cat.components.reduce((s,c)=>s+Number(c.hps||0),0);
+  return cat.mode==='simple'?(total>0?h/total*100:0):Number(cat.components[index].subWeight||0);
+}
 function validatePayload(payload) {
   if (!payload || typeof payload !== 'object' || !payload.meta || typeof payload.meta !== 'object' || !payload.categories || typeof payload.categories !== 'object' || !Array.isArray(payload.students)) {
     throw new Error('The Class Record data sent to the official-output engine is incomplete.');
@@ -792,6 +796,7 @@ function validatePayload(payload) {
   const cats = [['WW',ww],['PT',pt],['EXAM',ex]];
   let totalWeight = 0;
   for (const [key,cat] of cats) {
+    if(cat.mode!==undefined&&!['simple','custom'].includes(cat.mode))throw new Error('Invalid grading mode.');
     const weight = Number(cat.weight);
     if (!Number.isFinite(weight) || weight < 0 || weight > 1) throw new Error(`${key} has an invalid category weight.`);
     totalWeight += weight;
@@ -801,14 +806,14 @@ function validatePayload(payload) {
       const h = Number(c && c.hps);
       if (!Number.isFinite(h) || h < 0 || h > 1000000) throw new Error(`${key} contains an invalid HPS.`);
       if (String(c && c.name || '').length > 200) throw new Error(`${key} contains an unexpectedly long component name.`);
-      if (key === 'EXAM') {
+      if (cat.mode === 'custom' || (key === 'EXAM' && cat.mode === undefined)) {
         const sw=Number(c && c.subWeight);
         if (!Number.isFinite(sw) || sw < 0 || sw > 100) throw new Error('EXAM contains an invalid item weight.');
         if (h > 0) { customTotal += sw; activeCustomItems++; }
         else if (Math.abs(sw) > 0.001) throw new Error('An inactive EXAM item (HPS 0) must have 0% item weight.');
       }
     }
-    if (key === 'EXAM' && activeCustomItems > 0 && Math.abs(customTotal - 100) > 0.001) throw new Error('Active EXAM item weights must total exactly 100%.');
+    if ((cat.mode === 'custom' || (key === 'EXAM' && cat.mode === undefined)) && activeCustomItems > 0 && Math.abs(customTotal - 100) > 0.001) throw new Error('Active EXAM item weights must total exactly 100%.');
   }
   if (Math.abs(totalWeight - 1) > 0.0001) throw new Error('Category weights must total exactly 100%.');
   for (const st of payload.students) {
@@ -886,7 +891,7 @@ function buildOfficialEcrBuffer(payload, ctx) {
   hpsMap.Q15 = pt.components.reduce((a,c)=>a+Number(c.hps||0),0);
   hpsMap.R15 = 100; hpsMap.S15 = Number(pt.weight || 0);
   ['T','U','V'].forEach((c,i)=>hpsMap[`${c}15`] = Number(ex.components[i].hps || 0));
-  ['W','X','Y'].forEach((c,i)=>hpsMap[`${c}15`] = Number(ex.components[i].subWeight || 0));
+  ['W','X','Y'].forEach((c,i)=>hpsMap[`${c}15`] = examinationWeight(ex,i));
   hpsMap.Z15 = 100; hpsMap.AA15 = Number(ex.weight || 0);
   for (const [ref, value] of Object.entries(hpsMap)) xml = setWorksheetCell(xml, ref, value, 'number');
 
@@ -1551,7 +1556,7 @@ function makeEcrExcelRenderPlan(payload) {
     ],
     'T15:AD15': [
       ...ex.components.map(c=>Number(c.hps||0)),
-      ...ex.components.map(c=>Number(c.subWeight||0)),
+      ...ex.components.map((c,i)=>examinationWeight(ex,i)),
       100, Number(ex.weight||0), '', '', ''
     ]
   };
@@ -2401,6 +2406,7 @@ function openSf9HtmlPreview(payload, context){
 module.exports = {
   async register(context) {
     startupContext = context;
+    require(context.resolveResource("state-persistence.js")).register(context);
 
     // Existing bootstraps read this Electron path for the update watcher,
     // manual update scan and folder shortcut. This override is app-local;

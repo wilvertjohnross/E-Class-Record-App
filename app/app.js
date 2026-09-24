@@ -278,8 +278,8 @@ function classRecordLinkStatus(cls){
   if(m.classRecordSubjectId!=="ELECTIVE") return {ok:true,key,label:classRecordSubjectLabel(cls)};
   if(key) return {ok:true,key,label:classRecordSubjectLabel(cls)};
   const sc=ensureSubjectConfig(cls);
-  if(sc.classType!=="Special Science Class") return {ok:false,key:null,label:classRecordSubjectLabel(cls),message:"The active Class Record is an elective, but SF9 Setup is currently Regular Class. Configure SF9 as a special class before this elective can link to Summary of Grades."};
-  return {ok:false,key:null,label:classRecordSubjectLabel(cls),message:`${classRecordSubjectLabel(cls)} is not assigned to Elective 1 or Elective 2 in SF9 Setup. Select the same elective there before grades can link to Summary of Grades.`};
+  if(sc.classType!=="Special Science Class") return {ok:false,key:null,label:classRecordSubjectLabel(cls),message:"The active Class Record is an elective, but SF9 Setup is currently Regular Class. Configure elective subjects in Adviser SF9 Setup. Adviser grades are managed separately from Subject Teacher records."};
+  return {ok:false,key:null,label:classRecordSubjectLabel(cls),message:`${classRecordSubjectLabel(cls)} is not assigned to Elective 1 or Elective 2 in SF9 Setup. Adviser grades are managed separately in Summary of Subject Grades.`};
 }
 function classHasEncodedScores(cls){
   const walk=v=>{
@@ -557,6 +557,7 @@ function loadState(){
 }
 
 let SAVE_QUEUE=Promise.resolve();
+let STATE_TRANSITION=false;
 function setSaveStatus(text,isError=false){
   const el=document.getElementById("statusRight");
   if(!el) return;
@@ -564,7 +565,8 @@ function setSaveStatus(text,isError=false){
   el.style.color=isError?"var(--red-pen)":"";
   el.style.fontWeight=isError?"800":"";
 }
-function saveState(){
+function saveState({backupImport=false}={}){
+  if(STATE_TRANSITION)return Promise.resolve({ok:true,deferred:true});
   try{
     Object.values(APP.classes||{}).forEach(c=>{
       c.domain="subject";
@@ -581,14 +583,16 @@ function saveState(){
   const revision=APP._persistence.revision;
   // v1.1.10: persist text in Unicode NFC so ñ/Ñ and other accented letters
   // survive input/import -> JSON -> official-output round trips consistently.
-  const serialized=JSON.stringify(APP,(_k,v)=>typeof v==="string"?unicodeText(v):v);
+  const saveSnapshot=backupImport ? {...APP,_persistence:{...APP._persistence,backupImport:true}} : APP;
+  const serialized=JSON.stringify(saveSnapshot,(_k,v)=>typeof v==="string"?unicodeText(v):v);
 
-  try{ localStorage.setItem(STORE_KEY,serialized); }
+  let localSaved=false;
+  try{ localStorage.setItem(STORE_KEY,JSON.stringify(APP)); localSaved=true; }
   catch(err){ console.warn("Local recovery save failed",err); }
 
   if(!(window.eclassAPI && typeof window.eclassAPI.saveData==="function")){
-    setSaveStatus("Saved locally " + new Date().toLocaleTimeString());
-    return Promise.resolve({ok:true,localOnly:true});
+    setSaveStatus(localSaved ? "Saved locally " + new Date().toLocaleTimeString() : "⚠ NOT SAVED — storage is unavailable; export a backup",!localSaved);
+    return Promise.resolve({ok:localSaved,localOnly:true,error:localSaved?undefined:"Local storage write failed."});
   }
 
   setSaveStatus("Saving…");
@@ -744,8 +748,7 @@ function studentFinalResult(cls, studentId){
   const terms = ["term1","term2","term3"].map(t=>studentTermResult(cls,t,studentId).term).filter(v=>v!==null && v!==undefined);
   if(!terms.length) return {final:null, band:null, count:0};
   const final = averageWhole(terms);
-  const t = transmute(final);
-  return {final, band: t?t.band:null, count: terms.length};
+  return {final, band: bandFor(final), count: terms.length};
 }
 
 /* =========================================================================
@@ -1246,11 +1249,12 @@ function renderSf9Setup(main, cls){
 
 function renderCategoryEditor(cls, key){
   const cat = cls.categories[key];
-  const allowCustomWeights = key === "EXAM";
-  const fixedItems = key === "WW" || key === "PT";
+  const legacy=(key==='WW'||key==='PT')&&(cat.components.length!==(key==='WW'?5:3)||cat.mode==='custom');
+  const allowCustomWeights = key === "EXAM" || legacy;
+  const fixedItems = (key === "WW" || key === "PT")&&!legacy;
   const rows = cat.components.map(c=>`
     <tr data-comp="${esc(c.id)}">
-      <td><input type="text" class="comp-name" ${fixedItems?'readonly aria-readonly="true"':''} value="${esc(c.name)}" style="width:110px;"></td>
+      <td><input type="text" class="comp-name" ${(key==='WW'||key==='PT')?'readonly aria-readonly="true"':''} value="${esc(c.name)}" style="width:110px;"></td>
       <td><input type="number" class="comp-hps" value="${esc(c.hps)}" min="0" step="1" style="width:70px;"></td>
       ${allowCustomWeights ? `<td>${cat.mode==="custom" ? `<input type="number" class="comp-subweight" value="${esc(c.subWeight)}" min="0" step="1" style="width:70px;">` : `<span class="hint">auto</span>`}</td>` : ""}
       ${fixedItems ? "" : `<td><button class="small danger comp-remove icon-remove" type="button" aria-label="Remove item" title="Remove item"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 6h18M9 6V4h6v2M5 6l1 14h12l1-14M10 10v6M14 10v6"/></svg></button></td>`}
@@ -1258,6 +1262,7 @@ function renderCategoryEditor(cls, key){
   return `
     <section class="cat-editor" data-cat="${key}">
       <div class="cat-editor-title">${cat.label}</div>
+      ${legacy?`<p class="hint">Legacy setup preserved. Export a backup before adjusting it. Only unscored items can be removed. Official templates require 5 WW and 3 PT; encoded extra items must remain in this class. Use a separate class for the fixed template.</p>`:""}
       <div class="cat-controls">
         <label class="hint">Category weight (%)</label>
         <input type="number" class="cat-weight" value="${Math.round(cat.weight*10000)/100}" min="0" max="100" step="1">
@@ -1289,6 +1294,7 @@ function bindCategoryEditorEvents(cls){
       saveState(); render();
     });
     section.querySelector(".comp-add")?.addEventListener("click", ()=>{
+      if(cat.components.length>=200){alert("The 200-item safety limit has been reached.");return;}
       cat.components.push({id:uid("c"), name:"Item "+(cat.components.length+1), hps:50, subWeight:0});
       saveState(); render();
     });
@@ -1312,6 +1318,8 @@ function bindCategoryEditorEvents(cls){
         comp.subWeight=n;saveState();updateWeightTotal(cls);
       });
       row.querySelector(".comp-remove")?.addEventListener("click", ()=>{
+        if((key==='WW'||key==='PT')&&maxExistingScoreForComponent(cls,key,cid)!==null){alert('This legacy item contains recorded scores and cannot be removed. Preserve it and use a separate class for a fixed official template.');return;}
+        if((key==='WW'||key==='PT')&&!confirm('Remove this unscored legacy item? Export a backup first if you need to retain its setup.'))return;
         cat.components = cat.components.filter(c=>c.id!==cid);
         saveState(); render();
       });
@@ -1381,7 +1389,54 @@ function deleteStudentEverywhere(cls,sid){
   }
 }
 
+
 function applyOfficialSf1Import(cls,data,options={}){
+  const candidate=JSON.parse(JSON.stringify(cls));
+  const stats=mutateOfficialSf1Import(candidate,data,options);
+  Object.assign(cls,candidate);
+  return stats;
+}
+function prepareOfficialEcrImport(cls,data){
+  const candidate=JSON.parse(JSON.stringify(cls));
+  const stats=mutateOfficialEcrImport(candidate,data);
+  const errors=validateGradingConfiguration(candidate);
+  if(errors.length)throw new Error('Import conflicts with grading setup or recorded scores (including other terms). No data was imported.\n'+errors.join('\n'));
+  const changed=JSON.stringify(candidate.categories)!==JSON.stringify(cls.categories);
+  const otherTerms=['term1','term2','term3'].filter(t=>t!==stats.termKey&&Object.values(cls.scores[t]||{}).some(s=>Object.values(s).some(cat=>Object.values(cat||{}).some(v=>v!==''&&v!==null&&v!==undefined))));
+  return {candidate,stats,crossTermChange:changed&&otherTerms.length>0,otherTerms};
+}
+function applyOfficialEcrImport(cls,data,{allowCrossTermChange=false}={}){
+  const plan=prepareOfficialEcrImport(cls,data);
+  if(plan.crossTermChange&&!allowCrossTermChange)throw new Error('This import changes shared HPS or weights used by '+plan.otherTerms.join(', ')+'. Confirm the cross-term recalculation before importing.');
+  Object.assign(cls,plan.candidate);return plan.stats;
+}
+async function commitClassCandidate(original,candidate){
+  const state=JSON.parse(JSON.stringify(APP));
+  if(original===APP.adviserWorkspace)state.adviserWorkspace=candidate;
+  else if(state.classes[original.id])state.classes[original.id]=candidate;
+  else throw new Error('The import target no longer exists.');
+  return commitBackupImport(state);
+}
+async function commitBackupImport(data){
+  const candidate=validateBackupForImport(data), previous=APP;
+  await SAVE_QUEUE.catch(()=>null);
+  const oldLocal=localStorage.getItem(STORE_KEY);
+  try{localStorage.setItem(STORE_KEY+'.before-import',JSON.stringify(previous));}
+  catch(err){if(!(window.eclassAPI&&window.eclassAPI.saveData))throw new Error('Cannot preserve the pre-import recovery copy. Import cancelled.');}
+  // Imported revisions must not outrank the rollback or a more recent disk state.
+  candidate._persistence={...candidate._persistence,revision:persistenceRevision(previous)};
+  try{
+    STATE_TRANSITION=true;APP=candidate;render();STATE_TRANSITION=false;
+    const result=await saveState({backupImport:true});
+    if(!result||!result.ok)throw new Error(result&&result.error||'The imported backup could not be saved.');
+  }catch(err){
+    STATE_TRANSITION=true;APP=previous;
+    try{if(oldLocal===null)localStorage.removeItem(STORE_KEY);else localStorage.setItem(STORE_KEY,oldLocal);}catch(_){}
+    try{render();}finally{STATE_TRANSITION=false;}setSaveStatus('Import failed — previous records retained',true);throw err;
+  }
+}
+
+function mutateOfficialSf1Import(cls,data,options={}){
   const sources=Array.isArray(data.learners)?data.learners:[];
   if(!sources.length) throw new Error("No learners were found in the SF1 data.");
   if(sources.length>1000) throw new Error("SF1 contains more than the 1,000-learner safety limit for one class.");
@@ -1398,7 +1453,8 @@ function applyOfficialSf1Import(cls,data,options={}){
   for(const source of sources){
     const lrn=String(source.lrn||"").replace(/\D/g,"");
     const name=unicodeText(source.name).trim();
-    if(!lrn||!name) continue;
+    if(!/^\d{12}$/.test(lrn)||!name||!["M","F"].includes(source.sex)) throw new Error("SF1 contains an invalid learner identity or sex.");
+    if(ordered.some(s=>s.lrn===lrn))throw new Error("SF1 contains a duplicate LRN.");
     let student=idx.byLrn.get(lrn)||null;
     if(!student){
       const nk=normalizeLearnerName(name), candidate=nk&&idx.byName.has(nk)?idx.byName.get(nk):null;
@@ -1414,7 +1470,7 @@ function applyOfficialSf1Import(cls,data,options={}){
     }
 
     if(!student){
-      if(cls.students.length>=1000) throw new Error("SF1 import would exceed the 1,000-learner safety limit for one class.");
+
       student={id:uid("s"),name,lrn,age:String(source.age||""),sex:source.sex==="F"?"F":"M",birthDate:String(source.birthDate||""),sf1Profile:cleanSf1Profile(source.sf1)};
       cls.students.push(student); ensureStudentExtras(cls,student.id); added++;
     }else{
@@ -1444,6 +1500,7 @@ function applyOfficialSf1Import(cls,data,options={}){
     cls.students=[...ordered,...unmatchedOriginal];
   }
 
+  if(cls.students.length>1000)throw new Error("SF1 import would exceed the 1,000-learner safety limit for one class.");
   return {learners:ordered.length,matched,added,removed,warnings:(data.warnings||[]).length};
 }
 
@@ -1466,8 +1523,9 @@ async function importOfficialSf1IntoClass(cls){
   const options=await showOfficialSf1ImportDialog(result.data,result.fileName,cls);
   if(!options) return;
   try{
-    const stats=applyOfficialSf1Import(cls,result.data,options);
-    saveState(); render();
+    const candidate=JSON.parse(JSON.stringify(cls));
+    const stats=applyOfficialSf1Import(candidate,result.data,options);
+    await commitClassCandidate(cls,candidate);
     const parts=[`${stats.learners} official SF1 learner${stats.learners===1?"":"s"} processed`];
     if(stats.matched) parts.push(`${stats.matched} existing learner${stats.matched===1?"":"s"} matched and updated`);
     if(stats.added) parts.push(`${stats.added} new learner${stats.added===1?"":"s"} added`);
@@ -2408,7 +2466,7 @@ function showOfficialEcrImportDialog(data,fileName,currentTermKey){
   });
 }
 
-function applyOfficialEcrImport(cls,data){
+function mutateOfficialEcrImport(cls,data){
   const targetTermKey=officialImportTermKey(data.termNo);
   const ww=cls.categories&&cls.categories.WW, pt=cls.categories&&cls.categories.PT, ex=cls.categories&&cls.categories.EXAM;
   if(!ww||!pt||!ex||ww.components.length!==5||pt.components.length!==3||ex.components.length!==3){
@@ -2426,15 +2484,18 @@ function applyOfficialEcrImport(cls,data){
   ensureClassRecordSubject(cls);
 
   // The official form is authoritative for HPS and component weighting.
+  let preservedHps=0;
   const applyHps=(cat,vals)=>cat.components.forEach((c,i)=>{
-    const n=Number(vals&&vals[i]); if(Number.isFinite(n)&&n>=0) c.hps=n;
+    const raw=vals&&vals[i];
+    if(raw===undefined||raw===null||String(raw).trim()===''){preservedHps++;return;}
+    const n=Number(raw); if(!Number.isFinite(n)||n<0)throw new Error('Invalid imported HPS.'); c.hps=n;
   });
   applyHps(ww,data.categories&&data.categories.WW&&data.categories.WW.hps);
   applyHps(pt,data.categories&&data.categories.PT&&data.categories.PT.hps);
   applyHps(ex,data.categories&&data.categories.EXAM&&data.categories.EXAM.hps);
   const setWeight=(cat,v)=>{
     if(v===""||v===null||v===undefined) return;
-    const n=Number(v); if(Number.isFinite(n)&&n>=0) cat.weight=n;
+    const n=Number(v); if(!Number.isFinite(n)||n<0||n>1)throw new Error("Invalid imported category weight."); cat.weight=n;
   };
   setWeight(ww,data.categories&&data.categories.WW&&data.categories.WW.weight);
   setWeight(pt,data.categories&&data.categories.PT&&data.categories.PT.weight);
@@ -2442,7 +2503,7 @@ function applyOfficialEcrImport(cls,data){
   const sw=data.categories&&data.categories.EXAM&&data.categories.EXAM.subWeights;
   ex.components.forEach((c,i)=>{
     const raw=sw&&sw[i]; if(raw===""||raw===null||raw===undefined) return;
-    const n=Number(raw); if(Number.isFinite(n)&&n>=0) c.subWeight=n;
+    const n=Number(raw); if(!Number.isFinite(n)||n<0||n>100)throw new Error("Invalid imported examination weight."); c.subWeight=n;
   });
 
   if(!cls.scores[targetTermKey]) cls.scores[targetTermKey]={};
@@ -2477,7 +2538,7 @@ function applyOfficialEcrImport(cls,data){
       (values||[]).forEach((raw,i)=>{
         if(i>=cat.components.length||raw===""||raw===null||raw===undefined) return;
         const n=Number(raw), h=Number(cat.components[i].hps||0);
-        if(!Number.isFinite(n)||n<0||(h>0&&n>h)){ invalid++; return; }
+        if(!Number.isFinite(n)||n<0||h===0||n>h)throw new Error("An imported raw score is invalid or exceeds HPS. No data was imported.");
         sm[catKey][cat.components[i].id]=n; importedScores++;
       });
     };
@@ -2499,7 +2560,7 @@ function applyOfficialEcrImport(cls,data){
     if(Number(computed)!==official) gradeMismatches++;
   });
 
-  return {termKey:targetTermKey,matched,added,unmatched,learners:importedStudentIds.length,importedScores,invalid,unresolvedSex,gradeChecks,gradeMismatches,warnings:(data.warnings||[]).length};
+  return {termKey:targetTermKey,preservedHps,matched,added,unmatched,learners:importedStudentIds.length,importedScores,invalid,unresolvedSex,gradeChecks,gradeMismatches,warnings:(data.warnings||[]).length};
 }
 
 async function importOfficialEcrIntoClass(cls,currentTermKey){
@@ -2521,8 +2582,11 @@ async function importOfficialEcrIntoClass(cls,currentTermKey){
   const proceed=await showOfficialEcrImportDialog(result.data,result.fileName,currentTermKey);
   if(!proceed) return;
   try{
-    const stats=applyOfficialEcrImport(cls,result.data);
-    saveState();
+    const plan=prepareOfficialEcrImport(cls,result.data);
+    if(plan.crossTermChange&&!confirm('This import changes shared HPS or weights and will recalculate '+plan.otherTerms.join(', ')+'. Continue?'))return;
+    const candidate=JSON.parse(JSON.stringify(cls));
+    const stats=applyOfficialEcrImport(candidate,result.data,{allowCrossTermChange:true});
+    await commitClassCandidate(cls,candidate);
     activeTab=stats.termKey;
     render();
     const parts=[
@@ -2531,6 +2595,7 @@ async function importOfficialEcrIntoClass(cls,currentTermKey){
     ];
     if(stats.matched) parts.push(`${stats.matched} existing learner${stats.matched===1?"":"s"} matched`);
     if(stats.added) parts.push(`${stats.added} learner${stats.added===1?"":"s"} added to roster`);
+    if(stats.preservedHps) parts.push(`${stats.preservedHps} missing HPS values preserved from the current setup`);
     if(stats.invalid) parts.push(`${stats.invalid} invalid/out-of-HPS score${stats.invalid===1?"":"s"} skipped`);
     if(stats.unresolvedSex) parts.push(`${stats.unresolvedSex} new learner${stats.unresolvedSex===1?"":"s"} skipped because sex could not be identified safely`);
     if(stats.gradeChecks) parts.push(stats.gradeMismatches?`${stats.gradeMismatches}/${stats.gradeChecks} cached Excel term grade${stats.gradeChecks===1?"":"s"} differed from the app's recalculation`:`${stats.gradeChecks} cached Excel term grade${stats.gradeChecks===1?"":"s"} verified against the app`);
@@ -2641,7 +2706,7 @@ function officialEcrPayload(cls, termKey){
     const wwAny=anyRaw(wwRaw), ptAny=anyRaw(ptRaw), exAny=anyRaw(exRaw);
     const componentPs=ex.components.map((c,i)=>{
       if(exRaw[i]==="") return "";
-      const h=Number(c.hps||0), sw=Number(c.subWeight||0);
+      const h=Number(c.hps||0), sw=ex.mode==="simple" ? (ex.components.reduce((s,x)=>s+Number(x.hps||0),0)>0 ? h/ex.components.reduce((s,x)=>s+Number(x.hps||0),0)*100 : 0) : Number(c.subWeight||0);
       return h>0 ? round2(Number(exRaw[i])/h*sw) : "";
     });
     return {
@@ -2659,9 +2724,9 @@ function officialEcrPayload(cls, termKey){
     schoolLogoDataUri:schoolLogoDataUri(),
     meta:{...cls.meta},
     categories:{
-      WW:{weight:Number(ww.weight||0),components:ww.components.map(c=>({name:c.name,hps:Number(c.hps||0),subWeight:Number(c.subWeight||0)}))},
-      PT:{weight:Number(pt.weight||0),components:pt.components.map(c=>({name:c.name,hps:Number(c.hps||0),subWeight:Number(c.subWeight||0)}))},
-      EXAM:{weight:Number(ex.weight||0),components:ex.components.map(c=>({name:c.name,hps:Number(c.hps||0),subWeight:Number(c.subWeight||0)}))}
+      WW:{mode:ww.mode,weight:Number(ww.weight||0),components:ww.components.map(c=>({name:c.name,hps:Number(c.hps||0),subWeight:Number(c.subWeight||0)}))},
+      PT:{mode:pt.mode,weight:Number(pt.weight||0),components:pt.components.map(c=>({name:c.name,hps:Number(c.hps||0),subWeight:Number(c.subWeight||0)}))},
+      EXAM:{mode:ex.mode,weight:Number(ex.weight||0),components:ex.components.map(c=>({name:c.name,hps:Number(c.hps||0),subWeight:Number(c.subWeight||0)}))}
     },
     students
   };
@@ -2867,7 +2932,7 @@ function renderTerm(main, cls, termKey, termLabel){
    ========================================================================= */
 function renderFinal(main, cls){
   if(!cls.students.length){
-    main.innerHTML = `<div class="empty-state"><h2>No learners yet</h2><p>Add learners in Subject Teacher Controls → Classes first.</p></div>`;
+    main.innerHTML = `<div class="empty-state"><h2>No learners yet</h2><p>Add learners in Class Overview → Learner Roster first.</p></div>`;
     return;
   }
   const males = cls.students.filter(s=>s.sex==="M");
@@ -3703,78 +3768,7 @@ document.getElementById("btnExport").addEventListener("click", async ()=>{
   const backupStatus=document.getElementById("welcomeBackupStatus");
   if(backupStatus) backupStatus.textContent="Backup download requested. Check your browser downloads.";
 });
-function validateBackupForImport(data){
-  if(!data || typeof data!=="object" || Array.isArray(data) || !data.classes || typeof data.classes!=="object" || Array.isArray(data.classes) || !Object.keys(data.classes).length) throw new Error("Not a valid E-Class Record backup file.");
-  const forbidden=new Set(["__proto__","prototype","constructor"]);
-  const safeId=/^[A-Za-z0-9_.:-]{1,160}$/;let nodes=0;
-  const walk=(v,depth=0)=>{
-    if(++nodes>500000||depth>24) throw new Error("Backup structure exceeds safety limits.");
-    if(v===null || typeof v==="boolean" || typeof v==="string") return;
-    if(typeof v==="number"){if(!Number.isFinite(v))throw new Error("Backup contains an invalid number.");return;}
-    if(typeof v!=="object") throw new Error("Backup contains an unsupported value.");
-    if(Array.isArray(v)){if(v.length>100000)throw new Error("Backup contains an oversized array.");v.forEach(x=>walk(x,depth+1));return;}
-    for(const [k,x] of Object.entries(v)){if(forbidden.has(k))throw new Error("Backup contains a prohibited property.");if(k.length>256)throw new Error("Backup contains an invalid property name.");walk(x,depth+1);}
-  };
-  walk(data);
-  if(Object.keys(data.classes).length>2000) throw new Error("Backup contains too many classes.");
-  const roleRecords=Object.entries(data.classes);
-  if(data.adviserWorkspace!==undefined){
-    if(!data.adviserWorkspace||typeof data.adviserWorkspace!=="object"||Array.isArray(data.adviserWorkspace)) throw new Error("Backup contains an invalid Adviser workspace.");
-    roleRecords.push(["adviserWorkspace",data.adviserWorkspace]);
-  }
-  for(const [cid,cls] of roleRecords){
-    if(!safeId.test(cid)||!cls||typeof cls!=="object"||Array.isArray(cls)) throw new Error("Backup contains an invalid class record.");
-    if(!Array.isArray(cls.students)||cls.students.length>1000) throw new Error("Backup contains an invalid learner list.");
-    for(const st of cls.students){if(!st||typeof st!=="object"||Array.isArray(st)||!st.id||!safeId.test(String(st.id)))throw new Error("Backup contains an invalid learner identifier.");}
-    if(cls.categories!==undefined){
-      if(!cls.categories||typeof cls.categories!=="object"||Array.isArray(cls.categories))throw new Error("Backup contains invalid grading categories.");
-      for(const [key,cat] of Object.entries(cls.categories)){
-        if(!safeId.test(key)||!cat||typeof cat!=="object"||Array.isArray(cat))throw new Error("Backup contains an invalid grading category.");
-        if(cat.components!==undefined){if(!Array.isArray(cat.components)||cat.components.length>200)throw new Error("Backup contains an invalid component list.");for(const c of cat.components){if(!c||typeof c!=="object"||Array.isArray(c)||!c.id||!safeId.test(String(c.id)))throw new Error("Backup contains an invalid assessment-component identifier.");}}
-      }
-    }
-    if(cls.sf2!==undefined){
-      if(!cls.sf2||typeof cls.sf2!=="object"||Array.isArray(cls.sf2))throw new Error("Backup contains invalid SF2 data.");
-      if(cls.sf2.activeMonth!==undefined&&cls.sf2.activeMonth!==""&&!/^20\d{2}-(0[1-9]|1[0-2])$/.test(String(cls.sf2.activeMonth)))throw new Error("Backup contains an invalid active SF2 month.");
-      const months=cls.sf2.months===undefined?{}:cls.sf2.months;
-      if(!months||typeof months!=="object"||Array.isArray(months)||Object.keys(months).length>24)throw new Error("Backup contains an invalid SF2 month collection.");
-      const sf2SummaryKeys=new Set(["enrollmentFirstFriday","lateEnrollment","registeredEnd","dropout","transferredOut","transferredIn"]);
-      for(const [monthKey,month] of Object.entries(months)){
-        if(!/^20\d{2}-(0[1-9]|1[0-2])$/.test(monthKey)||!month||typeof month!=="object"||Array.isArray(month))throw new Error("Backup contains an invalid SF2 month.");
-        const datePrefix=monthKey+"-";
-        if(month.schoolDays!==undefined){
-          if(!Array.isArray(month.schoolDays)||month.schoolDays.length>31)throw new Error("Backup contains an invalid SF2 school-day list.");
-          const seen=new Set();
-          for(const d of month.schoolDays){const ds=String(d);if(!/^20\d{2}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(ds)||!ds.startsWith(datePrefix)||seen.has(ds))throw new Error("Backup contains an invalid or duplicate SF2 school day.");seen.add(ds);}
-        }
-        if(month.marks!==undefined){
-          if(!month.marks||typeof month.marks!=="object"||Array.isArray(month.marks)||Object.keys(month.marks).length>1000)throw new Error("Backup contains invalid SF2 attendance marks.");
-          for(const [sid,marks] of Object.entries(month.marks)){
-            if(!safeId.test(String(sid))||!marks||typeof marks!=="object"||Array.isArray(marks)||Object.keys(marks).length>31)throw new Error("Backup contains an invalid SF2 learner attendance record.");
-            for(const [date,status] of Object.entries(marks)){if(!date.startsWith(datePrefix)||!/^20\d{2}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(date)||!["A","T","L","C","P"].includes(String(status).toUpperCase()))throw new Error("Backup contains an invalid SF2 attendance code or date.");}
-          }
-        }
-        if(month.remarks!==undefined){
-          if(!month.remarks||typeof month.remarks!=="object"||Array.isArray(month.remarks)||Object.keys(month.remarks).length>1000)throw new Error("Backup contains invalid SF2 remarks.");
-          for(const [sid,remark] of Object.entries(month.remarks)){if(!safeId.test(String(sid))||typeof remark!=="string"||remark.length>2000)throw new Error("Backup contains an invalid SF2 learner remark.");}
-        }
-        if(month.summary!==undefined){
-          if(!month.summary||typeof month.summary!=="object"||Array.isArray(month.summary))throw new Error("Backup contains an invalid SF2 summary.");
-          for(const [field,pair] of Object.entries(month.summary)){
-            if(!sf2SummaryKeys.has(field)||!pair||typeof pair!=="object"||Array.isArray(pair))throw new Error("Backup contains an invalid SF2 summary field.");
-            for(const sex of ["M","F"]){const v=pair[sex];if(v===undefined||v===""||v===null)continue;const n=Number(v);if(!Number.isFinite(n)||n<0||n>100000)throw new Error("Backup contains an invalid SF2 summary value.");}
-          }
-        }
-      }
-    }
-  }
-  if(data.activeId!==undefined&&data.activeId!==null&&data.activeId!==""){if(!safeId.test(String(data.activeId))||!Object.prototype.hasOwnProperty.call(data.classes,String(data.activeId)))throw new Error("Backup contains an invalid active class identifier.");}
-  if(data.settings&&data.settings.schoolLogoDataUri!==undefined&&data.settings.schoolLogoDataUri!==null&&data.settings.schoolLogoDataUri!==""){
-    const logo=String(data.settings.schoolLogoDataUri);
-    if(logo.length>8*1024*1024 || !/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=\s]+$/i.test(logo)) throw new Error("Backup contains an invalid school-logo image.");
-  }
-  return data;
-}
+function validateBackupForImport(data){ return KlasState.validateBackupForImport(data); }
 
 document.getElementById("btnImport").addEventListener("click", async ()=>{
   if(window.eclassAPI && window.eclassAPI.importBackup){
@@ -3784,9 +3778,7 @@ document.getElementById("btnImport").addEventListener("click", async ()=>{
     try{
       const data=validateBackupForImport(JSON.parse(result.text));
       if(!confirm("Import will replace all data currently in this app. Continue?")) return;
-      APP = data;
-      if(!APP.activeId || !APP.classes[APP.activeId]) APP.activeId = Object.keys(APP.classes)[0];
-      saveState(); render();
+      await commitBackupImport(data);
     }catch(err){ alert("Could not read that file: "+err.message); }
     return;
   }
@@ -3796,13 +3788,11 @@ document.getElementById("fileImport").addEventListener("change", e=>{
   const file = e.target.files[0]; if(!file) return;
   if(file.size > 64 * 1024 * 1024){ alert("That backup exceeds the 64 MB safety limit."); e.target.value=""; return; }
   const reader = new FileReader();
-  reader.onload = ()=>{
+  reader.onload = async ()=>{
     try{
       const data=validateBackupForImport(JSON.parse(reader.result));
       if(!confirm("Import will replace all data currently in this app. Continue?")) return;
-      APP = data;
-      if(!APP.activeId || !APP.classes[APP.activeId]) APP.activeId = Object.keys(APP.classes)[0];
-      saveState(); render();
+      await commitBackupImport(data);
     }catch(err){ alert("Could not read that file: "+err.message); }
   };
   reader.readAsText(file);

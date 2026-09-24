@@ -1,6 +1,6 @@
 ﻿{
     "name":  "e-class-record-app-gs-sf9",
-    "version":  "1.4.31",
+    "version":  "1.4.32",
     "description":  "Offline-first E-Class Record App with official ECR, Grading Sheet, compliant SF2 Daily Attendance, SF9, SF1 import, secure local backups/updates, and app-owned grading/attendance logic",
     "main":  "main.js",
     "author":  "",
@@ -29,6 +29,7 @@
                                 "flex-importers.js",
                                 "thread-updater.js",
                                 "main-extension.js",
+                                "state-persistence.js",
                                 "app/**/*",
                                 "assets/**/*",
                                 "templates/**/*"
