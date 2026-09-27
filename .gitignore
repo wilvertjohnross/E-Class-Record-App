@@ -53,3 +53,12 @@ SNAPSHOTS/
 MASTER-EXTRACTED/
 V100-REPAIR-TEMP/
 *-QUESTIONABLE-BACKUP/
+
+# Local runtime data and release outputs
+outputs/
+*.ecrupdate
+*.exe
+*.blockmap
+*.zip
+eclass-record-data*.json
+Backups/

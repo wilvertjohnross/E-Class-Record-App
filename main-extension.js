@@ -2417,18 +2417,9 @@ function openSf9HtmlPreview(payload, context){
 module.exports = {
   async register(context) {
     startupContext = context;
+    require(context.resolveResource("keyboard-menu.js")).registerKeyboardMenu(context,require("electron").MenuItem);
 
-    // Existing bootstraps read this Electron path for the update watcher,
-    // manual update scan and folder shortcut. This override is app-local;
-    // it does not move Windows Downloads or change record/storage paths.
-    const updateFolder = 'C:\\Users\\Teacher\\Documents\\Codex\\2026-09-21\\files-pasted-by-the-user-continue\\outputs';
-    try {
-      context.fs.mkdirSync(updateFolder, { recursive: true });
-      context.app.setPath('downloads', updateFolder);
-    } catch (err) {
-      console.warn('Could not use the configured update folder; retaining Downloads:', err.message);
-    }
-
+    // Distributed installations use the current Windows user's Downloads folder.
 
     // Pre-warm Excel quietly in the background. Do not delay the main app
     // window if Excel itself takes a few seconds to initialize.

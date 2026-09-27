@@ -1092,7 +1092,7 @@
   .sidebar-utilities button:hover{background:rgba(255,255,255,.08)!important;transform:none;}
 
   main{
-    padding:18px 22px 24px;min-height:100vh;isolation:isolate;overflow-x:hidden;
+    padding:18px 22px 24px;min-height:100vh;isolation:isolate;overflow:clip;
     background:none!important;
   }
   main::before{
@@ -1286,18 +1286,19 @@ html[data-theme="dark"] main::after{
 
 <header class="appbar">
   <button type="button" class="sidebar-brand no-print" id="sidebarHomeBrand" aria-label="Go to KLAS Home" title="Go to KLAS Home">
-    <img src="assets/klas-banner.png" alt="KLAS">
+    <img src="assets/klas-official-logo.png" alt="KLAS">
   </button>
   <nav class="tabs role-tabs no-print" id="tabs" aria-label="Current location">
     <div class="location-item location-root" data-location-tabs="welcome"><span class="rail-glyph" aria-hidden="true">⌂</span><span>Home</span></div>
     <div class="location-item" data-location-tabs="subjecthome setup classroster"><span class="rail-glyph" aria-hidden="true">▣</span><span>Class Overview</span></div>
     <div class="location-item" data-location-tabs="adviserhome roster sf2 advisersummary sf5 report sf9setup sf10"><span class="rail-glyph" aria-hidden="true">♙</span><span>Advisory Overview</span></div>
-    <div class="location-item" data-location-tabs="gradinghome term1 term2 term3 final"><span class="rail-glyph" aria-hidden="true">◉</span><span>Grading</span></div>
+    <div class="location-item" data-location-tabs="gradinghome term1 term2 term3 final"><span class="rail-glyph" aria-hidden="true">◉</span><span>Term Grades</span></div>
   </nav>
 <div class="sidebar-utilities no-print">    <button id="btnTheme" class="ghost theme-toggle" title="Toggle light/dark working view">🌙 Dark</button>
     <button id="btnExport" class="ghost">Export Backup</button>
     <button id="btnImport" class="ghost">Import Backup</button>
     <input type="file" id="fileImport" accept="application/json" style="display:none;"></div>
+  <div class="sidebar-version no-print" id="statusVersion" title="Application/update status" aria-live="polite">v1.5.8</div>
 </header>
 
 <main id="main"></main>
@@ -1305,12 +1306,13 @@ html[data-theme="dark"] main::after{
 
 <footer class="status no-print">
   <span id="statusLeft">Ready.</span>
-  <span id="statusVersion" title="Application/update status"></span>
+
   <span id="statusRight">Saved automatically to this device.</span>
 </footer>
 
 <script src="welcome.js"></script>
 <script src="app.js"></script>
+<script src="keyboard-shortcuts.js"></script>
 </body>
 </html>
 
@@ -1644,3 +1646,44 @@ main[data-klas-page="final"] > .card{
   }
 }
 </style>
+
+<style>
+/* v1.5.2 sidebar identity and subject-class picker */
+header.appbar .sidebar-brand{background:#e8e6df!important;padding:10px 8px!important;border:1px solid #f5f3ed!important;border-radius:13px!important;box-shadow:0 2px 7px rgba(0,0,0,.13)!important;}
+header.appbar .sidebar-brand:hover{background:#f2f0e9!important;}
+.sidebar-version{display:block!important;color:#e2edf0;font-size:12px;text-align:center;padding:8px 0 2px;flex-shrink:0;overflow-wrap:anywhere;}
+.workspace-class-actions[hidden]{display:none!important;}
+.workspace-class-picker{min-width:0;max-width:100%;flex:1;}
+.workspace-class-picker select{width:100%;min-width:0;max-width:100%;}
+.workspace-class-controls{box-sizing:border-box;max-width:min(760px,100%);}
+@media print{.sidebar-version{display:none!important;}}
+</style>
+
+<style>
+.term-launch-pair{display:flex;flex-direction:column;align-items:center;gap:12px;min-width:0;}
+.term-launch-pair>.workspace-launcher{width:100%;}
+.term-sheet-launch{max-width:100%;white-space:normal;}
+</style>
+
+<style>
+.class-dashboard .class-overview-grid{width:min(654px,100%);grid-template-columns:repeat(3,minmax(0,1fr));}
+.class-overview-details{margin:8px auto 0;max-width:720px;color:var(--ink);line-height:1.6;overflow-wrap:anywhere;}
+.class-dashboard .workspace-launcher-badge{display:inline-flex!important;font-size:11px;}
+@media(max-width:600px){.class-dashboard .class-overview-grid{width:min(320px,100%);grid-template-columns:1fr;}}
+</style>
+
+<style>
+.subject-hub{text-align:center;}
+.subject-icon-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;width:min(1040px,100%);margin:24px auto;}
+.subject-icon-grid.special{grid-template-columns:repeat(5,minmax(0,1fr));}
+.subject-icon-card{display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:10px;padding:14px 10px;background:var(--surface-raised);color:var(--ink);border:1px solid var(--border);box-shadow:0 4px 12px var(--shadow);font-size:14px;line-height:1.3;}
+.subject-icon-holder{display:grid;place-items:center;background:#f5f2eb;border-radius:16px;width:132px;max-width:100%;aspect-ratio:1;}
+.subject-icon-holder img{display:block;width:100%;height:100%;object-fit:contain;filter:drop-shadow(0 2px 2px rgba(0,0,0,.12));}
+.subject-grade-section{margin:24px 0;}.subject-grade-table input{width:90px;max-width:100%;}.grade-entry-message{color:var(--red-pen);}
+.subject-hub .toolbar{justify-content:center;}
+@media(max-width:700px){.subject-icon-grid,.subject-icon-grid.special{grid-template-columns:repeat(2,minmax(0,1fr));}.subject-icon-holder{width:112px;}}
+@media(max-width:360px){.subject-icon-grid,.subject-icon-grid.special{gap:8px;}.subject-icon-card{font-size:12px;padding:8px 4px;}}
+@media(prefers-reduced-motion:reduce){.subject-icon-card{transition:none!important;transform:none!important;}}
+</style>
+
+<style>.sidebar-brand img{max-height:112px;} .welcome-artwork{width:180px!important;max-width:100%;}.welcome-banner{max-height:180px;width:auto;max-width:100%;margin:auto;}</style>

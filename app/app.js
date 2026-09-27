@@ -132,8 +132,8 @@ function newClass(name){
       schoolHead:"", subject:"Science", classRecordSubjectId:"SCI_STD", classRecordElectiveId:"research_1", electiveSubject:"Research I",
       gradeLevel:"10", section:"", teacher:"", adviser:"", sf2Enabled:false,
       preparedByName:"", preparedByTitle:"Subject Teacher",
-      checkedByName:"Eloisa B. Aquino", checkedByTitle:"Head Teacher VI, Science Department",
-      approvedByName:"Rolly A. Raceles", approvedByTitle:"Asst. Principal II"
+      checkedByName:"", checkedByTitle:"",
+      approvedByName:"", approvedByTitle:""
     },
     categories: defaultCategories(),
     students: [],
@@ -189,6 +189,7 @@ const SUBJECT_NAME_OPTIONS = {
   TLE:[
     "Technology and Livelihood Education (TLE)",
     "Creative Technologies",
+    "Creative Technologies I", "Creative Technologies II", "Creative Technologies III", "Creative Technologies IV",
     "Creative Technology I",
     "Creative Technology II",
     "Creative Technology III",
@@ -323,6 +324,11 @@ function ensureSubjectConfig(cls){
     c.MATH="Math";
     c.SCI="Science";
     c.TLE="Technology and Livelihood Education (TLE)";
+  }
+  if(c.classType==="Special Science Class"){
+    c.MATH="Enhanced Math";c.SCI="Enhanced Science";
+    if(c.TLE==="Technology and Livelihood Education (TLE)")c.TLE="Creative Technologies";
+    c.TLE=c.TLE.replace(/^Creative Technology /,"Creative Technologies ");
   }
   return c;
 }
@@ -809,7 +815,7 @@ function renderClassPicker(){
   const sel=document.getElementById("workspaceClassSelect");
   if(!sel) return;
   const classes=Object.values(APP.classes||{}).sort((a,b)=>a.createdAt-b.createdAt);
-  sel.innerHTML=classes.map(c=>`<option value="${esc(c.id)}" ${c.id===APP.activeId?"selected":""}>${esc(c.meta&&c.meta.className||"(untitled class)")}</option>`).join("");
+  sel.innerHTML=classes.map(c=>`<option style="font-weight:${linkedAdviserClass(c.id)?"700":"400"}" value="${esc(c.id)}" ${c.id===APP.activeId?"selected":""}>${esc((c.meta&&c.meta.className||"(untitled class)")+(linkedAdviserClass(c.id)?" (Advisory Class)":""))}</option>`).join("");
   sel.disabled=!classes.length;
 }
 function returnTargetFor(tab){
@@ -832,15 +838,18 @@ function navigateToTab(next,{termView=""}={}){
     next="adviserhome";
   }
 
+  if(next==="advisersummary"&&activeTab!=="advisersummary") SUMMARY_SUBJECT="";
   activeTab=next;
   render();
+  window.scrollTo({top:0,left:0,behavior:"instant"});
+  document.getElementById("main").scrollTop=0;
   return true;
 }
 function shellNavHtml(current){
   const parent=returnTargetFor(current);
   if(current==="welcome") return "";
   let returnLabel="← Return";
-  if(["term1","term2","term3","final"].includes(current)) returnLabel="← Return to Grading";
+  if(["term1","term2","term3","final"].includes(current)) returnLabel="← Return to Term Grades";
   else if(["roster","sf2","advisersummary","sf5","report","sf10"].includes(current)) returnLabel="← Return to Advisory";
   else if(current==="sf9setup"&&returnTargetFor(current)==="report") returnLabel="← Return to SF9";
   return `<div class="page-shell-nav no-print" role="navigation" aria-label="Page navigation">
@@ -855,12 +864,12 @@ function prependPageNavigation(main,current){
   wrap.innerHTML=html;
   if(wrap.firstElementChild) main.insertBefore(wrap.firstElementChild,main.firstChild);
 }
-function subjectClassControlHtml(cls){
+function subjectClassControlHtml(cls,manage=true){
   const classes=Object.values(APP.classes||{}).sort((a,b)=>a.createdAt-b.createdAt);
-  const options=classes.map(c=>`<option value="${esc(c.id)}" ${c.id===APP.activeId?"selected":""}>${esc(c.meta&&c.meta.className||"(untitled class)")}</option>`).join("");
+  const options=classes.map(c=>`<option style="font-weight:${linkedAdviserClass(c.id)?"700":"400"}" value="${esc(c.id)}" ${c.id===APP.activeId?"selected":""}>${esc((c.meta&&c.meta.className||"(untitled class)")+(linkedAdviserClass(c.id)?" (Advisory Class)":""))}</option>`).join("");
   return `<div class="workspace-class-controls no-print" aria-label="Subject class controls">
-    <label class="workspace-class-picker"><span>Subject class</span><select id="workspaceClassSelect" title="Active Subject Teacher class" ${classes.length?"":"disabled"}>${options}</select></label>
-    <div class="workspace-class-actions">
+    <label class="workspace-class-picker"><span>Subject class</span><select style="font-weight:${cls&&linkedAdviserClass(cls.id)?"700":"400"}" id="workspaceClassSelect" title="Active Subject Teacher class" ${classes.length?"":"disabled"}>${options}</select></label>
+    <div class="workspace-class-actions" ${manage?"":"hidden"}>
       <button type="button" class="primary" data-class-action="new">+ New Class</button>
       <button type="button" class="primary" data-class-action="duplicate" ${cls?"":"disabled"}>Duplicate Class</button>
       <button type="button" class="danger icon-remove" data-class-action="delete" ${cls&&classes.length>1?"":"disabled"} aria-label="Delete class" title="Delete class"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 6h18M9 6V4h6v2M5 6l1 14h12l1-14M10 10v6M14 10v6"/></svg></button>
@@ -868,11 +877,9 @@ function subjectClassControlHtml(cls){
   </div>`;
 }
 function prependSubjectClassControls(main,cls,current){
-  // The approved v1.5.0 mockup keeps overview/grading pages visually clean.
-  // Class switching/management stays available inside the class-management views.
-  if(!["setup","classroster"].includes(current)) return;
+  if(!SUBJECT_WORKFLOW_TABS.has(current)) return;
   const wrap=document.createElement("div");
-  wrap.innerHTML=subjectClassControlHtml(cls);
+  wrap.innerHTML=subjectClassControlHtml(cls,["setup","classroster"].includes(current));
   const nav=main.querySelector(".page-shell-nav");
   if(nav&&nav.nextSibling) main.insertBefore(wrap.firstElementChild,nav.nextSibling);
   else if(nav) main.appendChild(wrap.firstElementChild);
@@ -979,17 +986,18 @@ function renderSubjectTeacherHome(main,cls){
     main.innerHTML=`<div class="card coming-soon-panel"><div class="module-code">CLASS</div><h2>No Subject Teacher class yet</h2><p class="sub">Create your first teaching class, then encode learner names or import a CSV roster.</p><button class="primary" data-class-action="new">+ Create New Class</button></div>`;
     return;
   }
+  const students=cls.students||[],male=students.filter(s=>s.sex==="M").length,female=students.filter(s=>s.sex==="F").length;
+  const countText=`${students.length} learners · ${male} Male · ${female} Female${students.length-male-female?` · ${students.length-male-female} unspecified`:""}`;
   main.innerHTML=`
     <section class="workspace-overview class-dashboard">
       <div class="workspace-hero">
         <h2>Class Overview</h2>
-        <p class="sub">Manage your class information and records.</p>
+        <p class="class-overview-details"><strong>${esc(cls.meta.className||"Untitled class")}</strong><br><span>Class Adviser: ${esc(cls.meta.adviser||"Not set")}</span> · <span>SY ${esc(cls.meta.schoolYear||"Not set")}</span></p>
       </div>
-      <div class="workspace-launch-grid four-up">
+      <div class="workspace-launch-grid class-overview-grid">
         ${workspaceLauncherTile({tab:"setup",title:"Class Setup",tone:"cyan",icon:"setup"})}
-        ${workspaceLauncherTile({tab:"classroster",title:"Learner Roster",tone:"blue",icon:"roster"})}
-        ${workspaceLauncherTile({tab:"gradinghome",title:"Grading",tone:"gold",icon:"grading"})}
-        ${workspaceLauncherTile({tab:"final",title:"Final Grades",tone:"red",icon:"final"})}
+        ${workspaceLauncherTile({tab:"classroster",title:"Learner Roster",badge:countText,tone:"blue",icon:"roster"})}
+        ${workspaceLauncherTile({tab:"gradinghome",title:"Term Grades",tone:"gold",icon:"grading"})}
       </div>
     </section>`;
 }
@@ -998,13 +1006,13 @@ function renderGradingHome(main,cls){
   main.innerHTML=`
     <section class="workspace-overview grading-dashboard">
       <div class="workspace-hero">
-        <h2>Grading</h2>
+        <h2>Term Grades</h2>
         <p class="sub">Select a term to manage class records.</p>
       </div>
       <div class="workspace-launch-grid four-up">
-        ${workspaceLauncherTile({tab:"term1",title:"Term 1 Class Records",tone:"green",icon:"grading"})}
-        ${workspaceLauncherTile({tab:"term2",title:"Term 2 Class Records",tone:"gold",icon:"grading"})}
-        ${workspaceLauncherTile({tab:"term3",title:"Term 3 Class Records",tone:"blue",icon:"grading"})}
+        <div class="term-launch-pair">${workspaceLauncherTile({tab:"term1",title:"Term 1 Class Records",tone:"green",icon:"grading",termView:"record"})}<button type="button" class="term-sheet-launch" data-go-tab="term1" data-term-view="gs">Term 1 Grading Sheet</button></div>
+        <div class="term-launch-pair">${workspaceLauncherTile({tab:"term2",title:"Term 2 Class Records",tone:"gold",icon:"grading",termView:"record"})}<button type="button" class="term-sheet-launch" data-go-tab="term2" data-term-view="gs">Term 2 Grading Sheet</button></div>
+        <div class="term-launch-pair">${workspaceLauncherTile({tab:"term3",title:"Term 3 Class Records",tone:"blue",icon:"grading",termView:"record"})}<button type="button" class="term-sheet-launch" data-go-tab="term3" data-term-view="gs">Term 3 Grading Sheet</button></div>
         ${workspaceLauncherTile({tab:"final",title:"Final Grades and Reports",tone:"purple",icon:"final"})}
       </div>
     </section>`;
@@ -1033,10 +1041,11 @@ function renderAdviserHome(main,cls){
       <div class="workspace-launch-grid">
         ${workspaceLauncherTile({tab:"roster",title:"Learner Roster (SF1)",tone:"cyan",icon:"sf1"})}
         ${workspaceLauncherTile({tab:"sf2",title:"Attendance (SF2)",tone:"blue",icon:"sf2"})}
-        ${workspaceLauncherTile({tab:"advisersummary",title:"Summary of Subject Grades",tone:"gold",icon:"summary"})}
+        ${workspaceLauncherTile({tab:"advisersummary",title:"Summary of Final Grades",tone:"gold",icon:"summary"})}
         ${workspaceLauncherTile({tab:"sf5",title:"SF5",tone:"green",icon:"sf5"})}
         ${workspaceLauncherTile({tab:"report",title:"Report Cards (SF9)",tone:"purple",icon:"sf9"})}
-        ${workspaceLauncherTile({tab:"sf10",title:"Class Records (SF10)",tone:"red",icon:"sf10"})}
+        ${workspaceLauncherTile({tab:"sf10",title:"SF10 — Learner Permanent Record",tone:"red",icon:"sf10"})}
+
       </div>
       <div class="dashboard-quiet-action no-print"><button id="adviserImportSf1" class="ghost-alt" type="button">Update SF1 Masterlist</button></div>
     </section>`;
@@ -1053,7 +1062,7 @@ function renderSetup(main, cls){
     <div class="class-setup-split">
     <div class="card class-setup-card">
       <h2>Class Setup</h2>
-      <div class="sub">This area defines an independent Subject Teacher class and the specific Class Record / Grading Sheet being built. Its roster and grades do not populate Adviser official forms.</div>
+      <div class="sub">This area defines an independent Subject Teacher class and the specific Class Record / Grading Sheet being built. Its roster stays independent. Adviser grades automatically read this class when its subject, class details and SF1 learners match.</div>
       <div class="field"><label>Class label (shown in the class switcher)</label>
         <input type="text" id="f_className" value="${esc(m.className)}"></div>
       <div class="grid3">
@@ -1250,8 +1259,6 @@ function classRosterManagerHtml(cls){
       <td>${i+1}</td>
       <td><input type="text" class="roster-name" data-sid="${esc(s.id)}" value="${esc(s.name||"")}" aria-label="Learner name ${i+1}"></td>
       <td><select class="roster-sex" data-sid="${esc(s.id)}" aria-label="Sex of ${esc(s.name||`learner ${i+1}`)}"><option value="M" ${s.sex==="F"?"":"selected"}>Male</option><option value="F" ${s.sex==="F"?"selected":""}>Female</option></select></td>
-      <td><input type="text" class="roster-lrn" data-sid="${esc(s.id)}" value="${esc(s.lrn||"")}" aria-label="LRN of ${esc(s.name||`learner ${i+1}`)}"></td>
-      <td><input type="text" class="roster-age" data-sid="${esc(s.id)}" value="${esc(s.age||"")}" aria-label="Age of ${esc(s.name||`learner ${i+1}`)}"></td>
       <td><button type="button" class="danger icon-remove" data-roster-remove="${esc(s.id)}" aria-label="Remove ${esc(s.name||"learner")}" title="Remove learner">×</button></td>
     </tr>`).join("");
 
@@ -1274,7 +1281,7 @@ function classRosterManagerHtml(cls){
     ${students.length?`
       <div class="scroll-x class-roster-scroll">
         <table class="roster-table">
-          <thead><tr><th>#</th><th>Learner Name</th><th>Sex</th><th>LRN</th><th>Age</th><th class="no-print">Remove</th></tr></thead>
+          <thead><tr><th>#</th><th>Learner Name</th><th>Sex</th><th class="no-print">Remove</th></tr></thead>
           <tbody>${rows}</tbody>
         </table>
       </div>`:
@@ -1299,8 +1306,6 @@ function bindClassRosterManager(cls){
 
   main.querySelectorAll(".roster-name").forEach(el=>el.addEventListener("change",()=>saveRosterField(el,"name")));
   main.querySelectorAll(".roster-sex").forEach(el=>el.addEventListener("change",()=>saveRosterField(el,"sex")));
-  main.querySelectorAll(".roster-lrn").forEach(el=>el.addEventListener("change",()=>saveRosterField(el,"lrn")));
-  main.querySelectorAll(".roster-age").forEach(el=>el.addEventListener("change",()=>saveRosterField(el,"age")));
 
   main.querySelectorAll("[data-roster-remove]").forEach(btn=>btn.addEventListener("click",()=>{
     const sid=btn.dataset.rosterRemove;
@@ -1382,7 +1387,7 @@ function renderSf9Setup(main, cls){
   const regular=sc.classType==="Regular";
   main.innerHTML=`
     <div class="card">
-      <div class="hub-title-row"><div><h2>SF9 Setup</h2><div class="sub">SF9 belongs to the Adviser domain. Learner identity comes from SF1 and grades come from the Adviser Summary of Subject Grades.</div></div><div><button class="ghost-alt no-print" data-go-tab="report">← Back to SF9 Report Cards</button></div></div>
+      <div class="hub-title-row"><div><h2>SF9 Setup</h2><div class="sub">SF9 belongs to the Adviser domain. Learner identity comes from SF1 and grades come from the Adviser Summary of Final Grades.</div></div><div><button class="ghost-alt no-print" data-go-tab="report">← Back to SF9 Report Cards</button></div></div>
       <div class="grid3">
         <div class="field"><label>Region — from SF1</label><input value="${esc(m.region||"")}" readonly></div>
         <div class="field"><label>Division — from SF1</label><input value="${esc(m.division||"")}" readonly></div>
@@ -1399,15 +1404,15 @@ function renderSf9Setup(main, cls){
       <div class="sub">These choices control the learning-area labels and active elective rows in the Adviser Summary and SF9. They do not affect any Subject Teacher class.</div>
       <div class="grid3">
         <div class="field"><label>Class Type</label><select id="sf9_classType">${subjectOptionHtml(CLASS_TYPE_OPTIONS,sc.classType)}</select></div>
-        <div class="field"><label>Mathematics</label><select id="sf9_mathName" ${regular?"disabled":""}>${subjectOptionHtml(SUBJECT_NAME_OPTIONS.MATH,sc.MATH)}</select></div>
-        <div class="field"><label>Science</label><select id="sf9_scienceName" ${regular?"disabled":""}>${subjectOptionHtml(SUBJECT_NAME_OPTIONS.SCI,sc.SCI)}</select></div>
+        <div class="field"><label>Mathematics</label><select id="sf9_mathName" disabled>${subjectOptionHtml(SUBJECT_NAME_OPTIONS.MATH,sc.MATH)}</select></div>
+        <div class="field"><label>Science</label><select id="sf9_scienceName" disabled>${subjectOptionHtml(SUBJECT_NAME_OPTIONS.SCI,sc.SCI)}</select></div>
       </div>
       <div class="grid3">
-        <div class="field"><label>TLE / Special Subject</label><select id="sf9_tleName" ${regular?"disabled":""}>${subjectOptionHtml(SUBJECT_NAME_OPTIONS.TLE,sc.TLE)}</select></div>
+        <div class="field"><label>TLE / Special Subject</label><select id="sf9_tleName" ${regular?"disabled":""}>${subjectOptionHtml(regular?["Technology and Livelihood Education (TLE)"]:["Creative Technologies","Creative Technologies I","Creative Technologies II","Creative Technologies III","Creative Technologies IV"],sc.TLE)}</select></div>
         <div class="field"><label>Elective 1</label><select id="sf9_elective1" ${regular?"disabled":""}>${catalogOptionHtml(ELECTIVE_CATALOG,sc.ELEC1_ID,sc.ELEC2_ID)}</select></div>
         <div class="field"><label>Elective 2</label><select id="sf9_elective2" ${regular?"disabled":""}>${catalogOptionHtml(ELECTIVE_CATALOG,sc.ELEC2_ID,sc.ELEC1_ID)}</select></div>
       </div>
-      <div class="import-summary"><strong>Grade source:</strong> SF9 reads learning-area grades only from <strong>Adviser Controls → Summary of Subject Grades</strong>.</div>
+      <div class="import-summary"><strong>Grade source:</strong> SF9 reads learning-area grades only from <strong>Adviser Controls → Summary of Final Grades</strong>.</div>
     </div>`;
   document.getElementById("sf9_classType").addEventListener("change",e=>{sc.classType=e.target.value;ensureSubjectConfig(cls);saveState();render();});
   [["sf9_mathName","MATH"],["sf9_scienceName","SCI"],["sf9_tleName","TLE"]].forEach(([id,key])=>{document.getElementById(id).addEventListener("change",e=>{sc[key]=e.target.value;ensureSubjectConfig(cls);saveState();render();});});
@@ -1422,7 +1427,9 @@ function renderSf9Setup(main, cls){
 
 function renderCategoryEditor(cls, key){
   const cat = cls.categories[key];
-  const allowCustomWeights = key === "EXAM";
+  const lockedExam=key==="EXAM";
+  const standardExam=lockedExam&&cat.mode==="custom"&&cat.components.length===3&&cat.components.every((c,i)=>c.name===["ST1","ST2","TE"][i]&&Number(c.subWeight)===[30,30,40][i])&&Number(cat.weight)===0.3;
+  const allowCustomWeights = key === "EXAM" || cat.mode==="custom";
   const fixedItems = key === "WW" || key === "PT";
   const maxItems = key === "WW" ? 5 : key === "PT" ? 3 : null;
   const overCapacity = fixedItems && cat.components.length>maxItems;
@@ -1431,30 +1438,32 @@ function renderCategoryEditor(cls, key){
   const removableLegacy = excessCount ? cat.components.slice(maxItems).filter(c=>maxExistingScoreForComponent(cls,key,c.id)===null) : [];
   const rows = cat.components.map(c=>`
     <tr data-comp="${esc(c.id)}">
-      <td><input type="text" class="comp-name" ${fixedItems?'readonly aria-readonly="true"':''} value="${esc(c.name)}" style="width:110px;"></td>
+      <td><input type="text" class="comp-name" ${fixedItems||lockedExam?'readonly aria-readonly="true"':''} value="${esc(c.name)}" style="width:110px;"></td>
       <td><input type="number" class="comp-hps" value="${esc(c.hps)}" min="0" step="1" style="width:70px;"></td>
-      ${allowCustomWeights ? `<td>${cat.mode==="custom" ? `<input type="number" class="comp-subweight" value="${esc(c.subWeight)}" min="0" step="1" style="width:70px;">` : `<span class="hint">auto</span>`}</td>` : ""}
-      ${fixedItems ? "" : `<td><button class="small danger comp-remove icon-remove" type="button" aria-label="Remove item" title="Remove item"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 6h18M9 6V4h6v2M5 6l1 14h12l1-14M10 10v6M14 10v6"/></svg></button></td>`}
+      ${allowCustomWeights ? `<td>${cat.mode==="custom" ? `<input type="number" class="comp-subweight" ${lockedExam?'readonly aria-readonly="true"':""} value="${esc(c.subWeight)}" min="0" step="1" style="width:70px;">` : `<span class="hint">auto</span>`}</td>` : ""}
+      ${lockedExam?"":`<td><button class="small danger comp-remove icon-remove" type="button" aria-label="Remove item" title="Remove item"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 6h18M9 6V4h6v2M5 6l1 14h12l1-14M10 10v6M14 10v6"/></svg></button></td>`}
     </tr>`).join("");
   return `
     <section class="cat-editor" data-cat="${key}">
       <div class="cat-editor-title">${cat.label}</div>
       <div class="cat-controls">
         <label class="hint">Category weight (%)</label>
-        <input type="number" class="cat-weight" value="${Math.round(cat.weight*10000)/100}" min="0" max="100" step="1">
-        ${allowCustomWeights ? `<label class="hint cat-mode-row"><input type="checkbox" class="cat-mode" ${cat.mode==="custom"?"checked":""}> <span>Use custom item weights</span></label>` : ""}
+        <input type="number" class="cat-weight" ${lockedExam?'readonly aria-readonly="true"':""} value="${Math.round(cat.weight*10000)/100}" min="0" max="100" step="1">
+        ${allowCustomWeights&&!lockedExam ? `<label class="hint cat-mode-row"><input type="checkbox" class="cat-mode" ${cat.mode==="custom"?"checked":""}> <span>Use custom item weights</span></label>` : ""}
       </div>
       <div class="comp-table-wrap">
         <table class="data comp-table">
-          <thead><tr><th style="text-align:left;">Item</th><th>HPS</th>${allowCustomWeights ? "<th>Item Weight %</th>" : ""}${fixedItems ? "" : "<th>Actions</th>"}</tr></thead>
+          <thead><tr><th style="text-align:left;">Item</th><th>HPS</th>${allowCustomWeights ? "<th>Item Weight %</th>" : ""}${lockedExam?"":"<th>Actions</th>"}</tr></thead>
           <tbody>${rows}</tbody>
         </table>
       </div>
       <div class="hint hps-legend">* HPS — Highest Possible Score</div>
+      ${lockedExam?`<p class="hint">${standardExam?"Fixed examination setup: ST1 30%, ST2 30%, Term Exam 40%. HPS remains editable.":"Existing examination setup preserved to protect recorded grades. Its structure and weights are locked; HPS remains editable. New classes use ST1 30%, ST2 30%, Term Exam 40%."}</p>`:""}
       ${overCapacity ? `<div class="hint" style="margin-top:10px;"><strong>Legacy setup:</strong> this class has ${cat.components.length} ${key} items; the official template supports a maximum of ${maxItems}. Existing scored items are preserved.</div>` : ""}
       ${overCapacity ? `<button class="small legacy-remove-unscored" type="button" ${removableLegacy.length<excessCount?'disabled title="Some extra items contain recorded scores and cannot be removed safely."':''}>Remove unscored extra ${key} item${excessCount===1?"":"s"}</button>` : ""}
       ${legacyCustomMode ? `<div class="hint" style="margin-top:10px;"><strong>Legacy custom weighting:</strong> ${key} custom item weights are preserved. ${categoryHasEncodedScores(cls,key)?"They cannot be converted automatically because recorded scores exist.":"You may switch this empty category to standard weighting."}</div>${categoryHasEncodedScores(cls,key)?"":`<button class="small legacy-use-simple" type="button">Use standard ${key} weighting</button>`}` : ""}
-      ${fixedItems ? "" : `<button class="small primary comp-add" type="button">+ Add item</button>`}
+      ${fixedItems?`<div class="hint">${cat.components.length} of ${maxItems} ${key} items. HPS remains editable.</div>`:""}
+      ${lockedExam?"":`<button class="small primary comp-add" type="button" ${maxItems!==null&&cat.components.length>=maxItems?'disabled title="Maximum item count reached"':''}>+ Add ${fixedItems?key:"item"}</button>`}
     </section>`;
 }
 
@@ -1464,16 +1473,22 @@ function bindCategoryEditorEvents(cls){
     const cat = cls.categories[key];
 
     section.querySelector(".cat-weight").addEventListener("change", e=>{
+      if(key==="EXAM"){render();return;}
       const n=Number(e.target.value);
       if(!Number.isFinite(n)||n<0||n>100){alert("Category weight must be from 0% to 100%.");e.target.value=Math.round(Number(cat.weight||0)*10000)/100;return;}
       cat.weight=n/100;saveState();render();
     });
     section.querySelector(".cat-mode")?.addEventListener("change", e=>{
+      if(key==="EXAM")return;
       cat.mode = e.target.checked ? "custom" : "simple";
       saveState(); render();
     });
     section.querySelector(".comp-add")?.addEventListener("click", ()=>{
-      cat.components.push({id:uid("c"), name:"Item "+(cat.components.length+1), hps:50, subWeight:0});
+      if(key==="EXAM")return;
+      const maxItems=key==="WW"?5:key==="PT"?3:200;
+      if(cat.components.length>=maxItems){alert('The maximum is '+maxItems+' '+key+' items.');return;}
+      let number=1;while(cat.components.some(c=>c.name===key+number))number++;
+      cat.components.push({id:uid("c"), name:key==='EXAM'?'Item '+(cat.components.length+1):key+number, hps:50, subWeight:0});
       saveState(); render();
     });
     section.querySelector(".legacy-remove-unscored")?.addEventListener("click", ()=>{
@@ -1493,7 +1508,7 @@ function bindCategoryEditorEvents(cls){
     section.querySelectorAll("tr[data-comp]").forEach(row=>{
       const cid = row.dataset.comp;
       const comp = cat.components.find(c=>c.id===cid);
-      row.querySelector(".comp-name").addEventListener("change", e=>{if(key==="WW"||key==="PT")return;comp.name=e.target.value; saveState(); renderClassPicker();});
+      row.querySelector(".comp-name").addEventListener("change", e=>{if(key==="WW"||key==="PT"||key==="EXAM")return;comp.name=e.target.value; saveState(); renderClassPicker();});
       row.querySelector(".comp-hps").addEventListener("change", e=>{
         const n=Number(e.target.value),old=Number(comp.hps||0);
         const maxScore=maxExistingScoreForComponent(cls,key,cid);
@@ -1505,11 +1520,15 @@ function bindCategoryEditorEvents(cls){
       });
       const sw=row.querySelector(".comp-subweight");
       if(sw) sw.addEventListener("change", e=>{
+        if(key==="EXAM"){render();return;}
         const n=Number(e.target.value),old=Number(comp.subWeight||0);
         if(!Number.isFinite(n)||n<0||n>100){alert("Item weight must be from 0% to 100%.");e.target.value=old;return;}
         comp.subWeight=n;saveState();updateWeightTotal(cls);
       });
       row.querySelector(".comp-remove")?.addEventListener("click", ()=>{
+        if(key==="EXAM")return;
+        if((key==='WW'||key==='PT')&&maxExistingScoreForComponent(cls,key,cid)!==null){alert('This item has recorded scores in one or more terms. Clear those scores first if you intend to remove it. No records were deleted.');return;}
+        if((key==='WW'||key==='PT')&&categoryHasEncodedScores(cls,key)&&!confirm('Removing this unscored item changes the HPS total and may recalculate grades in all terms. Scores in the other items will remain. Continue?'))return;
         cat.components = cat.components.filter(c=>c.id!==cid);
         saveState(); render();
       });
@@ -2095,7 +2114,7 @@ function termStudentRow(cls, termKey, s){
     const catScores = scoreMap[k] || {};
     const itemCells = cat.components.map(c=>{
       const val = catScores[c.id]!==undefined ? catScores[c.id] : "";
-      return `<td><input type="text" inputmode="decimal" autocomplete="off" spellcheck="false" class="score-input" data-cat="${k}" data-comp="${esc(c.id)}" data-hps="${Number(c.hps)||0}" value="${esc(val)}" aria-label="Raw score for ${esc(c.id)}"></td>`;
+      return `<td><input type="text" inputmode="decimal" autocomplete="off" spellcheck="false" class="score-input" ${Number(c.hps)>0?"":'readonly tabindex="-1" aria-readonly="true"'} data-cat="${k}" data-comp="${esc(c.id)}" data-hps="${Number(c.hps)||0}" value="${esc(val)}" aria-label="${esc(s.name||"Learner")} — ${esc(c.name)} raw score"></td>`;
     }).join("");
     return itemCells + categoryComputedCells(cat, catScores, result.parts[k]);
   }).join("");
@@ -2648,6 +2667,9 @@ function preflightOfficialEcrSharedConfig(cls,data,targetTermKey){
   for(const key of ["WW","PT","EXAM"]){
     const cat=cats[key],src=incoming[key]||{};if(!cat)continue;
     const nextWeight=importNumberOrNull(src.weight);
+    if(key==="EXAM"&&nextWeight!==null&&Math.abs(nextWeight-Number(cat.weight||0))>0.0000001){
+      throw new Error("Examination category weight differs from this class's fixed setup. Import was cancelled; no records were changed.");
+    }
     if(nextWeight!==null&&nextWeight>=0&&Math.abs(nextWeight-Number(cat.weight||0))>0.0000001&&protectedScoreExists(cls,targetTermKey,matchedIds)){
       throw new Error(`${key} category weight differs from this class, but another term or unmatched learner already has recorded scores. Import was cancelled to avoid silently recalculating existing grades.`);
     }
@@ -2662,9 +2684,7 @@ function preflightOfficialEcrSharedConfig(cls,data,targetTermKey){
       const sw=Array.isArray(src.subWeights)?src.subWeights:[];
       cat.components.forEach((comp,i)=>{
         const n=importNumberOrNull(sw[i]);if(n===null||n<0||Math.abs(n-Number(comp.subWeight||0))<0.0000001)return;
-        if(protectedScoreExists(cls,targetTermKey,matchedIds,{catKey:"EXAM"})){
-          throw new Error(`Examination item weights differ from this class, but protected Examination scores already exist. Import was cancelled to avoid silently recalculating existing grades.`);
-        }
+        throw new Error("Examination item weights differ from this class's fixed setup. Import was cancelled; no records were changed.");
       });
     }
   }
@@ -3008,14 +3028,11 @@ function renderTerm(main, cls, termKey, termLabel){
 
   main.innerHTML = `
     <div class="card no-print">
-      <h2>${termLabel} Class Records</h2>
-      <div class="sub">Manage grades, switch record views, and generate the official Class Record or Grading Sheet.</div>
+      <h2>${termLabel} ${mode==="gs"?"Grading Sheet":"Class Records"}</h2>
+      <div class="sub">${mode==="gs"?"View computed grades and generate the official Grading Sheet.":"Manage grades and generate the official Class Record. Tab moves across score boxes; Enter moves down. Hold Shift to reverse."}</div>
       <div class="toolbar">
-        <div class="cr-viewtoggle">
-          <button class="small viewbtn ${mode==="record"?"active":""}" data-mode="record">Class Record</button>
-          <button class="small viewbtn ${mode==="gs"?"active":""}" data-mode="gs">Grading Sheet</button>
-        </div>
-        <button id="termImportOfficial" class="ghost-alt">Import ECR (.xlsx)</button>
+
+        <button id="termImportOfficial" class="ghost-alt" ${mode==="gs"?"hidden":""}>Import ECR (.xlsx)</button>
         <button id="termExportOfficial" class="ghost-alt">Download Official ECR (.xlsx)</button>
         <button id="termPrint" class="ghost-alt">Print this view</button>
       </div>
@@ -3047,28 +3064,43 @@ function renderTerm(main, cls, termKey, termLabel){
         <div class="cr-navybar"></div>
         <div class="scroll-x">${recordMasterTableHtml(cls, termKey)}</div>
       </div>`;
-    container.querySelectorAll(".score-input").forEach(inp=>{
-      inp.addEventListener("change", e=>{
-        const row = e.target.closest("tr");
-        const sid = row.dataset.sid;
-        const catKey = e.target.dataset.cat;
-        const compId = e.target.dataset.comp;
-        const scoreMap=cls.scores[termKey][sid] || (cls.scores[termKey][sid]={WW:{},PT:{},EXAM:{}});
-        if(!scoreMap[catKey]) scoreMap[catKey]={};
-        const comp=cls.categories[catKey] && cls.categories[catKey].components.find(c=>c.id===compId);
-        const previous=scoreMap[catKey][compId];
-        const raw=String(e.target.value??"").trim();
-        if(raw!==""){
-          const check=validateRawScoreEntry(raw, comp && comp.hps);
-          if(!check.ok){
-            e.target.value=previous===undefined||previous===null?"":previous;
-            markRawScoreError(e.target, check.message);
-            return;
-          }
-          scoreMap[catKey][compId]=check.value;
-        }else delete scoreMap[catKey][compId];
-        saveState();
-        drawRecord();
+    function commitScore(input){
+      const row=input.closest('tr'),sid=row.dataset.sid,catKey=input.dataset.cat,compId=input.dataset.comp;
+      const scoreMap=cls.scores[termKey][sid]||(cls.scores[termKey][sid]={WW:{},PT:{},EXAM:{}});
+      if(!scoreMap[catKey])scoreMap[catKey]={};
+      const comp=cls.categories[catKey].components.find(c=>c.id===compId),previous=scoreMap[catKey][compId];
+      const raw=String(input.value??'').trim(),check=validateRawScoreEntry(raw,comp.hps);
+      if(!check.ok){input.value=previous===undefined||previous===null?'':previous;markRawScoreError(input,check.message);return false;}
+      input.removeAttribute('aria-invalid');input.classList.remove('score-input-error');input.removeAttribute('title');
+      const value=check.empty?undefined:check.value;
+      if(value===previous)return true;
+      if(check.empty)delete scoreMap[catKey][compId];else scoreMap[catKey][compId]=value;
+      saveState();
+      // Update computed cells in place so a blur/click/Tab never destroys the next input.
+      const temp=document.createElement('tbody');temp.innerHTML=termStudentRow(cls,termKey,cls.students.find(s=>s.id===sid));
+      Array.from(row.cells).forEach((cell,i)=>{if(!cell.querySelector('.score-input'))cell.innerHTML=temp.firstElementChild.cells[i].innerHTML;});
+      return true;
+    }
+    container.querySelectorAll('.score-input').forEach(input=>{
+      input.addEventListener('change',()=>commitScore(input));
+      input.addEventListener('keydown',event=>{
+        if(event.isComposing||event.ctrlKey||event.altKey||event.metaKey||!['Tab','Enter'].includes(event.key))return;
+        if(!commitScore(input)){event.preventDefault();input.focus();input.select();return;}
+        const editable=el=>!el.disabled&&!el.readOnly&&Number(el.dataset.hps)>0;
+        const direction=event.shiftKey?-1:1;
+        let target;
+        if(event.key==='Tab'){
+          const inputs=Array.from(container.querySelectorAll('.score-input')).filter(editable);
+          target=inputs[inputs.indexOf(input)+direction];
+          // At either end, keep native Tab behavior so the grid is not a focus trap.
+          if(!target)return;
+        }else{
+          const rows=Array.from(container.querySelectorAll('tr[data-sid]'));
+          const next=rows[rows.indexOf(input.closest('tr'))+direction];
+          target=next&&Array.from(next.querySelectorAll('.score-input')).find(el=>el.dataset.cat===input.dataset.cat&&el.dataset.comp===input.dataset.comp&&editable(el));
+        }
+        event.preventDefault();
+        if(target){target.focus();target.select();target.scrollIntoView({block:'nearest',inline:'nearest'});}
       });
     });
   }
@@ -3202,7 +3234,77 @@ function syncClassRecordToSummary(cls){
   return {ok:true,key,updated,status:classRecordLinkStatus(cls)};
 }
 
+
+// Auto-detection never overwrites SF1 identities, stored grades, or old explicit links.
+function adviserLearnerMatch(cls,student,source){
+  const name=normalizeLearnerName(student.name),lrn=String(student.lrn||'').trim();
+  const sourceStudents=source.students||[],adviserStudents=cls.students||[];
+  let matches=[];
+  if(lrn){
+    matches=sourceStudents.filter(x=>String(x.lrn||'').trim()===lrn);
+    if(matches.length>1||adviserStudents.filter(x=>String(x.lrn||'').trim()===lrn).length>1)return {linked:true,error:'Duplicate LRN'};
+  }
+  if(!matches.length){
+    if(!name||adviserStudents.filter(x=>normalizeLearnerName(x.name)===name).length!==1)return {linked:true,error:'Ambiguous learner name'};
+    matches=sourceStudents.filter(x=>normalizeLearnerName(x.name)===name);
+  }
+  if(matches.length!==1)return {linked:true,error:matches.length?'Ambiguous learner name':'No matching learner'};
+  const matched=matches[0];
+  if(lrn&&matched.lrn&&lrn!==String(matched.lrn).trim())return {linked:true,error:'Conflicting LRN'};
+  if(student.sex&&matched.sex&&student.sex!==matched.sex)return {linked:true,error:'Conflicting learner sex'};
+  return {linked:true,source,student:matched};
+}
+
+function detectedAdviserSource(cls,key){
+  if(!adviserSf1Ready(cls)||!cls.students.length)return {status:'none',reason:'Import the SF1 masterlist first'};
+  const norm=v=>String(v||'').normalize('NFKC').toLowerCase().replace(/[^a-z0-9]/g,'');
+  const candidates=[];
+  for(const source of Object.values(APP.classes||{})){
+    const meta=source.meta||{},adv=cls.meta||{};
+    if(source.domain==='adviser')continue;
+    let sourceKey=classRecordSubjectAreaKey(source);
+    if(meta.classRecordSubjectId==='ELECTIVE'){
+      const config=ensureSubjectConfig(cls);
+      sourceKey=meta.classRecordElectiveId===config.ELEC1_ID?'ELEC1':meta.classRecordElectiveId===config.ELEC2_ID?'ELEC2':null;
+    }
+    if(sourceKey!==key)continue;
+    // Require year and grade; never carry last year's grades into this year's SF1.
+    if(!norm(meta.schoolYear)||!norm(adv.schoolYear)||norm(meta.schoolYear)!==norm(adv.schoolYear))continue;
+    if(!norm(meta.gradeLevel)||!norm(adv.gradeLevel)||norm(meta.gradeLevel)!==norm(adv.gradeLevel))continue;
+    if(norm(meta.schoolId)&&norm(adv.schoolId)&&norm(meta.schoolId)!==norm(adv.schoolId))continue;
+    if(norm(meta.section)&&norm(adv.section)&&norm(meta.section)!==norm(adv.section))continue;
+    const matches=cls.students.filter(st=>!adviserLearnerMatch(cls,st,source).error).length;
+    const sameSection=norm(meta.section)&&norm(adv.section)&&norm(meta.section)===norm(adv.section);
+    if(matches>0&&(sameSection||matches===cls.students.length))candidates.push({source,matches});
+  }
+  if(candidates.length>1)return {status:'ambiguous',reason:'Multiple matching Class Records; resolve duplicate classes',candidates};
+  if(!candidates.length)return {status:'none',reason:'No matching Class Record. Check subject, school year, grade, section and learner names'};
+  return {status:'matched',...candidates[0]};
+}
+function adviserGradeSources(cls){
+  const links={};if(!cls)return links;
+  for(const area of activeGradeInputAreas(cls)){const result=detectedAdviserSource(cls,area.key);if(result.status==='matched')links[area.key]=result.source.id;}
+  return links;
+}
+function linkedAdviserClass(id){return Object.values(adviserGradeSources(APP.adviserWorkspace)).includes(id);}
+function adviserGradeMatch(cls,student,key){
+  const detected=detectedAdviserSource(cls,key);
+  if(detected.status==='ambiguous')return {linked:true,error:detected.reason};
+  if(detected.status!=='matched')return {linked:false};
+  return adviserLearnerMatch(cls,student,detected.source);
+}
+function adviserSourceControls(cls){
+  return '<div class="card no-print"><h3>Automatically detected Class Records</h3><p>Grades are read from matching teaching classes using the subject, school year, grade, section and SF1 learners. No grade re-entry is needed. Subjects without a matching record retain previously saved or imported grades; ambiguous records stay blank.</p><div class="grid2">'+activeGradeInputAreas(cls).map(area=>{
+    const result=detectedAdviserSource(cls,area.key);
+    const detail=result.status==='matched'?result.source.meta.className+' — '+result.matches+' of '+cls.students.length+' learners matched':result.reason;
+    return '<div class="field"><strong>'+esc(area.label)+'</strong><p data-detected-subject="'+esc(area.key)+'">'+esc(detail)+'</p></div>';
+  }).join('')+'</div></div>';
+}
+
+function adviserGradeMode(cls,key){return cls.meta&&cls.meta.adviserGradeModes&&cls.meta.adviserGradeModes[key]==="manual"?"manual":"auto";}
+function setAdviserGradeMode(cls,key,mode){if(!cls.meta.adviserGradeModes||typeof cls.meta.adviserGradeModes!=="object"||Array.isArray(cls.meta.adviserGradeModes))cls.meta.adviserGradeModes={};cls.meta.adviserGradeModes[key]=mode;}
 function areaTermValue(cls, s, area, termKey){
+  if(cls.domain==="adviser"&&adviserGradeMode(cls,area.key)==="auto"){const match=adviserGradeMatch(cls,s,area.key);if(match.linked)return match.error?null:studentTermResult(match.source,termKey,match.student.id).term;}
   ensureStudentExtras(cls,s.id);
   const v = cls.otherGrades[s.id][area.key][termKey];
   return (v===undefined || v==="") ? null : Number(v);
@@ -3213,7 +3315,7 @@ function summaryStudentRow(cls, s, termKey){
   const subAreas = mapehComponentAreas(cls);
   const electiveAreas = activeElectiveAreas(cls);
   function cell(area){
-    const locked = cls.domain!=="adviser" && area.key===classRecordSubjectAreaKey(cls);
+    const locked = cls.domain==="adviser" || area.key===classRecordSubjectAreaKey(cls);
     const val = areaTermValue(cls, s, area, termKey);
     if(locked) return `<td class="computed">${val===null?"—":val}</td>`;
     return `<td><input type="number" class="summary-input" data-sid="${esc(s.id)}" data-key="${area.key}" data-term="${termKey}" value="${val===null?"":val}" min="60" max="100"></td>`;
@@ -3362,11 +3464,12 @@ function applySummaryImport(cls, config){
     if(!seen.has(st.id)){seen.add(st.id);matched++;}
     ensureStudentExtras(cls,st.id);
     for(const m of config.mappings){
-      if(activeKey && m.area.key===activeKey){lockedSkipped++;continue;}
+      if((activeKey && m.area.key===activeKey)){lockedSkipped++;continue;}
       const raw=(row||[])[m.col];if(raw===undefined||raw===null||String(raw).trim()==="")continue;
       const n=Number(String(raw).replace(/,/g,"").trim());
       if(!Number.isFinite(n)||n<60||n>100){invalid++;continue;}
       cls.otherGrades[st.id][m.area.key][config.termKey]=Math.round(n);
+      if(cls.domain==="adviser")setAdviserGradeMode(cls,m.area.key,"manual");
       imported++;
     }
   }
@@ -3408,47 +3511,49 @@ async function downloadSummaryTemplate(cls){
 ${result.path||result.xlsxPath||""}`);
 }
 
-function renderSummary(main, cls){
-  if(cls.domain!=="adviser"){renderFinal(main,cls);return;}
-  if(!adviserSf1Ready(cls)){
-    main.innerHTML=`<div class="empty-state"><h2>SF1 masterlist required</h2><p>The Adviser Summary of Subject Grades is available only after the official SF1 masterlist has been imported from Adviser Controls.</p></div>`;
-    return;
-  }
-  if(!cls.students.length){
-    main.innerHTML = `<div class="empty-state"><h2>No Adviser SF1 masterlist yet</h2><p>Return to Adviser Controls and import the official SF1 masterlist first.</p></div>`;
-    return;
-  }
-  cls.students.forEach(s=>ensureStudentExtras(cls, s.id));
-  main.innerHTML = `
-    <div class="card">
-      <h2>Summary of Subject Grades</h2>
-      <div class="sub">Consolidated learning-area grades for the advisory class. Learner identity comes only from the Adviser SF1 masterlist. This summary is the grade source for SF9 and the future SF5/SF10 workflows.</div>
-      <div class="import-summary"><strong>Independent Adviser grade domain:</strong> Subject Teacher Class Records do not write into this table automatically. Subject grades may be entered here or imported by learner name.</div>
-      <div class="toolbar">
-        <div class="cr-viewtoggle">
-          ${["term1","term2","term3"].map(t=>`<button class="small summary-termbtn ${SUMMARY_TERM.current===t?"active":""}" data-term="${t}">${SUMMARY_TERM_LABELS[t]}</button>`).join("")}
-        </div>
-        <button id="summaryTemplate" class="ghost-alt">Download Adviser Grade Template (.xlsx)</button>
-        <button id="summaryImport" class="primary">Import Subject Grades (.xlsx/.csv)</button>
-      </div>
-      <div class="scroll-x" id="summaryTableWrap"></div>
-    </div>`;
-
-  function draw(){
-    document.getElementById("summaryTableWrap").innerHTML = summaryTableHtml(cls, SUMMARY_TERM.current);
-    document.querySelectorAll(".summary-input").forEach(inp=>{
-      inp.addEventListener("change", e=>{
-        const sid=e.target.dataset.sid,key=e.target.dataset.key,term=e.target.dataset.term;
-        ensureStudentExtras(cls,sid);
-        cls.otherGrades[sid][key][term]=e.target.value;
-        saveState();draw();
-      });
-    });
-  }
-  document.getElementById("summaryTemplate").addEventListener("click",()=>downloadSummaryTemplate(cls));
-  document.getElementById("summaryImport").addEventListener("click",()=>importSummaryTable(cls));
-  document.querySelectorAll(".summary-termbtn").forEach(b=>b.addEventListener("click",()=>{SUMMARY_TERM.current=b.dataset.term;document.querySelectorAll(".summary-termbtn").forEach(x=>x.classList.toggle("active",x===b));draw();}));
-  draw();
+const SUBJECT_ICON_FILES={FIL:'filipino_learning_app_icon.png',ENG:'english_learning_book_icon.png',MATH:'mathematics_app_icon.png',SCI:'lavender_science_icon_with_flask_and_atom.png',AP:'araling_panlipunan_globe_icon.png',VAL:'values_education_gmrc_icon.png',TLE:'technology_and_livelihood_education_badge.png',MAPEH:'mapeh_creative_wellness_icon.png',MUS:'music_and_arts_icon.png',PE:'physical_education_and_health_icon.png',environmental_science:'environmental_science_eco_icon.png',research_1:'research_i_magnifying_glass_icon.png',research_2:'research_ii_explore_and_analyze.png',biotechnology:'colorful_biotechnology_app_icon.png',research_3:'research_iii_analytics_icon.png',research_4:'research_iv_insight_explorer.png',consumer_chemistry:'consumer_chemistry_essentials.png',basic_electronics:'basic_electronics_icon.png',ELEC1:'elective_1_starry_study_icon.png',ELEC2:'elective_2_learning_badge.png'};
+let SUMMARY_SUBJECT='';
+function adviserSubjectCards(cls){return corePrimaryAreas(cls).concat([{key:'MAPEH',label:'MAPEH'}],activeElectiveAreas(cls));}
+function subjectIconPath(cls,key){const sc=ensureSubjectConfig(cls),id=key==='ELEC1'?sc.ELEC1_ID:key==='ELEC2'?sc.ELEC2_ID:key;return 'assets/subjects/'+(SUBJECT_ICON_FILES[id]||SUBJECT_ICON_FILES[key]);}
+function bindGradeUploadButtons(main,cls){
+  main.querySelector('[data-grade-template]')?.addEventListener('click',()=>downloadSummaryTemplate(cls));
+  main.querySelector('[data-grade-upload]')?.addEventListener('click',()=>importSummaryTable(cls));
+  main.querySelector('[data-upload-term]')?.addEventListener('change',e=>{SUMMARY_TERM.current=e.target.value;});
+}
+function gradeUploadToolbar(){return `<div class="toolbar no-print"><label>Upload term <select data-upload-term>${['term1','term2','term3'].map((t,i)=>`<option value="${t}" ${SUMMARY_TERM.current===t?'selected':''}>Term ${i+1}</option>`).join('')}</select></label><button type="button" data-grade-template>Download Grade Template</button><button type="button" data-grade-upload>Upload Subject Grades</button></div><p class="hint no-print">An upload can include several subjects. Imported subjects use the uploaded grades; you can switch back to detected Class Record grades in the subject page.</p>`;}
+function renderSummary(main,cls){
+  if(cls.domain!=='adviser'){renderFinal(main,cls);return;}
+  if(!adviserSf1Ready(cls)||!cls.students.length){main.innerHTML='<div class="card"><h2>Summary of Final Grades</h2><p>Upload the SF1 masterlist in Advisory Overview first.</p></div>';return;}
+  cls.students.forEach(st=>ensureStudentExtras(cls,st.id));
+  const cards=adviserSubjectCards(cls),selected=cards.find(a=>a.key===SUMMARY_SUBJECT);
+  if(selected){renderAdviserSubjectGrades(main,cls,selected);return;}
+  main.innerHTML=`<section class="card subject-hub"><h2>Summary of Final Grades</h2><p>${esc(cls.meta.gradeLevel||'')} ${esc(cls.meta.section||'')} · ${esc(cls.meta.schoolYear||'')} · ${esc(ensureSubjectConfig(cls).classType)}</p><p>Choose a subject to enter term grades, upload grades, or view detected Class Record grades.</p><div class="subject-icon-grid ${isSpecialScienceClass(cls)?'special':''}">${cards.map(a=>`<button type="button" class="subject-icon-card" data-open-subject="${a.key}"><span class="subject-icon-holder"><img src="${subjectIconPath(cls,a.key)}" alt="" loading="eager"></span><span>${esc(a.label)}</span></button>`).join('')}</div>${gradeUploadToolbar()}<button type="button" class="ghost-alt" data-go-tab="sf9setup">Class Type and Subject Settings</button></section>`;
+  main.querySelectorAll('[data-open-subject]').forEach(btn=>btn.addEventListener('click',()=>{SUMMARY_SUBJECT=btn.dataset.openSubject;render();window.scrollTo(0,0);}));
+  bindGradeUploadButtons(main,cls);
+}
+function renderAdviserSubjectGrades(main,cls,selected){
+  const areas=selected.key==='MAPEH'?mapehComponentAreas(cls):[selected];
+  const sections=areas.map(area=>{
+    const detected=detectedAdviserSource(cls,area.key),manual=adviserGradeMode(cls,area.key)==='manual'||detected.status==='none';
+    const status=manual?'Enter term grades below or upload a grade file.':detected.status==='matched'?'Reading '+detected.source.meta.className:detected.reason;
+    return `<section class="subject-grade-section" data-grade-area="${area.key}"><h3>${esc(area.label)}</h3><label class="no-print">Grade source <select data-grade-source="${area.key}"><option value="manual" ${manual?'selected':''}>Manual entry / uploaded grades</option><option value="auto" ${!manual?'selected':''}>Detected Class Record</option></select></label><p>${esc(status)}</p><div class="scroll-x"><table class="data subject-grade-table"><thead><tr><th>Learner</th><th>Term 1</th><th>Term 2</th><th>Term 3</th><th>Final Grade</th></tr></thead><tbody>${cls.students.map(st=>{
+      const values=['term1','term2','term3'].map(t=>areaTermValue(cls,st,area,t));
+      return `<tr><td>${esc(st.name)}</td>${values.map((value,i)=>manual?`<td><input type="number" min="60" max="100" step="1" class="adviser-term-grade" data-sid="${esc(st.id)}" data-key="${area.key}" data-term="term${i+1}" value="${value===null?'':value}" aria-label="${esc(st.name)} ${esc(area.label)} Term ${i+1}"></td>`:`<td>${value===null?'—':value}</td>`).join('')}<td class="subject-final">${averageWhole(values)??'—'}</td></tr>`;
+    }).join('')}</tbody></table></div></section>`;
+  }).join('');
+  main.innerHTML=`<div class="card"><button type="button" class="no-print" data-all-subjects>← All Subjects</button><h2>${esc(selected.label)} — Term and Final Grades</h2>${selected.key==='MAPEH'?'<p>Music and Arts and PE and Health retain their separate grades. MAPEH averages use the existing calculation.</p>':''}${gradeUploadToolbar()}<p class="grade-entry-message" role="status"></p>${sections}</div>`;
+  main.querySelector('[data-all-subjects]').addEventListener('click',()=>{SUMMARY_SUBJECT='';render();window.scrollTo(0,0);});
+  main.querySelectorAll('[data-grade-source]').forEach(el=>el.addEventListener('change',()=>{setAdviserGradeMode(cls,el.dataset.gradeSource,el.value);saveState();render();}));
+  main.querySelectorAll('.adviser-term-grade').forEach(el=>el.addEventListener('change',()=>{
+    const {sid,key,term}=el.dataset,raw=el.value.trim(),value=raw===''?'':Number(raw),message=main.querySelector('.grade-entry-message');
+    const old=cls.otherGrades[sid][key][term];
+    if(raw!==''&&(!Number.isFinite(value)||!Number.isInteger(value)||value<60||value>100)){
+      el.value=old===undefined?'':old;message.textContent='Enter a whole-number grade from 60 to 100, or leave the field blank.';el.setAttribute('aria-invalid','true');return;
+    }
+    el.removeAttribute('aria-invalid');message.textContent='';setAdviserGradeMode(cls,key,'manual');cls.otherGrades[sid][key][term]=value;
+    el.closest('tr').querySelector('.subject-final').textContent=averageWhole(['term1','term2','term3'].map(t=>areaTermValue(cls,cls.students.find(st=>st.id===sid),{key},t)))??'—';saveState();
+  }));
+  bindGradeUploadButtons(main,cls);
 }
 
 function renderReport(main, cls){
@@ -3468,7 +3573,7 @@ function renderReport(main, cls){
   main.innerHTML = `
     <div class="card no-print">
       <h2>Report Cards (SF9)</h2>
-      <div class="sub">SF9 learner identity comes from the Adviser SF1 masterlist. Learning-area grades are <strong>read-only here</strong> and come exclusively from Adviser Controls → Summary of Subject Grades.${sf2ReportNote} Teacher comments remain editable here.</div>
+      <div class="sub">SF9 learner identity comes from the Adviser SF1 masterlist. Learning-area grades are <strong>read-only here</strong> and come exclusively from Adviser Controls → Summary of Final Grades.${sf2ReportNote} Teacher comments remain editable here.</div>
       <div class="toolbar">
         <select id="rcStudent"></select>
         <button class="ghost-alt" data-go-tab="sf9setup">Modify SF9 Setup</button>
@@ -3546,12 +3651,11 @@ function areaMatchesSubject(cls, area){
   return area && area.key===classRecordSubjectAreaKey(cls);
 }
 
-/* SF9 never reads directly from the Class Record and never owns separate
+/* SF9 uses the same resolved subject grades as Adviser Summary and never owns separate
    learning-area grade entries. Summary of Grades is the sole grade source. */
 function areaRowResult(cls, s, area){
   ensureStudentExtras(cls,s.id);
-  const g=cls.otherGrades[s.id][area.key]||{term1:"",term2:"",term3:""};
-  const nums=["term1","term2","term3"].map(t=>g[t]!==""&&g[t]!==undefined?Number(g[t]):null);
+  const nums=["term1","term2","term3"].map(t=>areaTermValue(cls,s,area,t));
   const final=averageWhole(nums);
   return {t1:nums[0],t2:nums[1],t3:nums[2],final,locked:true};
 }
