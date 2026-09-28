@@ -1,8 +1,10 @@
-# KLAS v1.5.8
+# KLAS v1.5.9
 
 Offline Windows class-record application with separate teaching and adviser workspaces.
 
 ## Current release
+
+v1.5.9 restores the original wide welcome/sidebar banner while retaining the new Windows application icon. See RELEASE-v1.5.9.md and VALIDATION-v1.5.9.md.
 
 v1.5.8 adds the official shield/book/sun logo with the KLAS wordmark and Kattokong hat. The complete Windows x64 installer includes all v1.5.1–v1.5.7 functionality: keyboard score entry, page shortcuts, class switching, subject icons, manual/uploaded adviser grades and automatic Class Record detection.
 
@@ -17,7 +19,7 @@ npm ci
 npm run dist
 ```
 
-The installer is generated at `dist/KLAS-Setup-1.5.8.exe`. Electron and electron-builder versions are pinned in package.json/package-lock.json. The shortcut is named KLAS. Existing application identity and storage paths are retained for compatibility.
+The installer is generated at `dist/KLAS-Setup-1.5.9.exe`. Electron and electron-builder versions are pinned in package.json/package-lock.json. The shortcut is named KLAS. Existing application identity and storage paths are retained for compatibility.
 
 The installer has no Windows publisher certificate. Internal `.ecrupdate` signatures use a separate trust mechanism and do not establish Windows publisher signing.
 

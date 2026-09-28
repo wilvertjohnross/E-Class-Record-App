@@ -67,7 +67,7 @@ function renderWelcome(main){
   main.innerHTML=`<section class="welcome-page">
     <img class="welcome-background" src="assets/welcome-classroom.png" alt="" aria-hidden="true">
     <div class="welcome-content">
-      <div class="welcome-brand welcome-artwork"><img class="welcome-banner" src="assets/klas-official-logo.png" alt="KLAS — The One Place for Every Class"></div>
+      <div class="welcome-brand welcome-artwork"><img class="welcome-banner" src="assets/klas-banner.png" alt="KLAS — The One Place for Every Class"></div>
       <div class="welcome-hero">
         <div class="welcome-person"><div class="welcome-avatar">${welcomePhotoSafe(profile.photoDataUri)?`<img src="${esc(profile.photoDataUri)}" alt="Teacher profile photo">`:`<span aria-hidden="true">${esc(initials)}</span>`}</div>
           <div><p class="welcome-eyebrow">YOUR TEACHING WORKSPACE</p><h1 id="welcomeGreeting"></h1>${profile.employeeId?`<p class="welcome-employee">Employee ID: ${esc(profile.employeeId)}</p>`:''}<div class="welcome-profile-details"><p class="welcome-school">${esc(cls?.meta?.schoolName||'Welcome to your teaching workspace.')}</p><button id="welcomeEditProfile" class="small ghost-alt" type="button">${hasProfile?'Edit Profile':'Set Up Profile'}</button></div></div>
