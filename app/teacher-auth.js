@@ -4,11 +4,15 @@ const RECOVERY="https://fldwqkmadsyrbslxunvi.supabase.co/functions/v1/teacher-au
 const SUPABASE_KEY="sb_publishable_SIcfjo1FVwIhiJT2-Uy1iw_-P1mkZoz";
 const KEY="klas.teacher.session";
 let mode="login",busy=false;
+const DIAG="KLAS v1.6.4 diagnostic";
+function trace(step,detail=""){const e=document.getElementById("ta-diagnostic");if(!e)return;const stamp=new Date().toLocaleTimeString();e.hidden=false;e.textContent=stamp+" · "+step+(detail?" · "+detail:"");}
 const esc=s=>String(s??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]));
 async function post(url,body){
+ trace("NETWORK","Preparing POST "+(body?.action||"request"));
  let r;
- try{r=await fetch(url,{method:"POST",headers:{"content-type":"application/json","apikey":SUPABASE_KEY,"Authorization":"Bearer "+SUPABASE_KEY},body:JSON.stringify(body)})}
- catch{throw new Error("KLAS could not reach the authentication service. Check your internet connection and try again.")}
+ try{trace("NETWORK","fetch() started");r=await fetch(url,{method:"POST",headers:{"content-type":"application/json","apikey":SUPABASE_KEY,"Authorization":"Bearer "+SUPABASE_KEY},body:JSON.stringify(body)})}
+ catch(err){trace("NETWORK ERROR",err?.message||"fetch failed");throw new Error("KLAS could not reach the authentication service. Check your internet connection and try again.")}
+ trace("NETWORK","HTTP "+r.status);
  const d=await r.json().catch(()=>({}));
  if(!r.ok)throw new Error(d.error||"Unable to complete the request.");
  return d;
@@ -23,17 +27,20 @@ function render(){
  if(mode==="recover")p.innerHTML=intro("Reset Teacher Password","Receive a one-time reset code through your verified DepEd mailbox.")+'<form id="klas-auth-form"><label for="ta-email">DepEd Email</label><input id="ta-email" type="email" autocomplete="username" inputmode="email" placeholder="name@deped.gov.ph" required><div id="verify-fields" hidden><label for="ta-code">Reset Code</label><input id="ta-code" class="klas-code" maxlength="10" autocomplete="one-time-code" spellcheck="false" placeholder="10-character code">'+pass("New Password","ta-password","new-password")+pass("Confirm Password","ta-confirm","new-password")+'<p class="klas-password-rule">Use at least 12 characters with uppercase, lowercase, a number, and a symbol.</p></div><button class="klas-auth-primary" id="ta-submit" type="submit">Send Reset Code</button></form><div id="ta-msg" aria-live="polite"></div><div class="klas-auth-links single"><button class="klas-auth-link" type="button" data-mode="login">Back to Sign In</button></div>';
  bind();
 }
+function diagBox(){return '<div id="ta-diagnostic" hidden style="margin-top:12px;padding:10px 12px;border:1px solid #d8b04a;border-radius:8px;background:#fff8df;color:#58440a;font:600 12px/1.4 Segoe UI,sans-serif;white-space:pre-wrap">Diagnostic ready</div>'}
 function msg(t,error=false){const e=document.getElementById("ta-msg");if(e)e.innerHTML=t?'<div class="klas-auth-message'+(error?" error":"")+'">'+esc(t)+'</div>':""}
 function setBusy(on,label){busy=on;const b=document.getElementById("ta-submit");if(!b)return;if(on){b.dataset.label=b.textContent;b.disabled=true;b.innerHTML='<span class="klas-spinner" aria-hidden="true"></span>'+esc(label)}else{b.disabled=false;b.textContent=b.dataset.label||b.textContent}}
 function bind(){
  document.querySelectorAll("[data-mode]").forEach(b=>b.onclick=()=>{if(busy)return;mode=b.dataset.mode;render()});
  document.querySelectorAll("[data-eye]").forEach(b=>b.onclick=()=>{const i=document.getElementById(b.dataset.eye);if(!i)return;const show=i.type==="password";i.type=show?"text":"password";b.querySelector("span").textContent=show?"Hide":"Show";b.setAttribute("aria-label",show?"Hide password":"Show password");b.title=show?"Hide password":"Show password"});
- const f=document.getElementById("klas-auth-form");if(f)f.onsubmit=submit;
+ const f=document.getElementById("klas-auth-form");if(f){f.onsubmit=submit;f.addEventListener("submit",()=>trace("EVENT","Form submit event received"),{capture:true})}
+ const sb=document.getElementById("ta-submit");if(sb)sb.addEventListener("click",()=>trace("EVENT","Submit button click received"),{capture:true});
+ trace("READY",DIAG+" · mode="+mode);
 }
 async function submit(e){
- e.preventDefault();if(busy)return;
+ e.preventDefault();trace("HANDLER","submit() entered · mode="+mode);if(busy){trace("HANDLER","ignored because busy=true");return;}
  const email=document.getElementById("ta-email")?.value.trim().toLowerCase()||"",password=document.getElementById("ta-password")?.value||"",confirm=document.getElementById("ta-confirm")?.value||"",code=document.getElementById("ta-code")?.value.trim().toUpperCase()||"",fields=document.getElementById("verify-fields");
- msg("");
+ msg("");trace("INPUT","email="+(email||"(empty)")+" · verificationFields="+(fields?String(fields.hidden):"none"));
  try{
   if(mode==="login"){setBusy(true,"Signing in...");const d=await post(ENDPOINT,{action:"login",email,password});localStorage.setItem(KEY,JSON.stringify({session:d.session,user:d.user,memberships:d.memberships||[],savedAt:Date.now()}));openApp(d.user);return}
   if(fields?.hidden){setBusy(true,mode==="register"?"Sending verification code...":"Sending reset code...");const d=await post(mode==="register"?ENDPOINT:RECOVERY,{action:mode==="register"?"register":"request",email});fields.hidden=false;const b=document.getElementById("ta-submit");if(b){b.dataset.label=mode==="register"?"Verify & Create Account":"Reset Password"}msg(d.message||"Check your DepEd mailbox for the code.");return}
