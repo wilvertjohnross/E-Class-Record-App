@@ -82,7 +82,25 @@ function renderWelcome(main){
           ${welcomeLauncher({tab:'subjecthome',title:'Class Overview',badge:"See Sections I'm Handling",tone:'blue',icon:'class',ariaLabel:'Open Class Overview'})}
           ${welcomeLauncher({id:'welcomeAdviser',title:'Advisory Overview',badge:'See My Advisory Class',tone:'purple',icon:'adviser',ariaLabel:'Open Advisory Overview'})}
         </div>
+        <div class="dashboard-quiet-action no-print"><button id="welcomeAboutKlas" type="button" class="ghost-alt">About KLAS</button></div>
       </div>
+      <dialog id="welcomeAboutPanel" class="welcome-profile klas-about-dialog" aria-labelledby="welcomeAboutTitle">
+        <div class="welcome-modal-heading"><h2 id="welcomeAboutTitle">About KLAS</h2><button type="button" id="aboutClose" class="ghost-alt" aria-label="Close About KLAS">Close</button></div>
+        <div class="klas-about-content">
+          <p><strong>KLAS is my brainchild, born from my own experience as a classroom teacher.</strong></p>
+          <p>I have seen how much of a teacher's time is spent not only teaching, but also maintaining class records, computing grades, preparing school forms, checking attendance, and repeatedly encoding information that is often related across several documents.</p>
+          <p>I envisioned KLAS as a way of bringing these tasks together. Instead of treating every class record and school form as an isolated document, KLAS provides one organized environment where related records can work together, reducing repetitive work while helping preserve the accuracy and integrity of the information teachers prepare.</p>
+          <p>KLAS is intended to be a practical tool made with the realities of teachers' work in mind. Its purpose is to lessen administrative burden so teachers can devote more time and energy to learners and the teaching-learning process.</p>
+          <h3>Data Privacy &amp; Use of Information</h3>
+          <p>KLAS processes learner, teacher, classroom, attendance, grading, and school-record information only as needed for its educational and teacher-productivity functions. Information may be used to organize class records, compute and consolidate grades, prepare applicable school forms, maintain attendance, support authorized learner access, preserve record integrity and audit history, recover data, and support controlled synchronization and publication.</p>
+          <p>KLAS is designed as an offline-first application, so records may be stored on an authorized teacher's device. When cloud synchronization is enabled, information necessary for the enabled KLAS functions may also be securely transmitted to and stored by the configured KLAS cloud services. Access is intended to follow assigned roles and legitimate school functions. KLAS does not sell learner or teacher information or use school records for advertising or unrelated commercial processing.</p>
+          <p>Users remain responsible for protecting their accounts and devices and for handling school records in accordance with applicable Department of Education requirements and data-privacy obligations.</p>
+          <h3>Important Notice on Official DepEd Systems</h3>
+          <p><strong>KLAS is a teacher productivity and school-record management tool. It does not replace the Learner Information System (LIS) or other official information systems of the Department of Education.</strong> Where official submission, reporting, validation, or another prescribed DepEd process is required, the prescribed process remains controlling. Keeping information in KLAS does not by itself constitute submission to LIS or another official DepEd system.</p>
+          <p>What began as an idea to make my own work more manageable has grown into a vision of a unified tool that may also make the work of other teachers a little easier.</p>
+          <p class="klas-about-signature"><strong>Wilvert John Ross D. Tabangin</strong><br><em>Developer, KLAS</em></p>
+        </div>
+      </dialog>
       <dialog id="welcomeProfilePanel" class="welcome-profile" aria-labelledby="welcomeProfileTitle"><div class="welcome-modal-heading"><h2 id="welcomeProfileTitle">Teacher profile</h2><button type="button" id="profileClose" class="ghost-alt" aria-label="Close profile setup">Close</button></div>
         <form id="welcomeProfileForm"><p>Your display profile is separate from official teacher names and signatories.</p>
           <div class="welcome-profile-grid">
@@ -98,6 +116,8 @@ function renderWelcome(main){
   </section>`;
   welcomeButtonIcons(main);
   welcomeTick();if(welcomeClockTimer)clearInterval(welcomeClockTimer);welcomeClockTimer=setInterval(welcomeTick,1000);
+  document.getElementById('welcomeAboutKlas').onclick=()=>document.getElementById('welcomeAboutPanel').showModal();
+  document.getElementById('aboutClose').onclick=()=>document.getElementById('welcomeAboutPanel').close();
   document.getElementById('welcomeEditProfile').onclick=()=>{const p=document.getElementById('welcomeProfilePanel');p.showModal();document.getElementById('profileDisplayName').focus();};
   document.getElementById('profileClose').onclick=()=>document.getElementById('welcomeProfilePanel').close();
   document.getElementById('welcomeAdviser').onclick=()=>{navigateToTab('adviserhome');if(!adviserSf1Ready(adviser))importOfficialSf1IntoClass(adviser);};
