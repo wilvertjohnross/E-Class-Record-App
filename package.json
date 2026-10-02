@@ -1,9 +1,9 @@
 {
-  "name": "e-class-record-app-gs-sf9",
-  "version": "1.6.16",
-  "description": "Offline-first E-Class Record App with official ECR, Grading Sheet, compliant SF2 Daily Attendance, SF9, SF1 import, secure local backups/updates, and app-owned grading/attendance logic",
+  "name": "klas",
+  "version": "1.7.0",
+  "description": "KLAS — an offline-first teacher productivity and school-record management application for class records, grading, attendance, and applicable school forms.",
   "main": "main.js",
-  "author": "",
+  "author": "Wilvert John Ross D. Tabangin",
   "license": "UNLICENSED",
   "private": true,
   "scripts": {
@@ -17,7 +17,7 @@
   },
   "build": {
     "appId": "ph.edu.eclassrecord.gs.sf9",
-    "productName": "E-Class Record App with GS and SF9",
+    "productName": "KLAS",
     "artifactName": "KLAS-Setup-${version}.${ext}",
     "directories": {
       "output": "dist"
