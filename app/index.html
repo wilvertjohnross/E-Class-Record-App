@@ -1288,16 +1288,38 @@ html[data-theme="dark"] main::after{
   <button type="button" class="sidebar-brand no-print" id="sidebarHomeBrand" aria-label="Go to KLAS Home" title="Go to KLAS Home">
     <img src="assets/klas-banner.png" alt="KLAS — The One Place for Every Class">
   </button>
-  <nav class="tabs role-tabs no-print" id="tabs" aria-label="Current location">
-    <div class="location-item location-root" data-location-tabs="welcome"><span class="rail-glyph" aria-hidden="true">⌂</span><span>Home</span></div>
-    <div class="location-item" data-location-tabs="subjecthome setup classroster"><span class="rail-glyph" aria-hidden="true">▣</span><span>Class Overview</span></div>
-    <div class="location-item" data-location-tabs="adviserhome roster sf2 advisersummary sf5 report sf9setup sf10"><span class="rail-glyph" aria-hidden="true">♙</span><span>Advisory Overview</span></div>
-    <div class="location-item" data-location-tabs="gradinghome term1 term2 term3 final"><span class="rail-glyph" aria-hidden="true">◉</span><span>Term Grades</span></div>
+  <nav class="tabs role-tabs no-print" id="tabs" aria-label="KLAS navigation">
+    <button type="button" class="location-item location-root sidebar-nav-link" data-go-tab="welcome" data-location-tabs="welcome"><span class="rail-glyph" aria-hidden="true">⌂</span><span>Home</span></button>
+    <details class="sidebar-branch" data-sidebar-branch="classes">
+      <summary class="location-item" data-location-tabs="subjecthome setup classroster gradinghome term1 term2 term3 final"><span><span class="rail-glyph" aria-hidden="true">▣</span> Classes</span></summary>
+      <div class="sidebar-branch-children">
+        <button type="button" class="location-subitem sidebar-nav-link" data-go-tab="subjecthome" data-location-tabs="subjecthome">Class Overview</button>
+        <button type="button" class="location-subitem sidebar-nav-link" data-go-tab="setup" data-location-tabs="setup">Class Setup</button>
+        <button type="button" class="location-subitem sidebar-nav-link" data-go-tab="classroster" data-location-tabs="classroster">Learner Roster</button>
+        <button type="button" class="location-subitem sidebar-nav-link" data-go-tab="gradinghome" data-location-tabs="gradinghome term1 term2 term3 final">Term Grades</button>
+      </div>
+    </details>
+    <details class="sidebar-branch" data-sidebar-branch="advisory">
+      <summary class="location-item" data-location-tabs="adviserhome roster sf2 advisersummary sf5 report sf9setup sf10"><span><span class="rail-glyph" aria-hidden="true">♙</span> Advisory</span></summary>
+      <div class="sidebar-branch-children">
+        <button type="button" class="location-subitem sidebar-nav-link" data-go-tab="adviserhome" data-location-tabs="adviserhome">Advisory Overview</button>
+        <button type="button" class="location-subitem sidebar-nav-link" data-go-tab="roster" data-location-tabs="roster">Learner Roster (SF1)</button>
+        <button type="button" class="location-subitem sidebar-nav-link" data-go-tab="sf2" data-location-tabs="sf2">Attendance (SF2)</button>
+        <button type="button" class="location-subitem sidebar-nav-link" data-go-tab="advisersummary" data-location-tabs="advisersummary">Summary of Final Grades</button>
+        <button type="button" class="location-subitem sidebar-nav-link" data-go-tab="report" data-location-tabs="report sf9setup">Report Cards (SF9)</button>
+      </div>
+    </details>
   </nav>
 <div class="sidebar-utilities no-print">    <button id="btnTheme" class="ghost theme-toggle" title="Toggle light/dark working view">🌙 Dark</button>
     <button id="btnExport" class="ghost">Export Backup</button>
     <button id="btnImport" class="ghost">Import Backup</button>
     <input type="file" id="fileImport" accept="application/json" style="display:none;"></div>
+  <div class="sidebar-account no-print" id="sidebarAccount" hidden>
+    <div class="sidebar-account-label">Signed in as:</div>
+    <div class="sidebar-account-name" id="sidebarAccountName">Teacher</div>
+    <div class="sidebar-account-rule"></div>
+    <button type="button" class="sidebar-signout" id="sidebarSignOut">Sign Out!</button>
+  </div>
   <div class="sidebar-version no-print" id="statusVersion" title="Application/update status" aria-live="polite">v1.5.9</div>
 </header>
 
@@ -1659,10 +1681,35 @@ header.appbar .sidebar-brand:hover{background:#f2f0e9!important;}
 @media print{.sidebar-version{display:none!important;}}
 </style>
 
+<style id="klas-v171-sidebar">
+/* v1.7.1: clickable two-level accordion sidebar + authenticated account panel. */
+nav.tabs::before{content:"Navigation";}
+nav.tabs .sidebar-nav-link{appearance:none;border:0;background:transparent;box-shadow:none;text-align:left;cursor:pointer;font-family:var(--sans);}
+nav.tabs .location-item.sidebar-nav-link,nav.tabs .location-subitem.sidebar-nav-link{pointer-events:auto;}
+.sidebar-branch{width:100%;min-width:0;margin:0;}
+.sidebar-branch>summary{cursor:pointer;list-style:none;display:flex!important;align-items:center;justify-content:space-between;gap:8px;pointer-events:auto!important;}
+.sidebar-branch>summary::-webkit-details-marker{display:none;}
+.sidebar-branch>summary::after{content:"›";font-size:18px;line-height:1;transition:transform .15s ease;}
+.sidebar-branch[open]>summary::after{transform:rotate(90deg);}
+.sidebar-branch-children{display:flex;flex-direction:column;gap:3px;padding:3px 0 5px;}
+nav.tabs .sidebar-nav-link:hover{background:rgba(255,255,255,.09);color:#fff;transform:none;}
+nav.tabs .sidebar-nav-link.active{background:#e7f7f6;color:#066f75;}
+.sidebar-account{margin-top:10px;padding:12px 4px 4px;color:#dcebed;min-width:0;}
+.sidebar-account-label{font-size:10px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#8bbdc0;}
+.sidebar-account-name{margin-top:4px;font-size:13px;font-weight:750;line-height:1.35;overflow-wrap:anywhere;}
+.sidebar-account-rule{height:1px;margin:10px 0;background:rgba(255,255,255,.2);}
+.sidebar-signout{width:100%;background:transparent!important;color:#fff!important;border:1px solid rgba(255,255,255,.35)!important;}
+.sidebar-signout:hover{background:rgba(255,255,255,.1)!important;}
+@media print{.sidebar-account{display:none!important;}}
+</style>
+
 <style>
 .term-launch-pair{display:flex;flex-direction:column;align-items:center;gap:12px;min-width:0;}
 .term-launch-pair>.workspace-launcher{width:100%;}
 .term-sheet-launch{max-width:100%;white-space:normal;}
+.grading-dashboard .workspace-launch-grid{grid-template-columns:repeat(auto-fit,minmax(190px,1fr));}
+.grading-sheet-card .workspace-launcher-icon{width:96px;height:96px;border-radius:28px;}
+.grading-sheet-card .workspace-launcher-icon svg{width:52px;height:52px;}
 </style>
 
 <style>
