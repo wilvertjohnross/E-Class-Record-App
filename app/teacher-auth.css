@@ -35,3 +35,26 @@ html:has(#klas-auth-gate:not([hidden])),body:has(#klas-auth-gate:not([hidden])){
     width:min(400px,94%);
   }
 }
+
+/* v1.6.9 precise desktop banner footprint */
+@media (min-width:821px){
+  .klas-auth-brand .klas-auth-banner{
+    width:520px!important;
+    max-width:calc(100% - 4px)!important;
+    height:auto!important;
+    object-fit:contain;
+    object-position:left top;
+    align-self:flex-start;
+  }
+}
+@media (min-width:1180px){
+  .klas-auth-brand .klas-auth-banner{
+    width:540px!important;
+  }
+}
+@media (max-height:720px) and (min-width:821px){
+  .klas-auth-brand .klas-auth-banner{
+    width:500px!important;
+    max-width:calc(100% - 4px)!important;
+  }
+}
