@@ -399,7 +399,8 @@ function sf2NormalizeMark(value){
 }
 
 function sf2SchoolYearStart(cls){
-  const m=String(cls && cls.meta && cls.meta.schoolYear || "").match(/(20\d{2})/);
+  const identity=cls&&cls.domain==="adviser"?advisoryIdentity(cls):(cls&&cls.meta||{});
+  const m=String(identity.schoolYear||"").match(/(20\d{2})/);
   return m ? Number(m[1]) : new Date().getFullYear();
 }
 function sf2MonthOptions(cls){
@@ -1783,21 +1784,21 @@ async function openOfficialSf1Viewer(cls, autoPrint=false){
 }
 
 function renderRoster(main, cls){
-  const ready=adviserSf1Ready(cls);
-  const males=cls.students.filter(s=>s.sex==="M").length;
-  const females=cls.students.filter(s=>s.sex==="F").length;
+  const ready=adviserSf1Ready(cls),identity=advisoryIdentity(cls),learners=advisoryLearners(cls);
+  const males=learners.filter(s=>s.sex==="M").length;
+  const females=learners.filter(s=>s.sex==="F").length;
   main.innerHTML=`
     <div class="card sf1-viewer-card">
       <div class="hub-title-row">
         <div><h2>School Form 1 (SF1)</h2><div class="sub">Read-only official School Register viewer. The displayed/printed form uses the preserved SF1 workbook template.</div></div>
-        <div class="hub-context">${ready?`${males} Male • ${females} Female • ${cls.students.length} Total`:"SF1 masterlist not established"}</div>
+        <div class="hub-context">${ready?`${males} Male • ${females} Female • ${learners.length} Total`:"SF1 masterlist not established"}</div>
       </div>
       <div class="sf1-viewer-panel">
         <div class="sf1-viewer-icon" aria-hidden="true">SF1</div>
         <div class="sf1-viewer-copy">
           <strong>Official SF1 Template View</strong>
           <p>${ready?"The form layout, merged cells, column widths, row heights, borders, legends, registration block, and certification area come from the preserved official workbook rather than an HTML reconstruction.":"Import the Adviser SF1 masterlist from the Adviser Controls home first. Import/update controls are intentionally kept out of this viewer tab."}</p>
-          <div class="sf1-viewer-meta">${ready?`${esc(cls.meta.schoolName||"School")} • ${esc(cls.meta.gradeLevel||"")} ${esc(cls.meta.section||"")} • SY ${esc(cls.meta.schoolYear||"")}`:"Adviser official-form data must originate from SF1"}</div>
+          <div class="sf1-viewer-meta">${ready?`${esc(identity.schoolName||"School")} • ${esc(identity.gradeLevel||"")} ${esc(identity.section||"")} • SY ${esc(identity.schoolYear||"")}`:"Adviser official-form data must originate from SF1"}</div>
         </div>
       </div>
       <div class="toolbar no-print" style="margin-top:16px;">
@@ -1953,7 +1954,8 @@ function officialSf2Payload(cls){
   const days=[...month.schoolDays].sort().map(date=>{const d=sf2CalendarDays(key).find(x=>x.date===date);return {date,day:d?d.day:"",weekday:d?d.short:""};});
   const summary=sf2ComputedSummary(cls,month);
   const students=cls.students.map(st=>{const x=sf2StudentStats(month,st.id);return {id:st.id,name:st.name||"",sex:st.sex==="F"?"F":"M",marks:days.map(d=>sf2Mark(month,st.id,d.date)),absent:x.absent,tardy:x.tardy,remarks:String(month.remarks[st.id]||"")};});
-  return {classId:cls.id||"",monthKey:key,monthLabel:info.label,monthName:SF2_MONTH_NAMES[info.month-1],meta:{...cls.meta},days,students,summary,adviser:cls.meta.adviser||cls.meta.teacher||"",schoolHead:cls.meta.schoolHead||""};
+  const identity=advisoryIdentity(cls);
+  return {classId:cls.id||"",monthKey:key,monthLabel:info.label,monthName:SF2_MONTH_NAMES[info.month-1],meta:{...identity},days,students,summary,adviser:identity.adviser||"",schoolHead:identity.schoolHead||""};
 }
 async function exportOfficialSf2(cls,mode="preview"){
   if(!window.eclassAPI||typeof window.eclassAPI.runtimeInvoke!=="function"){markRawScoreError(null,"Official SF2 output is available in the installed desktop app.");return;}
