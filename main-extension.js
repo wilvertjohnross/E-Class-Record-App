@@ -518,6 +518,23 @@ function fitDrawingImageToBox(zip, mediaEntryName, imageBytes) {
       changed = true;
       return `<xdr:oneCellAnchor>${next}</xdr:oneCellAnchor>`;
     });
+    // For both one-cell and two-cell anchors, explicitly lock the picture aspect
+    // ratio and remove source cropping. Excel then renders the replacement
+    // artwork without stretching it to the template's previous image shape.
+    xml = xml.replace(/<xdr:(oneCellAnchor|twoCellAnchor)>([\s\S]*?)<\/xdr:\1>/g, (anchor, anchorType, body) => {
+      const embed = (body.match(/<a:blip\b[^>]*r:embed="([^"]+)"/) || [])[1];
+      if (!embed || targetMap.get(embed) !== mediaEntryName) return anchor;
+      let next = body.replace(/<a:srcRect\b[^>]*\/>/g, '');
+      next = next.replace(/<a:picLocks\b([^>]*)\/>/g, (tag, attrs) => {
+        const clean = String(attrs || '').replace(/\s+noChangeAspect="[^"]*"/g, '');
+        return `<a:picLocks${clean} noChangeAspect="1"/>`;
+      });
+      if (!/<a:picLocks\b/.test(next)) {
+        next = next.replace(/<a:cNvPicPr\s*\/>/, '<a:cNvPicPr><a:picLocks noChangeAspect="1"/></a:cNvPicPr>');
+      }
+      if (next !== body) changed = true;
+      return `<xdr:${anchorType}>${next}</xdr:${anchorType}>`;
+    });
     if (changed) zip.updateFile(entry.entryName, Buffer.from(xml, 'utf8'));
   }
 }
