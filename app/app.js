@@ -481,7 +481,8 @@ function sf2StudentStats(month,sid){
   return {classDays:days.length,present,absent,tardy,maxConsecutiveAbsences:maxRun};
 }
 function sf2SexCounts(cls){
-  return {M:cls.students.filter(s=>s.sex==="M").length,F:cls.students.filter(s=>s.sex==="F").length};
+  const learners=cls&&cls.domain==="adviser"?advisoryLearners(cls):(cls&&Array.isArray(cls.students)?cls.students:[]);
+  return {M:learners.filter(s=>s.sex==="M").length,F:learners.filter(s=>s.sex==="F").length};
 }
 function sf2SummaryNumber(month,key,sex,fallback){
   const v=month.summary && month.summary[key] ? month.summary[key][sex] : "";
@@ -497,7 +498,7 @@ function sf2ComputedSummary(cls,month){
   const out={M:sf2SummaryNumber(month,"transferredOut","M",0),F:sf2SummaryNumber(month,"transferredOut","F",0)};
   const inn={M:sf2SummaryNumber(month,"transferredIn","M",0),F:sf2SummaryNumber(month,"transferredIn","F",0)};
   const totalAttendance={M:0,F:0}, consec5={M:0,F:0};
-  cls.students.forEach(st=>{ const x=sf2StudentStats(month,st.id); totalAttendance[st.sex==="F"?"F":"M"]+=x.present; if(x.maxConsecutiveAbsences>=5) consec5[st.sex==="F"?"F":"M"]++; });
+  advisoryLearners(cls).forEach(st=>{ const x=sf2StudentStats(month,st.id); totalAttendance[st.sex==="F"?"F":"M"]+=x.present; if(x.maxConsecutiveAbsences>=5) consec5[st.sex==="F"?"F":"M"]++; });
   const pctEnroll={M:first.M?reg.M/first.M*100:0,F:first.F?reg.F/first.F*100:0};
   const ada={M:days?totalAttendance.M/days:0,F:days?totalAttendance.F/days:0};
   const pctAttend={M:reg.M?ada.M/reg.M*100:0,F:reg.F?ada.F/reg.F*100:0};
@@ -518,7 +519,7 @@ function sf2MonthToSf9Key(monthKey){
 function syncSf2MonthToSf9(cls,monthKey){
   const sf9Key=sf2MonthToSf9Key(monthKey); if(!sf9Key) return;
   const m=ensureSf2Month(cls,monthKey);
-  cls.students.forEach(st=>{
+  advisoryLearners(cls).forEach(st=>{
     ensureStudentExtras(cls,st.id);
     const stats=sf2StudentStats(m,st.id);
     cls.attendance[st.id][sf9Key]={classDays:stats.classDays,present:stats.present};
@@ -711,6 +712,10 @@ function ensureAdviserWorkspace(){
   if(!adv.sf2||typeof adv.sf2!=="object") adv.sf2={activeMonth:"",months:{}};
   ensureSubjectConfig(adv);
   adv.students.forEach(st=>{ensureSf1Profile(st);ensureStudentExtras(adv,st.id);});
+  if(adv.meta.sf1SourceStatus==="imported" && (!adv.sf1Master||typeof adv.sf1Master!=="object")){
+    adv.sf1Master={schemaVersion:1,authority:"SF1",meta:{},learners:adv.students,importedAt:String(adv.meta.sf1ImportedAt||"")};
+    ADVISORY_SF1_META_KEYS.forEach(k=>{adv.sf1Master.meta[k]=unicodeText(adv.meta[k]??"").trim();});
+  }
   return adv;
 }
 function adviserClass(){ return ensureAdviserWorkspace(); }
@@ -1823,14 +1828,14 @@ function sf2SummaryInput(month,key,sex){
 function sf2MarkClass(status){ return status==="A"?"absent":status==="L"?"late":status==="C"?"cutting":"present"; }
 function refreshSf2CalculatedView(cls,monthKey){
   const month=ensureSf2Month(cls,monthKey), days=[...(month.schoolDays||[])].sort();
-  cls.students.forEach(st=>{
+  advisoryLearners(cls).forEach(st=>{
     const x=sf2StudentStats(month,st.id);
     const a=document.querySelector(`[data-sf2-absent="${CSS.escape(st.id)}"]`); if(a)a.textContent=String(x.absent);
     const t=document.querySelector(`[data-sf2-tardy="${CSS.escape(st.id)}"]`); if(t)t.textContent=String(x.tardy);
   });
   const daily={M:{},F:{}};
   days.forEach(d=>{daily.M[d]=0;daily.F[d]=0;});
-  cls.students.forEach(st=>{ const sex=st.sex==="F"?"F":"M"; days.forEach(d=>{if(sf2Mark(month,st.id,d)!=="A")daily[sex][d]++;}); });
+  advisoryLearners(cls).forEach(st=>{ const sex=st.sex==="F"?"F":"M"; days.forEach(d=>{if(sf2Mark(month,st.id,d)!=="A")daily[sex][d]++;}); });
   days.forEach(d=>{
     for(const sex of ["M","F"]){const el=document.querySelector(`[data-sf2-daily="${sex}|${d}"]`);if(el)el.textContent=String(daily[sex][d]);}
     const total=document.querySelector(`[data-sf2-daily="T|${d}"]`);if(total)total.textContent=String(daily.M[d]+daily.F[d]);
@@ -3278,7 +3283,7 @@ function syncClassRecordToSummary(cls){
 // Auto-detection never overwrites SF1 identities, stored grades, or old explicit links.
 function adviserLearnerMatch(cls,student,source){
   const name=normalizeLearnerName(student.name),lrn=String(student.lrn||'').trim();
-  const sourceStudents=source.students||[],adviserStudents=cls.students||[];
+  const sourceStudents=source.students||[],adviserStudents=advisoryLearners(cls);
   let matches=[];
   if(lrn){
     matches=sourceStudents.filter(x=>String(x.lrn||'').trim()===lrn);
@@ -3296,11 +3301,12 @@ function adviserLearnerMatch(cls,student,source){
 }
 
 function detectedAdviserSource(cls,key){
-  if(!adviserSf1Ready(cls)||!cls.students.length)return {status:'none',reason:'Import the SF1 masterlist first'};
+  const adviserStudents=advisoryLearners(cls),adv=advisoryIdentity(cls);
+  if(!adviserSf1Ready(cls)||!adviserStudents.length)return {status:'none',reason:'Import the SF1 masterlist first'};
   const norm=v=>String(v||'').normalize('NFKC').toLowerCase().replace(/[^a-z0-9]/g,'');
   const candidates=[];
   for(const source of Object.values(APP.classes||{})){
-    const meta=source.meta||{},adv=cls.meta||{};
+    const meta=source.meta||{};
     if(source.domain==='adviser')continue;
     let sourceKey=classRecordSubjectAreaKey(source);
     if(meta.classRecordSubjectId==='ELECTIVE'){
@@ -3313,9 +3319,9 @@ function detectedAdviserSource(cls,key){
     if(!norm(meta.gradeLevel)||!norm(adv.gradeLevel)||norm(meta.gradeLevel)!==norm(adv.gradeLevel))continue;
     if(norm(meta.schoolId)&&norm(adv.schoolId)&&norm(meta.schoolId)!==norm(adv.schoolId))continue;
     if(norm(meta.section)&&norm(adv.section)&&norm(meta.section)!==norm(adv.section))continue;
-    const matches=cls.students.filter(st=>!adviserLearnerMatch(cls,st,source).error).length;
+    const matches=adviserStudents.filter(st=>!adviserLearnerMatch(cls,st,source).error).length;
     const sameSection=norm(meta.section)&&norm(adv.section)&&norm(meta.section)===norm(adv.section);
-    if(matches>0&&(sameSection||matches===cls.students.length))candidates.push({source,matches});
+    if(matches>0&&(sameSection||matches===adviserStudents.length))candidates.push({source,matches});
   }
   if(candidates.length>1)return {status:'ambiguous',reason:'Multiple matching Class Records; resolve duplicate classes',candidates};
   if(!candidates.length)return {status:'none',reason:'No matching Class Record. Check subject, school year, grade, section and learner names'};
@@ -3336,7 +3342,7 @@ function adviserGradeMatch(cls,student,key){
 function adviserSourceControls(cls){
   return '<div class="card no-print"><h3>Automatically detected Class Records</h3><p>Grades are read from matching teaching classes using the subject, school year, grade, section and SF1 learners. No grade re-entry is needed. Subjects without a matching record retain previously saved or imported grades; ambiguous records stay blank.</p><div class="grid2">'+activeGradeInputAreas(cls).map(area=>{
     const result=detectedAdviserSource(cls,area.key);
-    const detail=result.status==='matched'?result.source.meta.className+' — '+result.matches+' of '+cls.students.length+' learners matched':result.reason;
+    const detail=result.status==='matched'?result.source.meta.className+' — '+result.matches+' of '+advisoryLearners(cls).length+' learners matched':result.reason;
     return '<div class="field"><strong>'+esc(area.label)+'</strong><p data-detected-subject="'+esc(area.key)+'">'+esc(detail)+'</p></div>';
   }).join('')+'</div></div>';
 }
