@@ -1412,7 +1412,7 @@ function renderClassRoster(main, cls){
 }
 
 function renderSf9Setup(main, cls){
-  const m=cls.meta||{},sc=ensureSubjectConfig(cls);
+  const m=advisoryIdentity(cls),sc=ensureSubjectConfig(cls);
   const regular=sc.classType==="Regular";
   main.innerHTML=`
     <div class="card">
@@ -3383,8 +3383,9 @@ function summaryTableHtml(cls, termKey){
   const primaryAreas = corePrimaryAreas(cls);
   const subAreas = mapehComponentAreas(cls);
   const electiveAreas = activeElectiveAreas(cls);
-  const males = cls.students.filter(s=>s.sex==="M");
-  const females = cls.students.filter(s=>s.sex==="F");
+  const learners = cls.domain==="adviser"?advisoryLearners(cls):cls.students;
+  const males = learners.filter(s=>s.sex==="M");
+  const females = learners.filter(s=>s.sex==="F");
   const colCount = 1 + primaryAreas.length + subAreas.length + 1 + electiveAreas.length + 2;
   const headCells = primaryAreas.map(a=>`<th>${esc(a.label)}</th>`).join("")
     + subAreas.map(a=>`<th>${esc(a.label)}</th>`).join("")
@@ -3524,7 +3525,8 @@ async function importSummaryTable(cls){
 }
 
 function summaryTemplatePayload(cls,termKey){
-  const males=cls.students.filter(s=>s.sex==="M"),females=cls.students.filter(s=>s.sex==="F");
+  const learners=cls.domain==="adviser"?advisoryLearners(cls):cls.students;
+  const males=learners.filter(s=>s.sex==="M"),females=learners.filter(s=>s.sex==="F");
   return {
     kind:"download-template",
     meta:{
@@ -3561,8 +3563,9 @@ function bindGradeUploadButtons(main,cls){
 function gradeUploadToolbar(){return `<div class="toolbar no-print"><label>Upload term <select data-upload-term>${['term1','term2','term3'].map((t,i)=>`<option value="${t}" ${SUMMARY_TERM.current===t?'selected':''}>Term ${i+1}</option>`).join('')}</select></label><button type="button" data-grade-template>Download Grade Template</button><button type="button" data-grade-upload>Upload Subject Grades</button></div><p class="hint no-print">An upload can include several subjects. Imported subjects use the uploaded grades; you can switch back to detected Class Record grades in the subject page.</p>`;}
 function renderSummary(main,cls){
   if(cls.domain!=='adviser'){renderFinal(main,cls);return;}
-  if(!adviserSf1Ready(cls)||!cls.students.length){main.innerHTML='<div class="card"><h2>Summary of Final Grades</h2><p>Upload the SF1 masterlist in Advisory Overview first.</p></div>';return;}
-  cls.students.forEach(st=>ensureStudentExtras(cls,st.id));
+  const learners=advisoryLearners(cls);
+  if(!adviserSf1Ready(cls)||!learners.length){main.innerHTML='<div class="card"><h2>Summary of Final Grades</h2><p>Upload the SF1 masterlist in Advisory Overview first.</p></div>';return;}
+  learners.forEach(st=>ensureStudentExtras(cls,st.id));
   const cards=adviserSubjectCards(cls),selected=cards.find(a=>a.key===SUMMARY_SUBJECT);
   if(selected){renderAdviserSubjectGrades(main,cls,selected);return;}
   main.innerHTML=`<section class="card subject-hub"><h2>Summary of Final Grades</h2><p>${esc(cls.meta.gradeLevel||'')} ${esc(cls.meta.section||'')} · ${esc(cls.meta.schoolYear||'')} · ${esc(ensureSubjectConfig(cls).classType)}</p><p>Choose a subject to enter term grades, upload grades, or view detected Class Record grades.</p><div class="subject-icon-grid ${isSpecialScienceClass(cls)?'special':''}">${cards.map(a=>`<button type="button" class="subject-icon-card" data-open-subject="${a.key}"><span class="subject-icon-holder"><img src="${subjectIconPath(cls,a.key)}" alt="" loading="eager"></span><span>${esc(a.label)}</span></button>`).join('')}</div>${gradeUploadToolbar()}<button type="button" class="ghost-alt" data-go-tab="sf9setup">Class Type and Subject Settings</button></section>`;
@@ -3570,11 +3573,12 @@ function renderSummary(main,cls){
   bindGradeUploadButtons(main,cls);
 }
 function renderAdviserSubjectGrades(main,cls,selected){
+  const learners=advisoryLearners(cls);
   const areas=selected.key==='MAPEH'?mapehComponentAreas(cls):[selected];
   const sections=areas.map(area=>{
     const detected=detectedAdviserSource(cls,area.key),manual=adviserGradeMode(cls,area.key)==='manual'||detected.status==='none';
     const status=manual?'Enter term grades below or upload a grade file.':detected.status==='matched'?'Reading '+detected.source.meta.className:detected.reason;
-    return `<section class="subject-grade-section" data-grade-area="${area.key}"><h3>${esc(area.label)}</h3><label class="no-print">Grade source <select data-grade-source="${area.key}"><option value="manual" ${manual?'selected':''}>Manual entry / uploaded grades</option><option value="auto" ${!manual?'selected':''}>Detected Class Record</option></select></label><p>${esc(status)}</p><div class="scroll-x"><table class="data subject-grade-table"><thead><tr><th>Learner</th><th>Term 1</th><th>Term 2</th><th>Term 3</th><th>Final Grade</th></tr></thead><tbody>${cls.students.map(st=>{
+    return `<section class="subject-grade-section" data-grade-area="${area.key}"><h3>${esc(area.label)}</h3><label class="no-print">Grade source <select data-grade-source="${area.key}"><option value="manual" ${manual?'selected':''}>Manual entry / uploaded grades</option><option value="auto" ${!manual?'selected':''}>Detected Class Record</option></select></label><p>${esc(status)}</p><div class="scroll-x"><table class="data subject-grade-table"><thead><tr><th>Learner</th><th>Term 1</th><th>Term 2</th><th>Term 3</th><th>Final Grade</th></tr></thead><tbody>${learners.map(st=>{
       const values=['term1','term2','term3'].map(t=>areaTermValue(cls,st,area,t));
       return `<tr><td>${esc(st.name)}</td>${values.map((value,i)=>manual?`<td><input type="number" min="60" max="100" step="1" class="adviser-term-grade" data-sid="${esc(st.id)}" data-key="${area.key}" data-term="term${i+1}" value="${value===null?'':value}" aria-label="${esc(st.name)} ${esc(area.label)} Term ${i+1}"></td>`:`<td>${value===null?'—':value}</td>`).join('')}<td class="subject-final">${averageWhole(values)??'—'}</td></tr>`;
     }).join('')}</tbody></table></div></section>`;
@@ -3589,21 +3593,22 @@ function renderAdviserSubjectGrades(main,cls,selected){
       el.value=old===undefined?'':old;message.textContent='Enter a whole-number grade from 60 to 100, or leave the field blank.';el.setAttribute('aria-invalid','true');return;
     }
     el.removeAttribute('aria-invalid');message.textContent='';setAdviserGradeMode(cls,key,'manual');cls.otherGrades[sid][key][term]=value;
-    el.closest('tr').querySelector('.subject-final').textContent=averageWhole(['term1','term2','term3'].map(t=>areaTermValue(cls,cls.students.find(st=>st.id===sid),{key},t)))??'—';saveState();
+    el.closest('tr').querySelector('.subject-final').textContent=averageWhole(['term1','term2','term3'].map(t=>areaTermValue(cls,learners.find(st=>st.id===sid),{key},t)))??'—';saveState();
   }));
   bindGradeUploadButtons(main,cls);
 }
 
 function renderReport(main, cls){
+  const learners=advisoryLearners(cls);
   if(!adviserSf1Ready(cls)){
     main.innerHTML=`<div class="card"><div class="hub-title-row"><div><h2>School Form 9</h2><div class="sub">SF9 requires the Adviser SF1 masterlist first. Import it from Adviser Controls so learner identity originates from SF1.</div></div><div><button class="ghost-alt no-print" data-go-tab="sf9setup">Modify SF9 Setup</button></div></div></div>`;
     return;
   }
-  if(!cls.students.length){
+  if(!learners.length){
     main.innerHTML = `<div class="card"><div class="hub-title-row"><div><h2>School Form 9</h2><div class="sub">No Adviser SF1 masterlist is available yet. Import the official SF1 from Adviser Controls first.</div></div><div><button class="ghost-alt no-print" data-go-tab="sf9setup">Modify SF9 Setup</button></div></div></div>`;
     return;
   }
-  cls.students.forEach(s=>ensureStudentExtras(cls, s.id));
+  learners.forEach(s=>ensureStudentExtras(cls, s.id));
   syncExistingSf2MonthsToSf9(cls);
   const sf2ReportNote=cls.meta&&cls.meta.sf2Enabled===true
     ? " Attendance for months already maintained in SF2 is read directly from SF2 and is locked here to avoid conflicting records."
@@ -3622,27 +3627,27 @@ function renderReport(main, cls){
     </div>
     <div id="rcContainer"></div>`;
   const sel = document.getElementById("rcStudent");
-  cls.students.forEach(s=>{
+  learners.forEach(s=>{
     const opt = document.createElement("option");
     opt.value = s.id; opt.textContent = s.name || "(unnamed)";
     sel.appendChild(opt);
   });
   function draw(){
     const container = document.getElementById("rcContainer");
-    const s = cls.students.find(x=>x.id===sel.value) || cls.students[0];
+    const s = learners.find(x=>x.id===sel.value) || learners[0];
     container.innerHTML = s ? reportCardHtml(cls,s) : "";
     bindReportCardEvents(cls, container);
   }
   sel.addEventListener("change", draw);
   document.getElementById("rcPreview").addEventListener("click", async ()=>{
-    const st=cls.students.find(x=>x.id===sel.value)||cls.students[0];
+    const st=learners.find(x=>x.id===sel.value)||learners[0];
     if(!st)return;
     const snapshot=`<!doctype html><html data-theme="${document.documentElement.dataset.theme||"light"}"><head><meta charset="utf-8"><title>SF9 Preview — ${esc(st.name)}</title><style>${Array.from(document.styleSheets).map(ss=>{try{return Array.from(ss.cssRules||[]).map(r=>r.cssText).join("\n")}catch{return""}}).join("\n")}</style></head><body><main style="padding:20px;max-width:none;">${reportCardHtml(cls,st)}</main></body></html>`;
     const r=await window.eclassAPI.runtimeInvoke("sf9:preview-html",{html:snapshot,name:st.name||"Learner"});
     if(!r||!r.ok)alert("Could not open SF9 preview: "+(r&&r.error?r.error:"Unknown error"));
   });
   document.getElementById("rcPrint").addEventListener("click", async ()=>{
-    const st=cls.students.find(x=>x.id===sel.value)||cls.students[0];
+    const st=learners.find(x=>x.id===sel.value)||learners[0];
     if(!st)return;
     const snapshot=`<!doctype html><html data-theme="${document.documentElement.dataset.theme||"light"}"><head><meta charset="utf-8"><title>SF9 — ${esc(st.name)}</title><style>${Array.from(document.styleSheets).map(ss=>{try{return Array.from(ss.cssRules||[]).map(r=>r.cssText).join("\n")}catch{return""}}).join("\n")}</style></head><body><main style="padding:20px;max-width:none;">${reportCardHtml(cls,st)}</main></body></html>`;
     const r=await window.eclassAPI.runtimeInvoke("sf9:preview-html",{html:snapshot,name:st.name||"Learner"});
@@ -3650,7 +3655,7 @@ function renderReport(main, cls){
   });
   document.getElementById("rcPrintAll").addEventListener("click", ()=>{
     const container = document.getElementById("rcContainer");
-    container.innerHTML = cls.students.map(s=>reportCardHtml(cls,s)).join("");
+    container.innerHTML = learners.map(s=>reportCardHtml(cls,s)).join("");
     bindReportCardEvents(cls, container);
     printCurrentView();
   });
