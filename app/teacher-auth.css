@@ -52,3 +52,19 @@ html:has(#klas-auth-gate:not([hidden])),body:has(#klas-auth-gate:not([hidden])){
     justify-self:end;
   }
 }
+/* v1.6.13 definitive desktop auth-card positioning */
+@media (min-width:821px){
+  #klas-auth-gate{
+    display:block!important;
+    padding:0!important;
+    overflow:hidden!important;
+  }
+  #klas-auth-gate > .klas-auth-shell{
+    position:absolute!important;
+    top:50%!important;
+    right:clamp(42px,4vw,68px)!important;
+    left:auto!important;
+    margin:0!important;
+    transform:translateY(-50%)!important;
+  }
+}
