@@ -942,7 +942,7 @@ function returnTargetFor(tab){
   if(tab==="sf9setup") return sf9SetupReturnTab==="report"?"report":"adviserhome";
   return RETURN_PARENT_TAB[tab]||null;
 }
-function navigateToTab(next,{termView=""}={}){
+function navigateToTab(next,{termView="",fromSidebar=false}={}){
   next=String(next||"").trim();
   if(!VALID_WORKFLOW_TABS.has(next)){
     console.warn("KLAS navigation ignored unknown tab:",next);
@@ -952,7 +952,9 @@ function navigateToTab(next,{termView=""}={}){
   if(next==="sf9setup") sf9SetupReturnTab=activeTab==="report"?"report":"adviserhome";
 
   if(SUBJECT_WORKFLOW_TABS.has(next) && next!=="subjecthome" && !activeClass()){
-    next="subjecthome";
+    // A sidebar destination must remain actionable. Class Setup is the only
+    // subject workspace that can establish a class when none exists.
+    next=fromSidebar?"setup":"subjecthome";
   }
   if(ADVISER_WORKFLOW_TABS.has(next) && next!=="adviserhome" && !adviserSf1Ready(ensureAdviserWorkspace())){
     next="adviserhome";
@@ -1129,20 +1131,26 @@ function renderGradingHome(main,cls){
         <h2>Term Grades</h2>
         <p class="sub">Select a term to manage class records.</p>
       </div>
-      <div class="workspace-launch-grid four-up">
+      <div class="workspace-launch-grid grading-term-row">
         ${workspaceLauncherTile({tab:"term1",title:"Term 1 Class Records",tone:"green",icon:"grading",termView:"record"})}
         ${workspaceLauncherTile({tab:"term2",title:"Term 2 Class Records",tone:"gold",icon:"grading",termView:"record"})}
         ${workspaceLauncherTile({tab:"term3",title:"Term 3 Class Records",tone:"blue",icon:"grading",termView:"record"})}
-        ${workspaceLauncherTile({tab:"final",title:"Final Grades and Reports",tone:"purple",icon:"final"})}
       </div>
       <div class="workspace-hero" style="margin-top:22px;">
-        <h2>Grading Sheet</h2>
+        <h2>Grading Sheets</h2>
         <p class="sub">Preview or print the computed grading sheet for the selected term.</p>
       </div>
-      <div class="workspace-launch-grid grading-sheet-card">
+      <div class="workspace-launch-grid grading-term-row">
         ${workspaceLauncherTile({tab:"term1",title:"Term 1 Grading Sheet",tone:"green",icon:"grading",termView:"gs"})}
         ${workspaceLauncherTile({tab:"term2",title:"Term 2 Grading Sheet",tone:"gold",icon:"grading",termView:"gs"})}
         ${workspaceLauncherTile({tab:"term3",title:"Term 3 Grading Sheet",tone:"blue",icon:"grading",termView:"gs"})}
+      </div>
+      <div class="workspace-hero" style="margin-top:22px;">
+        <h2>Final Grades and Reports</h2>
+        <p class="sub">Open the final grade summary and reporting workspace.</p>
+      </div>
+      <div class="workspace-launch-grid grading-final-row">
+        ${workspaceLauncherTile({tab:"final",title:"Final Grades and Reports",tone:"purple",icon:"final"})}
       </div>
     </section>`;
 }
@@ -4166,7 +4174,7 @@ document.getElementById("sidebarHomeBrand").addEventListener("click",()=>{
 document.getElementById("tabs").addEventListener("click",e=>{
   const go=e.target.closest("[data-go-tab]");
   if(!go||go.disabled)return;
-  navigateToTab(go.dataset.goTab,{termView:go.dataset.termView||""});
+  navigateToTab(go.dataset.goTab,{termView:go.dataset.termView||"",fromSidebar:true});
 });
 document.querySelectorAll("#tabs .sidebar-branch").forEach(branch=>{
   branch.addEventListener("toggle",()=>{
