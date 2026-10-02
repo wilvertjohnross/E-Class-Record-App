@@ -88,3 +88,6 @@ html:has(#klas-auth-gate:not([hidden])),body:has(#klas-auth-gate:not([hidden])){
 
 /* v1.6.15: hidden auth gate must override desktop positioning */
 #klas-auth-gate[hidden]{display:none!important}
+
+/* v1.7.1 account identity moved into the application sidebar. */
+.klas-auth-user{display:none!important;}
