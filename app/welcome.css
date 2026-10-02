@@ -408,3 +408,11 @@ html[data-theme="dark"] .welcome-page::before{
     font-size:19px !important;
   }
 }
+
+
+/* KLAS v1.7.0 — About KLAS */
+.klas-about-dialog{width:min(760px,calc(100vw - 32px));max-height:min(82vh,820px);}
+.klas-about-content{overflow:auto;max-height:calc(82vh - 110px);padding:2px 4px 10px;line-height:1.65;color:var(--text-primary);}
+.klas-about-content p{margin:0 0 14px;}
+.klas-about-content h3{margin:24px 0 8px;font-size:15px;color:var(--accent);}
+.klas-about-signature{margin-top:26px!important;padding-top:16px;border-top:1px solid var(--border);line-height:1.45!important;}
