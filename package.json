@@ -51,7 +51,12 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "KLAS",
-      "deleteAppDataOnUninstall": false
+      "deleteAppDataOnUninstall": false,
+      "guid": "ph.edu.eclassrecord.gs.sf9",
+      "perMachine": false,
+      "runAfterFinish": true,
+      "uninstallDisplayName": "KLAS",
+      "include": "build/installer-compat.nsh"
     }
   },
   "dependencies": {
