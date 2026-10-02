@@ -455,7 +455,8 @@ function ensureSf2Month(cls,key){
     if(m.summary[k].M===undefined) m.summary[k].M="";
     if(m.summary[k].F===undefined) m.summary[k].F="";
   });
-  cls.students.forEach(st=>{
+  const learners=cls&&cls.domain==="adviser"?advisoryLearners(cls):(Array.isArray(cls.students)?cls.students:[]);
+  learners.forEach(st=>{
     if(!m.marks[st.id]||typeof m.marks[st.id]!=="object"||Array.isArray(m.marks[st.id])) m.marks[st.id]={};
     if(m.remarks[st.id]===undefined) m.remarks[st.id]="";
   });
