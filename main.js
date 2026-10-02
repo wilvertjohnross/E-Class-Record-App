@@ -326,7 +326,7 @@ function buildMenu() {
 ipcMain.on('data:load-sync', (event) => {
   if (!isTrustedMainSender(event)) { event.returnValue = null; return; }
   const p = ensureDataFolders();
-  for (const candidate of [p.dataFile, p.recoveryFile]) {
+  for (const candidate of [...new Set([p.readableDataFile, p.dataFile, p.recoveryFile])]) {
     try {
       if (!fs.existsSync(candidate)) continue;
       const raw = fs.readFileSync(candidate, 'utf8');
@@ -360,8 +360,8 @@ ipcMain.handle('backup:export', async (event, text) => {
     const normalized = JSON.stringify(parseAndValidateAppState(text), null, 2);
     const date = new Date().toISOString().slice(0, 10);
     const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
-      title: 'Export Gradebook Backup',
-      defaultPath: path.join(app.getPath('documents'), `eclass-record-backup-${date}.json`),
+      title: 'Export KLAS Backup',
+      defaultPath: path.join(app.getPath('documents'), `KLAS-backup-${date}.json`),
       filters: [{ name: 'JSON Backup', extensions: ['json'] }]
     });
     if (canceled || !filePath) return { ok: false, cancelled: true };
@@ -376,7 +376,7 @@ ipcMain.handle('backup:import', async (event) => {
   const rejected = rejectUntrustedInvoke(event); if (rejected) return rejected;
   try {
     const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
-      title: 'Import Gradebook Backup',
+      title: 'Import KLAS Backup',
       properties: ['openFile'],
       filters: [{ name: 'JSON Backup', extensions: ['json'] }]
     });
