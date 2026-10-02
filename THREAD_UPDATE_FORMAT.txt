@@ -1,45 +1,48 @@
-E-CLASS RECORD APP — SIGNED DEVELOPMENT UPDATE FORMAT
-Bootstrap feature/security baseline: v1.1.5
+KLAS — SIGNED RUNTIME UPDATE FORMAT
+Bootstrap compatibility boundary: v1.7.0
 
-PURPOSE
-Ordinary runtime/UI/template iterations can still be delivered as *.ecrupdate files,
-but v1.1.5+ accepts only packages signed by the current trusted Ed25519 development key.
-The private key is kept outside the application and is never distributed with builds.
+RELEASE BOUNDARY
+v1.6.15 -> v1.7.0 is a FULL WINDOWS INSTALLER/BOOTSTRAP upgrade.
+Do not distribute v1.7.0 as a normal .ecrupdate overlay. The v1.7.0 setup keeps
+the legacy application ID ph.edu.eclassrecord.gs.sf9 and the NSIS GUID is pinned
+to that same compatibility identity so Windows installer upgrades target the
+existing per-user installation rather than intentionally creating a second app.
 
-PACKAGE FORMAT
-.ecrupdate is ZIP-compatible:
-  manifest.json
-  payload/
-    app/index.html
-    app/app.js
-    main-extension.js
-    templates/...
+The installer does not delete application data on uninstall. KLAS v1.7.0 also
+reads the legacy Documents\E-Class Record App with GS and SF9\eclass-record-data.json
+when no valid canonical KLAS copy exists. The first successful KLAS save writes
+Documents\KLAS\klas-data.json; the legacy source is not destroyed.
 
-manifest.json includes:
+POST-v1.7.0 UPDATES
+Later compatible v1.7.x runtime/UI/template iterations may use *.ecrupdate.
+The package remains Ed25519-signed and every payload file is SHA-256 pinned.
+The private signing key stays outside the repository and outside distributed builds.
+
+manifest.json:
   format: 1
   appId: ph.edu.eclassrecord.gs.sf9
-  productName: E-Class Record App with GS and SF9
+  productName: KLAS
   version: semantic version newer than the effective version
-  minBootstrapVersion: 1.1.5 or newer
+  minBootstrapVersion: 1.7.0 or newer
   files: exact SHA-256 map for every payload file
   signature.algorithm: ed25519
   signature.keyId: ecr-dev-2026-09-12
-  signature.value: Base64 Ed25519 signature over the canonical manifest fields
+  signature.value: Base64 Ed25519 signature over canonical manifest fields
+
+BOOTSTRAP FILE RULE
+main.js, preload.js, thread-updater.js, Electron/native dependencies, installer
+configuration, and other bootstrap-level changes require a full installer.
+Do not assume they can be safely replaced by a runtime overlay.
 
 VALIDATION
 The updater verifies package size, manifest size, entry count, safe ZIP paths,
 per-entry size, total uncompressed size, exact signed file list, SHA-256 hashes,
-application identity, version compatibility, and Ed25519 signature. Staged files
-are re-hashed and the signed manifest is reverified before activation/loading.
+legacy-compatible app ID, KLAS product identity, minimum bootstrap v1.7.0, and
+the trusted Ed25519 signature. Staged files are re-hashed before activation.
 
-CREATE A SIGNED UPDATE
-Keep the private key outside the project folder. On Windows:
+CREATE A POST-v1.7.0 SIGNED UPDATE
+Keep the private key outside the project:
   set ECLASS_UPDATE_SIGNING_KEY=C:\secure\ECR_UPDATE_SIGNING_PRIVATE_KEY.pem
-  node tools\make-thread-update.js 1.1.6 path\to\payload update.ecrupdate
+  node tools\make-thread-update.js 1.7.1 path\to\payload KLAS-v1.7.1.ecrupdate
 
-IMPORTANT
-- Future update payloads should be self-contained snapshots of all runtime files they need.
-- Bootstrap/preload/native dependency changes still require a full installer.
-- Do not distribute the private signing key.
-- This remains a private development channel; eventual schoolwide releases should also use
-  normal Windows publisher/code signing and a trusted hosted release channel.
+Never distribute or commit the private signing key.
