@@ -1739,20 +1739,21 @@ async function importOfficialSf1IntoClass(cls){
    RENDER: Roster tab
    ========================================================================= */
 function sf1ViewerPayload(cls){
-  cls.students.forEach(ensureSf1Profile);
+  const master=advisoryMasterRecord(cls), identity=master.meta, learners=master.learners;
+  learners.forEach(ensureSf1Profile);
   return {
     meta:{
-      schoolId:String(cls.meta.schoolId||""),
-      region:String(cls.meta.region||""),
-      division:String(cls.meta.division||""),
-      schoolName:String(cls.meta.schoolName||""),
-      schoolYear:String(cls.meta.schoolYear||""),
-      gradeLevel:String(cls.meta.gradeLevel||""),
-      section:String(cls.meta.section||""),
-      adviser:String(cls.meta.adviser||""),
-      schoolHead:String(cls.meta.schoolHead||"")
+      schoolId:String(identity.schoolId||""),
+      region:String(identity.region||""),
+      division:String(identity.division||""),
+      schoolName:String(identity.schoolName||""),
+      schoolYear:String(identity.schoolYear||""),
+      gradeLevel:String(identity.gradeLevel||""),
+      section:String(identity.section||""),
+      adviser:String(identity.adviser||""),
+      schoolHead:String(identity.schoolHead||"")
     },
-    students:cls.students.map(s=>{
+    students:learners.map(s=>{
       const p=ensureSf1Profile(s);
       return {
         id:String(s.id||""), name:String(s.name||""), lrn:String(s.lrn||""),
@@ -1845,7 +1846,8 @@ function refreshSf2CalculatedView(cls,monthKey){
 }
 
 function renderSf2(main,cls){
-  if(cls&&cls.domain==="adviser"&&!adviserSf1Ready(cls)){
+  const sf1Master=advisoryMasterRecord(cls);
+  if(cls&&cls.domain==="adviser"&&!sf1Master.ready){
     main.innerHTML=`<div class="card"><h2>SF1 masterlist required</h2><p class="sub">SF2 is an Adviser official form and its learner roster must originate from SF1. Return to Adviser Controls and import the official SF1 masterlist first.</p></div>`;
     return;
   }
@@ -1855,8 +1857,9 @@ function renderSf2(main,cls){
     return;
   }
   const sf2=ensureSf2Class(cls), opts=sf2MonthOptions(cls), key=sf2.activeMonth, month=ensureSf2Month(cls,key), info=sf2MonthInfo(key);
+  const sf1Learners=sf1Master.learners;
   const calendar=sf2CalendarDays(key), schoolDays=[...(month.schoolDays||[])].sort();
-  const males=cls.students.filter(s=>s.sex==="M"), females=cls.students.filter(s=>s.sex==="F");
+  const males=sf1Learners.filter(s=>s.sex==="M"), females=sf1Learners.filter(s=>s.sex==="F");
   const summary=sf2ComputedSummary(cls,month);
   const dayMap=new Map(calendar.map(d=>[d.date,d]));
   const dateHeaders=schoolDays.map(d=>{const x=dayMap.get(d);return `<th class="sf2-date-head"><span>${x?x.day:""}</span><small>${x?x.short:""}</small></th>`;}).join("");
@@ -1868,10 +1871,10 @@ function renderSf2(main,cls){
   }
   function dailyTotalRow(label,sex){
     const cells=schoolDays.map(date=>{
-      const n=cls.students.filter(st=>(sex==="T"||st.sex===sex) && sf2Mark(month,st.id,date)!=="A").length;
+      const n=sf1Learners.filter(st=>(sex==="T"||st.sex===sex) && sf2Mark(month,st.id,date)!=="A").length;
       return `<td class="sf2-daily-total" data-sf2-daily="${sex}|${esc(date)}">${n}</td>`;
     }).join("");
-    const subset=sex==="T"?cls.students:cls.students.filter(st=>st.sex===sex);
+    const subset=sex==="T"?sf1Learners:sf1Learners.filter(st=>st.sex===sex);
     const abs=subset.reduce((a,st)=>a+sf2StudentStats(month,st.id).absent,0);
     const tar=subset.reduce((a,st)=>a+sf2StudentStats(month,st.id).tardy,0);
     return `<tr class="sf2-total-row"><td class="sf2-name sticky-learner">${label}</td>${cells}<td>${abs}</td><td>${tar}</td><td></td></tr>`;
