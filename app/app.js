@@ -713,7 +713,36 @@ function ensureAdviserWorkspace(){
   return adv;
 }
 function adviserClass(){ return ensureAdviserWorkspace(); }
+
+/* =========================================================================
+   KLAS v1.7.0 — ADVISORY DATA AUTHORITY
+   SF1 is the authoritative advisory master record. Downstream Adviser
+   modules consume these accessors instead of independently deciding which
+   roster/class identity is authoritative. Legacy fields remain in place
+   during migration so existing local records are not destroyed.
+   ========================================================================= */
+const ADVISORY_SF1_META_KEYS=["schoolId","region","division","schoolName","schoolYear","gradeLevel","section","adviser","schoolHead"];
 function adviserSf1Ready(cls){ return !!(cls&&cls.domain==="adviser"&&cls.meta&&cls.meta.sf1SourceStatus==="imported"); }
+function advisoryMasterRecord(cls){
+  if(!cls||cls.domain!=="adviser") return {ready:false,meta:{},learners:[]};
+  const sf1Meta=cls.sf1Master&&cls.sf1Master.meta&&typeof cls.sf1Master.meta==="object"?cls.sf1Master.meta:{};
+  const legacyMeta=cls.meta&&typeof cls.meta==="object"?cls.meta:{};
+  const meta={};
+  ADVISORY_SF1_META_KEYS.forEach(k=>{meta[k]=unicodeText(sf1Meta[k]??legacyMeta[k]??"").trim();});
+  const sourceLearners=Array.isArray(cls.sf1Master&&cls.sf1Master.learners)?cls.sf1Master.learners:(Array.isArray(cls.students)?cls.students:[]);
+  return {ready:adviserSf1Ready(cls),meta,learners:sourceLearners,importedAt:String((cls.sf1Master&&cls.sf1Master.importedAt)||legacyMeta.sf1ImportedAt||"")};
+}
+function advisoryLearners(cls){ return advisoryMasterRecord(cls).learners; }
+function advisoryIdentity(cls){ return advisoryMasterRecord(cls).meta; }
+function advisoryLearnerKey(student){
+  const lrn=String(student&&student.lrn||"").replace(/\D/g,"");
+  return /^\d{12}$/.test(lrn)?"lrn:"+lrn:"legacy:"+String(student&&student.id||"");
+}
+function syncSf1MasterCompatibility(cls){
+  if(!cls||cls.domain!=="adviser") return;
+  const master=advisoryMasterRecord(cls);
+  cls.sf1Master={schemaVersion:1,authority:"SF1",meta:{...master.meta},learners:Array.isArray(cls.students)?cls.students:master.learners,importedAt:master.importedAt};
+}
 
 /* =========================================================================
    GRADE COMPUTATION
@@ -1607,6 +1636,10 @@ function applyOfficialSf1ImportMutable(cls,data,options={}){
   cls.meta.className=[cls.meta.gradeLevel,cls.meta.section].filter(Boolean).join(" - ")||cls.meta.className||"Advisory Class";
   cls.meta.sf1SourceStatus="imported";
   cls.meta.sf1ImportedAt=new Date().toISOString();
+  // Capture SF1-owned class identity explicitly. cls.meta is retained only
+  // as a compatibility mirror while older KLAS records are migrated.
+  cls.sf1Master={schemaVersion:1,authority:"SF1",meta:{},learners:[],importedAt:cls.meta.sf1ImportedAt};
+  ADVISORY_SF1_META_KEYS.forEach(k=>{cls.sf1Master.meta[k]=unicodeText(cls.meta[k]??"").trim();});
   const original=[...cls.students];
   const idx=buildStudentImportIndexes(cls);
   const ordered=[], usedIds=new Set();
@@ -1660,6 +1693,8 @@ function applyOfficialSf1ImportMutable(cls,data,options={}){
     cls.students=[...ordered,...unmatchedOriginal];
   }
   if(cls.students.length>1000) throw new Error("SF1 import would exceed the 1,000-learner safety limit for one class.");
+  cls.sf1Master.learners=cls.students;
+  syncSf1MasterCompatibility(cls);
 
   return {learners:ordered.length,matched,added,removed,warnings:(data.warnings||[]).length};
 }
