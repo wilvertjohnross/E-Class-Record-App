@@ -19,32 +19,9 @@
     "appId": "ph.edu.eclassrecord.gs.sf9",
     "productName": "KLAS",
     "artifactName": "KLAS-Setup-${version}.${ext}",
-    "directories": {
-      "output": "dist"
-    },
-    "files": [
-      "main.js",
-      "preload.js",
-      "sf1-parser.js",
-      "flex-importers.js",
-      "thread-updater.js",
-      "main-extension.js",
-      "keyboard-menu.js",
-      "app/**/*",
-      "assets/**/*",
-      "templates/**/*"
-    ],
-    "win": {
-      "target": [
-        {
-          "target": "nsis",
-          "arch": [
-            "x64"
-          ]
-        }
-      ],
-      "icon": "assets/app.ico"
-    },
+    "directories": { "output": "dist" },
+    "files": ["main.js","preload.js","sf1-parser.js","flex-importers.js","thread-updater.js","main-extension.js","keyboard-menu.js","app/**/*","assets/**/*","templates/**/*"],
+    "win": { "target": [{ "target": "nsis", "arch": ["x64"] }], "icon": "assets/app.ico" },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
@@ -59,7 +36,5 @@
       "include": "build/installer-compat.nsh"
     }
   },
-  "dependencies": {
-    "adm-zip": "0.6.0"
-  }
+  "dependencies": { "adm-zip": "0.6.1" }
 }
