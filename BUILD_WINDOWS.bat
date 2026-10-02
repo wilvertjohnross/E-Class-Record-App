@@ -1,10 +1,10 @@
 @echo off
 setlocal
 cd /d "%~dp0"
-title Build - E-Class Record App with GS and SF9
+title Build - KLAS
 
 echo ============================================================
-echo   E-Class Record App with GS and SF9 - Windows Builder
+echo   KLAS v1.7.0 - Full Bootstrap Windows Builder
 echo ============================================================
 echo.
 
