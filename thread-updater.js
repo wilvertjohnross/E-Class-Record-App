@@ -79,7 +79,7 @@ function canonicalManifestBytes(manifest) {
 function verifyManifestSignature(manifest) {
   const sig = manifest && manifest.signature;
   if (!sig || sig.algorithm !== 'ed25519' || sig.keyId !== UPDATE_KEY_ID || typeof sig.value !== 'string') {
-    throw new Error('This update is not signed by the trusted E-Class Record development key.');
+    throw new Error('This update is not signed by the trusted KLAS development key.');
   }
   let signature;
   try { signature = Buffer.from(sig.value, 'base64'); } catch { throw new Error('The update signature is malformed.'); }
@@ -151,7 +151,7 @@ class ThreadUpdater {
       downloadsFolder: this.app.getPath('downloads'),
       updateExtension: UPDATE_EXT,
       developmentChannel: true,
-      note: 'Only Ed25519-signed .ecrupdate packages from the trusted development key are accepted; valid packages are staged and become active on the next normal app launch.'
+      note: 'Only Ed25519-signed KLAS compatibility update packages from the trusted development key are accepted; valid packages are staged and become active on the next normal app launch.'
     };
   }
 
