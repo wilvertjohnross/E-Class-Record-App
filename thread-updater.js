@@ -288,6 +288,15 @@ class ThreadUpdater {
     if (!manifest || manifest.format !== 1) throw new Error('Unsupported update package format.');
     if (manifest.appId !== this.appId) throw new Error('This update belongs to a different application.');
     if (manifest.productName && manifest.productName !== this.productName) throw new Error('Update product name does not match this application.');
+    // v1.7.0 is the KLAS bootstrap boundary. Bootstrap-level changes (main.js,
+    // preload.js, thread-updater.js, native/dependency changes) must arrive via
+    // the full installer; signed overlays are only for later compatible runtimes.
+    if (compareVersions(this.bootstrapVersion, '1.7.0') < 0) {
+      throw new Error('KLAS updates require the full KLAS v1.7.0 setup once before signed runtime updates can be installed.');
+    }
+    if (compareVersions(String(manifest.minBootstrapVersion || '0'), '1.7.0') < 0) {
+      throw new Error('This update was not issued for the KLAS v1.7.0 bootstrap boundary.');
+    }
     if (!/^\d+\.\d+\.\d+(?:\.\d+)?(?:[-+][0-9A-Za-z.-]+)?$/.test(String(manifest.version || ''))) {
       throw new Error('The update package has an invalid version number.');
     }
