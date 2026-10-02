@@ -21,3 +21,17 @@ html:has(#klas-auth-gate:not([hidden])),body:has(#klas-auth-gate:not([hidden])){
 .klas-auth-links{margin-top:12px}
 .klas-auth-message{margin-top:10px;padding:9px 12px}
 @media(max-height:720px) and (min-width:821px){.klas-auth-shell{height:calc(100vh - 24px)}#klas-auth-gate{padding:12px}.klas-auth-brand{padding:26px 36px 24px}.klas-auth-banner{width:min(300px,78%)}.klas-auth-brand h1{font-size:34px}.klas-auth-values{margin-top:12px}.klas-auth-panel{padding:24px 40px}.klas-auth-heading{margin-bottom:10px}.klas-auth-panel label{margin-top:7px}.klas-auth-panel input{height:40px}.klas-auth-primary{height:42px;margin-top:12px}}
+
+/* v1.6.8 targeted branding refinement: larger KLAS banner only */
+@media (min-width:821px){
+  .klas-auth-banner{
+    width:min(440px,96%);
+    max-width:none;
+    align-self:flex-start;
+  }
+}
+@media (max-height:720px) and (min-width:821px){
+  .klas-auth-banner{
+    width:min(400px,94%);
+  }
+}
