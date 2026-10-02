@@ -87,7 +87,7 @@ const manifest = {
   appId: 'ph.edu.eclassrecord.gs.sf9',
   productName: 'KLAS',
   version,
-  minBootstrapVersion: '1.1.5',
+  minBootstrapVersion: '1.7.0',
   channel: 'chat-thread-local-development',
   createdAt: new Date().toISOString(),
   files
