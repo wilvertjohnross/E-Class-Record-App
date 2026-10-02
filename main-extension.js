@@ -466,18 +466,86 @@ function replacePngMediaFromDataUri(zip, entryName, dataUri) {
   } catch {}
 }
 
+function pngDimensions(buf) {
+  if (!Buffer.isBuffer(buf) || buf.length < 24 || buf.toString('ascii', 1, 4) !== 'PNG') return null;
+  const width = buf.readUInt32BE(16), height = buf.readUInt32BE(20);
+  return width > 0 && height > 0 ? { width, height } : null;
+}
+
+function drawingMediaTargets(zip) {
+  const rels = new Map();
+  for (const entry of zip.getEntries()) {
+    const m = entry.entryName.match(/^xl\/drawings\/_rels\/(drawing\d+\.xml)\.rels$/);
+    if (!m) continue;
+    const xml = entry.getData().toString('utf8');
+    const map = new Map();
+    for (const hit of xml.matchAll(/<Relationship\b[^>]*\bId="([^"]+)"[^>]*\bTarget="([^"]+)"[^>]*\/>/g)) {
+      const target = hit[2].replace(/^\.\.\//, 'xl/');
+      map.set(hit[1], target);
+    }
+    rels.set(m[1], map);
+  }
+  return rels;
+}
+
+function fitDrawingImageToBox(zip, mediaEntryName, imageBytes) {
+  const dim = pngDimensions(imageBytes);
+  if (!dim) return;
+  const rels = drawingMediaTargets(zip);
+  for (const entry of zip.getEntries()) {
+    const m = entry.entryName.match(/^xl\/drawings\/(drawing\d+\.xml)$/);
+    if (!m) continue;
+    const targetMap = rels.get(m[1]);
+    if (!targetMap) continue;
+    let xml = entry.getData().toString('utf8'), changed = false;
+    xml = xml.replace(/<xdr:oneCellAnchor>([\s\S]*?)<\/xdr:oneCellAnchor>/g, (anchor, body) => {
+      const embed = (body.match(/<a:blip\b[^>]*r:embed="([^"]+)"/) || [])[1];
+      if (!embed || targetMap.get(embed) !== mediaEntryName) return anchor;
+      const ext = body.match(/<xdr:ext\s+cx="(\d+)"\s+cy="(\d+)"\s*\/>/);
+      if (!ext) return anchor;
+      const boxW = Number(ext[1]), boxH = Number(ext[2]);
+      const scale = Math.min(boxW / dim.width, boxH / dim.height);
+      const newW = Math.max(1, Math.round(dim.width * scale)), newH = Math.max(1, Math.round(dim.height * scale));
+      const dx = Math.max(0, Math.round((boxW - newW) / 2)), dy = Math.max(0, Math.round((boxH - newH) / 2));
+      let next = body.replace(/<xdr:ext\s+cx="\d+"\s+cy="\d+"\s*\/>/, `<xdr:ext cx="${newW}" cy="${newH}"/>`);
+      next = next.replace(/<xdr:from>([\s\S]*?)<\/xdr:from>/, (from, inner) => {
+        const colOff = Number((inner.match(/<xdr:colOff>(\d+)<\/xdr:colOff>/) || [])[1] || 0);
+        const rowOff = Number((inner.match(/<xdr:rowOff>(\d+)<\/xdr:rowOff>/) || [])[1] || 0);
+        inner = inner.replace(/<xdr:colOff>\d+<\/xdr:colOff>/, `<xdr:colOff>${colOff + dx}</xdr:colOff>`);
+        inner = inner.replace(/<xdr:rowOff>\d+<\/xdr:rowOff>/, `<xdr:rowOff>${rowOff + dy}</xdr:rowOff>`);
+        return `<xdr:from>${inner}</xdr:from>`;
+      });
+      changed = true;
+      return `<xdr:oneCellAnchor>${next}</xdr:oneCellAnchor>`;
+    });
+    if (changed) zip.updateFile(entry.entryName, Buffer.from(xml, 'utf8'));
+  }
+}
+
 function placeDepEdLeftAndSchoolRight(zip, leftEntryName, rightEntryName, schoolLogoDataUri) {
-  // The bundled official templates currently keep the DepEd artwork in the
-  // right-hand media slot. Move that exact bundled artwork to the left slot,
-  // then place the user-selected school/custom logo in the right slot.
+  // Keep the official template's logo boxes, but fit each replacement image
+  // proportionally inside its box and center it. This prevents landscape
+  // DepEd artwork and square/circular school seals from being stretched.
   const depedEntry = zip.getEntry(rightEntryName);
   if (depedEntry) {
     try {
       const depedBytes = Buffer.from(depedEntry.getData());
-      if (depedBytes.length > 100) zip.updateFile(leftEntryName, depedBytes);
+      if (depedBytes.length > 100) {
+        zip.updateFile(leftEntryName, depedBytes);
+        fitDrawingImageToBox(zip, leftEntryName, depedBytes);
+      }
     } catch {}
   }
-  replacePngMediaFromDataUri(zip, rightEntryName, schoolLogoDataUri);
+  const m = String(schoolLogoDataUri || '').match(/^data:image\/png;base64,(.+)$/i);
+  if (m) {
+    try {
+      const schoolBytes = Buffer.from(m[1], 'base64');
+      if (schoolBytes.length > 100) {
+        zip.updateFile(rightEntryName, schoolBytes);
+        fitDrawingImageToBox(zip, rightEntryName, schoolBytes);
+      }
+    } catch {}
+  }
 }
 
 function divisionHeading(value) {
