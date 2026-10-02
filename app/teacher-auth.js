@@ -79,7 +79,14 @@ async function signOut(){
  localStorage.removeItem(KEY);
  try{await revokeServerSession(saved)}finally{location.reload()}
 }
-function openApp(user){busy=false;document.getElementById("klas-auth-gate").hidden=true;let b=document.getElementById("klas-auth-user");if(!b){b=document.createElement("button");b.id="klas-auth-user";b.className="klas-auth-user";document.body.appendChild(b)}b.textContent=(user?.displayName||user?.email||"Teacher")+" · Sign out";b.onclick=signOut}
+function openApp(user){
+ busy=false;document.getElementById("klas-auth-gate").hidden=true;
+ const legacy=document.getElementById("klas-auth-user");if(legacy)legacy.remove();
+ const panel=document.getElementById("sidebarAccount"),name=document.getElementById("sidebarAccountName"),button=document.getElementById("sidebarSignOut");
+ if(name)name.textContent=user?.displayName||user?.email||"Teacher";
+ if(panel)panel.hidden=false;
+ if(button)button.onclick=signOut;
+}
 function init(){const gate=document.createElement("div");gate.id="klas-auth-gate";gate.innerHTML='<img class="klas-auth-background" src="assets/welcome-classroom.png" alt=""><div class="klas-auth-wash"></div><div class="klas-auth-shell"><section class="klas-auth-brand"><img class="klas-auth-banner" src="assets/klas-banner.png" alt="KLAS"><div class="klas-auth-brand-copy"><span class="klas-auth-eyebrow">THE ONE PLACE FOR EVERY KLAS</span><h1>Empowering teachers.<br>Connecting every classroom.</h1><p>Secure access to your KLAS Teacher workspace using your verified DepEd identity.</p><div class="klas-auth-values"><span>Learn</span><span>Plan</span><span>Assess</span><span>Inspire</span></div></div></section><section class="klas-auth-panel" id="klas-auth-panel"></section></div>';document.body.appendChild(gate);render();requestAnimationFrame(()=>{const p=document.getElementById("klas-auth-panel");if(p&&!p.children.length)render()});restoreSession()}
 if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",init);else init();
 })();
