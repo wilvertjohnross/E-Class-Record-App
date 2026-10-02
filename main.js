@@ -253,7 +253,9 @@ function buildMenu() {
     {
       label: 'View',
       submenu: [
-        { role: 'reload' }, { role: 'togglefullscreen' }
+        { role: 'reload' },
+        { label: 'Developer Tools', accelerator: 'CmdOrCtrl+Shift+I', click: () => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.toggleDevTools(); } },
+        { role: 'togglefullscreen' }
       ]
     },
     {
