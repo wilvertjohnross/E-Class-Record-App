@@ -85,3 +85,6 @@ html:has(#klas-auth-gate:not([hidden])),body:has(#klas-auth-gate:not([hidden])){
     opacity:1!important;
   }
 }
+
+/* v1.6.15: hidden auth gate must override desktop positioning */
+#klas-auth-gate[hidden]{display:none!important}
