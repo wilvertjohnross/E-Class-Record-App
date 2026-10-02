@@ -1,6 +1,6 @@
 {
   "name": "klas",
-  "version": "1.7.0",
+  "version": "1.7.1",
   "description": "KLAS — an offline-first teacher productivity and school-record management application for class records, grading, attendance, and applicable school forms.",
   "main": "main.js",
   "author": "Wilvert John Ross D. Tabangin",
