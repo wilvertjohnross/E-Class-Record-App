@@ -41,12 +41,14 @@ html:has(#klas-auth-gate:not([hidden])),body:has(#klas-auth-gate:not([hidden])){
     margin-left:-14px;
   }
 }
-/* v1.6.11 temporary on-screen geometry diagnostic */
-#klas-geometry-diagnostic{
- position:fixed;left:10px;bottom:10px;z-index:100001;
- max-width:calc(100vw - 20px);margin:0;padding:9px 12px;
- overflow:auto;border:1px solid rgba(255,255,255,.75);border-radius:9px;
- background:rgba(8,24,38,.92);color:#fff;
- font:11px/1.35 Consolas,"Courier New",monospace;
- box-shadow:0 8px 24px rgba(0,0,0,.24);pointer-events:none;
+/* v1.6.12 auth card placement: right-aligned with deliberate edge breathing room */
+@media (min-width:821px){
+  #klas-auth-gate{
+    justify-items:end;
+    align-items:center;
+    padding-right:clamp(42px,4vw,68px);
+  }
+  .klas-auth-shell{
+    justify-self:end;
+  }
 }
