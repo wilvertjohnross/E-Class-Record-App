@@ -926,8 +926,10 @@ function updateSidebarLocation(){
   document.querySelectorAll("#tabs [data-location-tabs]").forEach(el=>{
     el.classList.toggle("active", sidebarLocationTabs(el).includes(activeTab));
   });
-  const adviserNav=document.getElementById("adviserFunctions");
-  if(adviserNav) adviserNav.hidden=!adviserSf1Ready(ensureAdviserWorkspace());
+  const classBranch=document.querySelector('[data-sidebar-branch="classes"]');
+  const adviserBranch=document.querySelector('[data-sidebar-branch="advisory"]');
+  if(classBranch && SUBJECT_WORKFLOW_TABS.has(activeTab)) classBranch.open=true;
+  if(adviserBranch && ADVISER_WORKFLOW_TABS.has(activeTab)) adviserBranch.open=true;
 }
 function renderClassPicker(){
   const sel=document.getElementById("workspaceClassSelect");
@@ -1128,10 +1130,19 @@ function renderGradingHome(main,cls){
         <p class="sub">Select a term to manage class records.</p>
       </div>
       <div class="workspace-launch-grid four-up">
-        <div class="term-launch-pair">${workspaceLauncherTile({tab:"term1",title:"Term 1 Class Records",tone:"green",icon:"grading",termView:"record"})}<button type="button" class="term-sheet-launch" data-go-tab="term1" data-term-view="gs">Term 1 Grading Sheet</button></div>
-        <div class="term-launch-pair">${workspaceLauncherTile({tab:"term2",title:"Term 2 Class Records",tone:"gold",icon:"grading",termView:"record"})}<button type="button" class="term-sheet-launch" data-go-tab="term2" data-term-view="gs">Term 2 Grading Sheet</button></div>
-        <div class="term-launch-pair">${workspaceLauncherTile({tab:"term3",title:"Term 3 Class Records",tone:"blue",icon:"grading",termView:"record"})}<button type="button" class="term-sheet-launch" data-go-tab="term3" data-term-view="gs">Term 3 Grading Sheet</button></div>
+        ${workspaceLauncherTile({tab:"term1",title:"Term 1 Class Records",tone:"green",icon:"grading",termView:"record"})}
+        ${workspaceLauncherTile({tab:"term2",title:"Term 2 Class Records",tone:"gold",icon:"grading",termView:"record"})}
+        ${workspaceLauncherTile({tab:"term3",title:"Term 3 Class Records",tone:"blue",icon:"grading",termView:"record"})}
         ${workspaceLauncherTile({tab:"final",title:"Final Grades and Reports",tone:"purple",icon:"final"})}
+      </div>
+      <div class="workspace-hero" style="margin-top:22px;">
+        <h2>Grading Sheet</h2>
+        <p class="sub">Preview or print the computed grading sheet for the selected term.</p>
+      </div>
+      <div class="workspace-launch-grid grading-sheet-card">
+        ${workspaceLauncherTile({tab:"term1",title:"Term 1 Grading Sheet",tone:"green",icon:"grading",termView:"gs"})}
+        ${workspaceLauncherTile({tab:"term2",title:"Term 2 Grading Sheet",tone:"gold",icon:"grading",termView:"gs"})}
+        ${workspaceLauncherTile({tab:"term3",title:"Term 3 Grading Sheet",tone:"blue",icon:"grading",termView:"gs"})}
       </div>
     </section>`;
 }
@@ -1556,7 +1567,7 @@ function renderCategoryEditor(cls, key){
   const removableLegacy = excessCount ? cat.components.slice(maxItems).filter(c=>maxExistingScoreForComponent(cls,key,c.id)===null) : [];
   const rows = cat.components.map(c=>`
     <tr data-comp="${esc(c.id)}">
-      <td><input type="text" class="comp-name" ${fixedItems||lockedExam?'readonly aria-readonly="true"':''} value="${esc(c.name)}" style="width:110px;"></td>
+      <td><input type="text" class="comp-name" ${lockedExam?'readonly aria-readonly="true"':''} value="${esc(c.name)}" maxlength="40" style="width:110px;" title="${fixedItems?'Editable assessment label':''}"></td>
       <td><input type="number" class="comp-hps" value="${esc(c.hps)}" min="0" step="1" style="width:70px;"></td>
       ${allowCustomWeights ? `<td>${cat.mode==="custom" ? `<input type="number" class="comp-subweight" ${lockedExam?'readonly aria-readonly="true"':""} value="${esc(c.subWeight)}" min="0" step="1" style="width:70px;">` : `<span class="hint">auto</span>`}</td>` : ""}
       ${lockedExam?"":`<td><button class="small danger comp-remove icon-remove" type="button" aria-label="Remove item" title="Remove item"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 6h18M9 6V4h6v2M5 6l1 14h12l1-14M10 10v6M14 10v6"/></svg></button></td>`}
@@ -1626,7 +1637,12 @@ function bindCategoryEditorEvents(cls){
     section.querySelectorAll("tr[data-comp]").forEach(row=>{
       const cid = row.dataset.comp;
       const comp = cat.components.find(c=>c.id===cid);
-      row.querySelector(".comp-name").addEventListener("change", e=>{if(key==="WW"||key==="PT"||key==="EXAM")return;comp.name=e.target.value; saveState(); renderClassPicker();});
+      row.querySelector(".comp-name").addEventListener("change", e=>{
+        if(key==="EXAM"){render();return;}
+        const next=String(e.target.value||"").trim().slice(0,40);
+        if(!next){alert("Assessment item label cannot be blank.");e.target.value=comp.name;return;}
+        comp.name=next;saveState();renderClassPicker();
+      });
       row.querySelector(".comp-hps").addEventListener("change", e=>{
         const n=Number(e.target.value),old=Number(comp.hps||0);
         const maxScore=maxExistingScoreForComponent(cls,key,cid);
@@ -4146,6 +4162,17 @@ async function refreshFullscreenControl(){
    ========================================================================= */
 document.getElementById("sidebarHomeBrand").addEventListener("click",()=>{
   navigateToTab("welcome");
+});
+document.getElementById("tabs").addEventListener("click",e=>{
+  const go=e.target.closest("[data-go-tab]");
+  if(!go||go.disabled)return;
+  navigateToTab(go.dataset.goTab,{termView:go.dataset.termView||""});
+});
+document.querySelectorAll("#tabs .sidebar-branch").forEach(branch=>{
+  branch.addEventListener("toggle",()=>{
+    if(!branch.open)return;
+    document.querySelectorAll("#tabs .sidebar-branch").forEach(other=>{if(other!==branch)other.open=false;});
+  });
 });
 document.getElementById("main").addEventListener("click",async e=>{
   const shell=e.target.closest("[data-shell-nav]");
