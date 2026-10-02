@@ -326,7 +326,9 @@ function buildMenu() {
 ipcMain.on('data:load-sync', (event) => {
   if (!isTrustedMainSender(event)) { event.returnValue = null; return; }
   const p = ensureDataFolders();
-  for (const candidate of [...new Set([p.readableDataFile, p.dataFile, p.recoveryFile])]) {
+  // Prefer canonical KLAS primary/recovery files. Fall back to the legacy
+  // v1.6.x primary only when no valid KLAS copy can be loaded.
+  for (const candidate of [...new Set([p.dataFile, p.recoveryFile, p.readableDataFile])]) {
     try {
       if (!fs.existsSync(candidate)) continue;
       const raw = fs.readFileSync(candidate, 'utf8');
