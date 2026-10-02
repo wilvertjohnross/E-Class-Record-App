@@ -7,8 +7,11 @@ const AdmZip = require('adm-zip');
 const { parseOfficialSf1Xls } = require('./sf1-parser');
 const { ThreadUpdater } = require('./thread-updater');
 
-const PRODUCT_NAME = 'E-Class Record App with GS and SF9';
+const PRODUCT_NAME = 'KLAS';
+// Keep the legacy application ID through the v1.7.x compatibility window so
+// existing installations, updater trust, and local Electron state remain continuous.
 const APP_ID = 'ph.edu.eclassrecord.gs.sf9';
+const LEGACY_DATA_PRODUCT_NAME = 'E-Class Record App with GS and SF9';
 let mainWindow;
 let threadUpdater = null;
 let runtimeExtension = null;
@@ -27,12 +30,19 @@ function rejectUntrustedInvoke(event) {
 }
 
 function dataPaths() {
-  const root = path.join(app.getPath('documents'), PRODUCT_NAME);
+  const documents = app.getPath('documents');
+  const root = path.join(documents, PRODUCT_NAME);
+  const legacyRoot = path.join(documents, LEGACY_DATA_PRODUCT_NAME);
+  const legacyDataFile = path.join(legacyRoot, 'eclass-record-data.json');
+  const dataFile = path.join(root, 'klas-data.json');
+  const recoveryFile = path.join(root, 'klas-data.previous.json');
+  // Compatibility read-through: existing v1.6.x data remains readable until
+  // the first successful KLAS save creates the canonical KLAS data file.
+  const readableDataFile = fs.existsSync(dataFile) ? dataFile : (fs.existsSync(legacyDataFile) ? legacyDataFile : dataFile);
   return {
-    root,
-    dataFile: path.join(root, 'eclass-record-data.json'),
-    recoveryFile: path.join(root, 'eclass-record-data.previous.json'),
-    backupDir: path.join(root, 'Backups')
+    root,dataFile,recoveryFile,readableDataFile,
+    legacyRoot,legacyDataFile,
+    backupDir:path.join(root, 'Backups')
   };
 }
 
