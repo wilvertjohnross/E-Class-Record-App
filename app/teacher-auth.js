@@ -4,12 +4,15 @@ const RECOVERY="https://fldwqkmadsyrbslxunvi.supabase.co/functions/v1/teacher-au
 const AUTH_BASE="https://fldwqkmadsyrbslxunvi.supabase.co/auth/v1";
 const SUPABASE_KEY="sb_publishable_SIcfjo1FVwIhiJT2-Uy1iw_-P1mkZoz";
 const KEY="klas.teacher.session";
+const NETWORK_ERROR="KLAS_AUTH_NETWORK";
 let mode="login",busy=false;
+function authError(message,code="KLAS_AUTH_INVALID"){const e=new Error(message);e.code=code;return e}
+function isNetworkError(err){return err?.code===NETWORK_ERROR}
 const esc=s=>String(s??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]));
 async function post(url,body){
  let r;
  try{r=await fetch(url,{method:"POST",headers:{"content-type":"application/json","apikey":SUPABASE_KEY,"Authorization":"Bearer "+SUPABASE_KEY},body:JSON.stringify(body)})}
- catch(err){throw new Error("KLAS could not reach the authentication service. Check your internet connection and try again.")}
+ catch(err){throw authError("KLAS could not reach the authentication service. Check your internet connection and try again.",NETWORK_ERROR)}
  const d=await r.json().catch(()=>({}));
  if(!r.ok)throw new Error(d.error||"Unable to complete the request.");
  return d;
@@ -18,9 +21,9 @@ async function refreshSession(saved){
  const refresh=String(saved?.session?.refresh_token||"");
  if(!refresh)throw new Error("Your saved KLAS session has expired. Please sign in again.");
  let r;try{r=await fetch(AUTH_BASE+"/token?grant_type=refresh_token",{method:"POST",headers:{"content-type":"application/json","apikey":SUPABASE_KEY},body:JSON.stringify({refresh_token:refresh})})}
- catch{throw new Error("KLAS could not verify your saved session. Check your internet connection and sign in again.")}
+ catch{throw authError("KLAS could not verify your saved session because the authentication service is unreachable. Your local KLAS records remain on this device.",NETWORK_ERROR)}
  const session=await r.json().catch(()=>({}));
- if(!r.ok||!session.access_token||!session.refresh_token)throw new Error("Your saved KLAS session has expired. Please sign in again.");
+ if(!r.ok||!session.access_token||!session.refresh_token)throw authError("Your saved KLAS session has expired or was revoked. Please sign in again.");
  const verified=await post(ENDPOINT,{action:"session",accessToken:session.access_token});
  const next={session,user:verified.user,memberships:verified.memberships||[],savedAt:Date.now()};
  localStorage.setItem(KEY,JSON.stringify(next));
@@ -32,7 +35,7 @@ async function restoreSession(){
  const panel=document.getElementById("klas-auth-panel");
  if(panel)panel.innerHTML=intro("Verifying your session","KLAS is securely checking your saved Teacher session before opening your workspace.")+'<div class="klas-auth-message">Please wait…</div>';
  try{const verified=await refreshSession(saved);openApp(verified.user)}
- catch(err){localStorage.removeItem(KEY);mode="login";render();msg(err.message||"Please sign in again.",true)}
+ catch(err){if(!isNetworkError(err))localStorage.removeItem(KEY);mode="login";render();msg(err.message||"Please sign in again.",true)}
 }
 function eye(id){return '<button class="klas-eye" type="button" data-eye="'+id+'" aria-label="Show password" title="Show password"><span aria-hidden="true">Show</span></button>'}
 function pass(label,id,ac="current-password",disabled=false){return '<label for="'+id+'">'+label+'</label><div class="klas-password-wrap"><input id="'+id+'" type="password" autocomplete="'+ac+'" required'+(disabled?' disabled':'')+'>'+eye(id)+'</div>'}
@@ -60,11 +63,23 @@ async function submit(e){
   if(fields?.hidden){setBusy(true,mode==="register"?"Sending verification code...":"Sending reset code...");const d=await post(mode==="register"?ENDPOINT:RECOVERY,{action:mode==="register"?"register":"request",email});fields.querySelectorAll("input").forEach(i=>i.disabled=false);fields.hidden=false;const b=document.getElementById("ta-submit");if(b){b.dataset.label=mode==="register"?"Verify & Create Account":"Reset Password"}msg(d.message||"Check your DepEd mailbox for the code.");return}
   if(password!==confirm){msg("Passwords do not match.",true);return}
   if(mode==="register"){setBusy(true,"Creating account...");const d=await post(ENDPOINT,{action:"verify",email,code,password});localStorage.setItem(KEY,JSON.stringify({session:d.session,user:d.user,memberships:d.memberships||[],savedAt:Date.now()}));openApp(d.user);return}
-  setBusy(true,"Resetting password...");const d=await post(RECOVERY,{action:"complete",email,code,newPassword:password});msg(d.message||"Password updated. You can now sign in.");setTimeout(()=>{mode="login";busy=false;render()},1300);return;
+  setBusy(true,"Resetting password...");const d=await post(RECOVERY,{action:"complete",email,code,newPassword:password});localStorage.removeItem(KEY);msg(d.message||"Password updated. For security, sign in again on this device.");setTimeout(()=>{mode="login";busy=false;render()},1300);return;
  }catch(x){msg(x.message||"Unable to complete the request.",true)}
  finally{if(document.getElementById("klas-auth-gate")&&!document.getElementById("klas-auth-gate").hidden)setBusy(false)}
 }
-function openApp(user){busy=false;document.getElementById("klas-auth-gate").hidden=true;let b=document.getElementById("klas-auth-user");if(!b){b=document.createElement("button");b.id="klas-auth-user";b.className="klas-auth-user";document.body.appendChild(b)}b.textContent=(user?.displayName||user?.email||"Teacher")+" · Sign out";b.onclick=()=>{localStorage.removeItem(KEY);location.reload()}}
+async function revokeServerSession(saved){
+ const access=String(saved?.session?.access_token||"");
+ if(!access)return false;
+ let r;try{r=await fetch(AUTH_BASE+"/logout?scope=global",{method:"POST",headers:{"apikey":SUPABASE_KEY,"Authorization":"Bearer "+access}})}
+ catch{return false}
+ return r.ok;
+}
+async function signOut(){
+ let saved=null;try{saved=JSON.parse(localStorage.getItem(KEY)||"null")}catch{}
+ localStorage.removeItem(KEY);
+ try{await revokeServerSession(saved)}finally{location.reload()}
+}
+function openApp(user){busy=false;document.getElementById("klas-auth-gate").hidden=true;let b=document.getElementById("klas-auth-user");if(!b){b=document.createElement("button");b.id="klas-auth-user";b.className="klas-auth-user";document.body.appendChild(b)}b.textContent=(user?.displayName||user?.email||"Teacher")+" · Sign out";b.onclick=signOut}
 function init(){const gate=document.createElement("div");gate.id="klas-auth-gate";gate.innerHTML='<img class="klas-auth-background" src="assets/welcome-classroom.png" alt=""><div class="klas-auth-wash"></div><div class="klas-auth-shell"><section class="klas-auth-brand"><img class="klas-auth-banner" src="assets/klas-banner.png" alt="KLAS"><div class="klas-auth-brand-copy"><span class="klas-auth-eyebrow">THE ONE PLACE FOR EVERY KLAS</span><h1>Empowering teachers.<br>Connecting every classroom.</h1><p>Secure access to your KLAS Teacher workspace using your verified DepEd identity.</p><div class="klas-auth-values"><span>Learn</span><span>Plan</span><span>Assess</span><span>Inspire</span></div></div></section><section class="klas-auth-panel" id="klas-auth-panel"></section></div>';document.body.appendChild(gate);render();requestAnimationFrame(()=>{const p=document.getElementById("klas-auth-panel");if(p&&!p.children.length)render()});restoreSession()}
 if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",init);else init();
 })();
