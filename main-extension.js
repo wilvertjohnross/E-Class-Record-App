@@ -466,12 +466,6 @@ function replacePngMediaFromDataUri(zip, entryName, dataUri) {
   } catch {}
 }
 
-function pngDimensions(buf) {
-  if (!Buffer.isBuffer(buf) || buf.length < 24 || buf.toString('ascii', 1, 4) !== 'PNG') return null;
-  const width = buf.readUInt32BE(16), height = buf.readUInt32BE(20);
-  return width > 0 && height > 0 ? { width, height } : null;
-}
-
 function drawingMediaTargets(zip) {
   const rels = new Map();
   for (const entry of zip.getEntries()) {
@@ -488,81 +482,65 @@ function drawingMediaTargets(zip) {
   return rels;
 }
 
-function fitDrawingImageToBox(zip, mediaEntryName, imageBytes) {
-  const dim = pngDimensions(imageBytes);
-  if (!dim) return;
+function swapDrawingImagePositions(zip, firstMediaEntryName, secondMediaEntryName) {
+  // The official templates were authored with the square school logo on the
+  // left and the landscape DepEd artwork on the right. To reverse their visual
+  // order without distorting either image, keep each picture's own geometry
+  // and exchange only their starting positions.
   const rels = drawingMediaTargets(zip);
   for (const entry of zip.getEntries()) {
     const m = entry.entryName.match(/^xl\/drawings\/(drawing\d+\.xml)$/);
     if (!m) continue;
     const targetMap = rels.get(m[1]);
     if (!targetMap) continue;
-    let xml = entry.getData().toString('utf8'), changed = false;
-    xml = xml.replace(/<xdr:oneCellAnchor>([\s\S]*?)<\/xdr:oneCellAnchor>/g, (anchor, body) => {
+
+    let xml = entry.getData().toString('utf8');
+    const anchors = [];
+    xml.replace(/<xdr:twoCellAnchor([^>]*)>([\s\S]*?)<\/xdr:twoCellAnchor>/g, (full, attrs, body) => {
       const embed = (body.match(/<a:blip\b[^>]*r:embed="([^"]+)"/) || [])[1];
-      if (!embed || targetMap.get(embed) !== mediaEntryName) return anchor;
-      const ext = body.match(/<xdr:ext\s+cx="(\d+)"\s+cy="(\d+)"\s*\/>/);
-      if (!ext) return anchor;
-      const boxW = Number(ext[1]), boxH = Number(ext[2]);
-      const scale = Math.min(boxW / dim.width, boxH / dim.height);
-      const newW = Math.max(1, Math.round(dim.width * scale)), newH = Math.max(1, Math.round(dim.height * scale));
-      const dx = Math.max(0, Math.round((boxW - newW) / 2)), dy = Math.max(0, Math.round((boxH - newH) / 2));
-      let next = body.replace(/<xdr:ext\s+cx="\d+"\s+cy="\d+"\s*\/>/, `<xdr:ext cx="${newW}" cy="${newH}"/>`);
-      next = next.replace(/<xdr:from>([\s\S]*?)<\/xdr:from>/, (from, inner) => {
-        const colOff = Number((inner.match(/<xdr:colOff>(\d+)<\/xdr:colOff>/) || [])[1] || 0);
-        const rowOff = Number((inner.match(/<xdr:rowOff>(\d+)<\/xdr:rowOff>/) || [])[1] || 0);
-        inner = inner.replace(/<xdr:colOff>\d+<\/xdr:colOff>/, `<xdr:colOff>${colOff + dx}</xdr:colOff>`);
-        inner = inner.replace(/<xdr:rowOff>\d+<\/xdr:rowOff>/, `<xdr:rowOff>${rowOff + dy}</xdr:rowOff>`);
-        return `<xdr:from>${inner}</xdr:from>`;
-      });
-      changed = true;
-      return `<xdr:oneCellAnchor>${next}</xdr:oneCellAnchor>`;
+      const target = embed ? targetMap.get(embed) : '';
+      if (target !== firstMediaEntryName && target !== secondMediaEntryName) return full;
+      const from = body.match(/<xdr:from>[\s\S]*?<\/xdr:from>/);
+      const ext = body.match(/<a:ext\s+cx="(\d+)"\s+cy="(\d+)"\s*\/>/);
+      if (!from || !ext) return full;
+      anchors.push({ full, attrs, body, target, from: from[0], cx: ext[1], cy: ext[2] });
+      return full;
     });
-    // For both one-cell and two-cell anchors, explicitly lock the picture aspect
-    // ratio and remove source cropping. Excel then renders the replacement
-    // artwork without stretching it to the template's previous image shape.
-    xml = xml.replace(/<xdr:(oneCellAnchor|twoCellAnchor)>([\s\S]*?)<\/xdr:\1>/g, (anchor, anchorType, body) => {
-      const embed = (body.match(/<a:blip\b[^>]*r:embed="([^"]+)"/) || [])[1];
-      if (!embed || targetMap.get(embed) !== mediaEntryName) return anchor;
-      let next = body.replace(/<a:srcRect\b[^>]*\/>/g, '');
-      next = next.replace(/<a:picLocks\b([^>]*)\/>/g, (tag, attrs) => {
+
+    const first = anchors.find(a => a.target === firstMediaEntryName);
+    const second = anchors.find(a => a.target === secondMediaEntryName);
+    if (!first || !second) continue;
+
+    const rewrite = (anchor, newFrom) => {
+      let body = anchor.body
+        .replace(/<xdr:from>[\s\S]*?<\/xdr:from>/, newFrom)
+        .replace(/<xdr:to>[\s\S]*?<\/xdr:to>/, '')
+        .replace(/<a:srcRect\b[^>]*\/>/g, '');
+      body = body.replace(/<a:picLocks\b([^>]*)\/>/g, (tag, attrs) => {
         const clean = String(attrs || '').replace(/\s+noChangeAspect="[^"]*"/g, '');
         return `<a:picLocks${clean} noChangeAspect="1"/>`;
       });
-      if (!/<a:picLocks\b/.test(next)) {
-        next = next.replace(/<a:cNvPicPr\s*\/>/, '<a:cNvPicPr><a:picLocks noChangeAspect="1"/></a:cNvPicPr>');
+      if (!/<a:picLocks\b/.test(body)) {
+        body = body.replace(/<a:cNvPicPr\s*\/>/, '<a:cNvPicPr><a:picLocks noChangeAspect="1"/></a:cNvPicPr>');
       }
-      if (next !== body) changed = true;
-      return `<xdr:${anchorType}>${next}</xdr:${anchorType}>`;
-    });
-    if (changed) zip.updateFile(entry.entryName, Buffer.from(xml, 'utf8'));
+      body = body.replace(/<xdr:clientData([^>]*)\/>/, `<xdr:ext cx="${anchor.cx}" cy="${anchor.cy}"/><xdr:clientData$1/>`);
+      return `<xdr:oneCellAnchor${anchor.attrs}>${body}</xdr:oneCellAnchor>`;
+    };
+
+    const firstReplacement = rewrite(first, second.from);
+    const secondReplacement = rewrite(second, first.from);
+    xml = xml.replace(first.full, firstReplacement).replace(second.full, secondReplacement);
+    zip.updateFile(entry.entryName, Buffer.from(xml, 'utf8'));
   }
 }
 
-function placeDepEdLeftAndSchoolRight(zip, leftEntryName, rightEntryName, schoolLogoDataUri) {
-  // Keep the official template's logo boxes, but fit each replacement image
-  // proportionally inside its box and center it. This prevents landscape
-  // DepEd artwork and square/circular school seals from being stretched.
-  const depedEntry = zip.getEntry(rightEntryName);
-  if (depedEntry) {
-    try {
-      const depedBytes = Buffer.from(depedEntry.getData());
-      if (depedBytes.length > 100) {
-        zip.updateFile(leftEntryName, depedBytes);
-        fitDrawingImageToBox(zip, leftEntryName, depedBytes);
-      }
-    } catch {}
-  }
-  const m = String(schoolLogoDataUri || '').match(/^data:image\/png;base64,(.+)$/i);
-  if (m) {
-    try {
-      const schoolBytes = Buffer.from(m[1], 'base64');
-      if (schoolBytes.length > 100) {
-        zip.updateFile(rightEntryName, schoolBytes);
-        fitDrawingImageToBox(zip, rightEntryName, schoolBytes);
-      }
-    } catch {}
-  }
+function placeDepEdLeftAndSchoolRight(zip, schoolMediaEntryName, depedMediaEntryName, schoolLogoDataUri) {
+  // Root-source correction for the v1.5.0 logo-order regression:
+  // image1 remains the square school-logo object and image2 remains the
+  // landscape DepEd object. Replace only the school image bytes, then exchange
+  // the two drawing positions so each logo carries its original geometry.
+  replacePngMediaFromDataUri(zip, schoolMediaEntryName, schoolLogoDataUri);
+  swapDrawingImagePositions(zip, schoolMediaEntryName, depedMediaEntryName);
 }
 
 function divisionHeading(value) {
