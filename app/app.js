@@ -3616,12 +3616,13 @@ async function importSummaryTable(cls){
 
 function summaryTemplatePayload(cls,termKey){
   const learners=cls.domain==="adviser"?advisoryLearners(cls):cls.students;
+  const identity=cls.domain==="adviser"?advisoryIdentity(cls):(cls.meta||{});
   const males=learners.filter(s=>s.sex==="M"),females=learners.filter(s=>s.sex==="F");
   return {
     kind:"download-template",
     meta:{
-      gradeLevel:String(cls.meta.gradeLevel||""),section:String(cls.meta.section||""),schoolYear:String(cls.meta.schoolYear||""),
-      className:[cls.meta.gradeLevel,cls.meta.section].filter(Boolean).join(" - ")||"Class"
+      gradeLevel:String(identity.gradeLevel||""),section:String(identity.section||""),schoolYear:String(identity.schoolYear||""),
+      className:[identity.gradeLevel,identity.section].filter(Boolean).join(" - ")||"Class"
     },
     termKey,
     termLabel:SUMMARY_TERM_LABELS[termKey]||"Term 1",
@@ -3656,9 +3657,10 @@ function renderSummary(main,cls){
   const learners=advisoryLearners(cls);
   if(!adviserSf1Ready(cls)||!learners.length){main.innerHTML='<div class="card"><h2>Summary of Final Grades</h2><p>Upload the SF1 masterlist in Advisory Overview first.</p></div>';return;}
   learners.forEach(st=>ensureStudentExtras(cls,st.id));
+  const identity=advisoryIdentity(cls);
   const cards=adviserSubjectCards(cls),selected=cards.find(a=>a.key===SUMMARY_SUBJECT);
   if(selected){renderAdviserSubjectGrades(main,cls,selected);return;}
-  main.innerHTML=`<section class="card subject-hub"><h2>Summary of Final Grades</h2><p>${esc(cls.meta.gradeLevel||'')} ${esc(cls.meta.section||'')} · ${esc(cls.meta.schoolYear||'')} · ${esc(ensureSubjectConfig(cls).classType)}</p><p>Choose a subject to enter term grades, upload grades, or view detected Class Record grades.</p><div class="subject-icon-grid ${isSpecialScienceClass(cls)?'special':''}">${cards.map(a=>`<button type="button" class="subject-icon-card" data-open-subject="${a.key}"><span class="subject-icon-holder"><img src="${subjectIconPath(cls,a.key)}" alt="" loading="eager"></span><span>${esc(a.label)}</span></button>`).join('')}</div>${gradeUploadToolbar()}<button type="button" class="ghost-alt" data-go-tab="sf9setup">Class Type and Subject Settings</button></section>`;
+  main.innerHTML=`<section class="card subject-hub"><h2>Summary of Final Grades</h2><p>${esc(identity.gradeLevel||'')} ${esc(identity.section||'')} · ${esc(identity.schoolYear||'')} · ${esc(ensureSubjectConfig(cls).classType)}</p><p>Choose a subject to enter term grades, upload grades, or view detected Class Record grades.</p><div class="subject-icon-grid ${isSpecialScienceClass(cls)?'special':''}">${cards.map(a=>`<button type="button" class="subject-icon-card" data-open-subject="${a.key}"><span class="subject-icon-holder"><img src="${subjectIconPath(cls,a.key)}" alt="" loading="eager"></span><span>${esc(a.label)}</span></button>`).join('')}</div>${gradeUploadToolbar()}<button type="button" class="ghost-alt" data-go-tab="sf9setup">Class Type and Subject Settings</button></section>`;
   main.querySelectorAll('[data-open-subject]').forEach(btn=>btn.addEventListener('click',()=>{SUMMARY_SUBJECT=btn.dataset.openSubject;render();window.scrollTo(0,0);}));
   bindGradeUploadButtons(main,cls);
 }
@@ -3801,7 +3803,10 @@ function areaRowResult(cls, s, area){
 
 function reportCardHtml(cls, s){
   ensureStudentExtras(cls, s.id);
-  const m = cls.meta;
+  const identity=advisoryIdentity(cls);
+  // SF1 owns advisory identity. Only SF9-specific supplemental fields may
+  // fall back to KLAS configuration because they are not part of the SF1 authority set.
+  const m = {...(cls.meta||{}),...identity};
   const fmt = v => (v===null||v===undefined||v==="") ? "" : v;
 
   const rowResults = {};
