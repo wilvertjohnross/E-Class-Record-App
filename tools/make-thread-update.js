@@ -1,11 +1,15 @@
 'use strict';
 
-// Developer helper for creating the .ecrupdate packages consumed by v1.0.9+.
+// Developer helper for creating signed KLAS compatibility updates.
+// The .ecrupdate extension and ECLASS_UPDATE_SIGNING_KEY environment variable
+// remain unchanged during the v1.7.x compatibility window so existing trusted
+// bootstraps continue to recognize the package.
 // Usage:
 //   set ECLASS_UPDATE_SIGNING_KEY=C:\secure\ECR_UPDATE_SIGNING_PRIVATE_KEY.pem
-//   node tools/make-thread-update.js 1.0.21 path\to\payload output.ecrupdate
-// The payload directory can contain app/index.html, main-extension.js,
-// templates/* and any other runtime files needed by that version.
+//   node tools/make-thread-update.js 1.7.0 path\to\payload KLAS-v1.7.0.ecrupdate
+// IMPORTANT: payload is the complete changed-runtime set, not app/** only.
+// Include every changed root runtime file (for example main-extension.js),
+// changed app/** files, and any changed templates/resources.
 
 const fs = require('fs');
 const path = require('path');
@@ -55,6 +59,11 @@ function hash(buf) {
 const payloadItems = walk(payloadRoot);
 if (!payloadItems.length || payloadItems.length > MAX_FILES) { console.error(`Payload must contain 1-${MAX_FILES} files.`); process.exit(2); }
 let declaredTotal = 0;
+const requiredRuntimeCandidates = ['app/index.html', 'app/app.js', 'main-extension.js'];
+if (!requiredRuntimeCandidates.some(rel => payloadItems.some(item => item.rel === rel))) {
+  console.error('Payload does not contain a recognized KLAS runtime entry. Refusing to create an app-only/empty-style update.');
+  process.exit(2);
+}
 for (const item of payloadItems) {
   if (path.resolve(item.full) === signingKeyPath) { console.error('Refusing to package the private signing key. Move it outside the payload folder.'); process.exit(2); }
   if (!item.rel || item.rel.startsWith('/') || item.rel.split('/').some(seg=>!seg||seg==='.'||seg==='..') || item.rel.includes(':')) { console.error('Unsafe payload path:', item.rel); process.exit(2); }
@@ -76,7 +85,7 @@ for (const item of payloadItems) {
 const manifest = {
   format: 1,
   appId: 'ph.edu.eclassrecord.gs.sf9',
-  productName: 'E-Class Record App with GS and SF9',
+  productName: 'KLAS',
   version,
   minBootstrapVersion: '1.1.5',
   channel: 'chat-thread-local-development',
