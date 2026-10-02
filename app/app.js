@@ -578,6 +578,87 @@ function loadState(){
   return {classes:{[c.id]:c},activeId:c.id,_persistence:{revision:0,modifiedAt:new Date().toISOString()}};
 }
 
+/* =========================================================================
+   KLAS v1.7.0 — RECORD LIFECYCLE FOUNDATION
+   Local persistence is not publication. Records move through an explicit
+   lifecycle before any future KLAS Student synchronization can expose them.
+   ========================================================================= */
+const RECORD_LIFECYCLE_STATES=Object.freeze({
+  LOCAL:"saved-local",
+  FINALIZED:"finalized",
+  QUEUED:"queued-for-sync",
+  SYNCED:"synced",
+  PUBLISHED:"published"
+});
+function ensureRecordLifecycle(state=APP){
+  if(!state._recordLifecycle||typeof state._recordLifecycle!=="object"||Array.isArray(state._recordLifecycle)) state._recordLifecycle={};
+  const life=state._recordLifecycle;
+  life.schemaVersion=1;
+  if(!life.records||typeof life.records!=="object"||Array.isArray(life.records)) life.records={};
+  if(!Array.isArray(life.syncQueue)) life.syncQueue=[];
+  return life;
+}
+function lifecycleRecordKey({domain="subject",classId="",recordType="class-record",term=""}={}){
+  return [domain,classId,recordType,term||"all"].map(v=>String(v||"").replace(/[^A-Za-z0-9_.-]/g,"_")).join(":");
+}
+function ensureLifecycleRecord(ref={}){
+  const life=ensureRecordLifecycle(),key=lifecycleRecordKey(ref);
+  if(!life.records[key]) life.records[key]={
+    key,domain:String(ref.domain||"subject"),classId:String(ref.classId||""),
+    recordType:String(ref.recordType||"class-record"),term:String(ref.term||""),
+    state:RECORD_LIFECYCLE_STATES.LOCAL,localRevision:persistenceRevision(APP),
+    savedAt:"",finalizedAt:"",queuedAt:"",syncedAt:"",publishedAt:"",unpublishedAt:""
+  };
+  return life.records[key];
+}
+function markRecordSavedLocal(ref={}){
+  const rec=ensureLifecycleRecord(ref);
+  rec.localRevision=persistenceRevision(APP)+1;
+  rec.savedAt=new Date().toISOString();
+  // Editing a previously synchronized/published record never silently republishes it.
+  if(rec.state===RECORD_LIFECYCLE_STATES.SYNCED||rec.state===RECORD_LIFECYCLE_STATES.PUBLISHED){
+    rec.state=RECORD_LIFECYCLE_STATES.LOCAL;
+    rec.syncedAt="";rec.publishedAt="";
+  }
+  return rec;
+}
+function finalizeRecord(ref={}){
+  const rec=ensureLifecycleRecord(ref);
+  rec.state=RECORD_LIFECYCLE_STATES.FINALIZED;rec.finalizedAt=new Date().toISOString();
+  rec.syncedAt="";rec.publishedAt="";
+  return rec;
+}
+function queueRecordForSync(ref={}){
+  const life=ensureRecordLifecycle(),rec=ensureLifecycleRecord(ref);
+  if(rec.state!==RECORD_LIFECYCLE_STATES.FINALIZED) throw new Error("Only finalized records can be queued for synchronization.");
+  rec.state=RECORD_LIFECYCLE_STATES.QUEUED;rec.queuedAt=new Date().toISOString();
+  if(!life.syncQueue.includes(rec.key)) life.syncQueue.push(rec.key);
+  return rec;
+}
+function markRecordSynced(ref={}){
+  const life=ensureRecordLifecycle(),rec=ensureLifecycleRecord(ref);
+  if(rec.state!==RECORD_LIFECYCLE_STATES.QUEUED) throw new Error("Only queued records can be marked synchronized.");
+  rec.state=RECORD_LIFECYCLE_STATES.SYNCED;rec.syncedAt=new Date().toISOString();
+  life.syncQueue=life.syncQueue.filter(k=>k!==rec.key);
+  return rec;
+}
+function publishRecord(ref={}){
+  const rec=ensureLifecycleRecord(ref);
+  if(rec.state!==RECORD_LIFECYCLE_STATES.SYNCED) throw new Error("Only synchronized records can be published.");
+  rec.state=RECORD_LIFECYCLE_STATES.PUBLISHED;rec.publishedAt=new Date().toISOString();
+  return rec;
+}
+function unpublishRecord(ref={}){
+  const rec=ensureLifecycleRecord(ref);
+  if(rec.state===RECORD_LIFECYCLE_STATES.PUBLISHED){
+    rec.state=RECORD_LIFECYCLE_STATES.SYNCED;rec.unpublishedAt=new Date().toISOString();rec.publishedAt="";
+  }
+  return rec;
+}
+function studentVisibleRecord(ref={}){
+  return ensureLifecycleRecord(ref).state===RECORD_LIFECYCLE_STATES.PUBLISHED;
+}
+
 let SAVE_QUEUE=Promise.resolve();
 function setSaveStatus(text,isError=false){
   const el=document.getElementById("statusRight");
@@ -587,6 +668,7 @@ function setSaveStatus(text,isError=false){
   el.style.fontWeight=isError?"800":"";
 }
 function saveState(){
+  ensureRecordLifecycle(APP);
   try{
     Object.values(APP.classes||{}).forEach(c=>{
       c.domain="subject";
