@@ -3603,7 +3603,13 @@ function renderReport(main, cls){
     const r=await window.eclassAPI.runtimeInvoke("sf9:preview-html",{html:snapshot,name:st.name||"Learner"});
     if(!r||!r.ok)alert("Could not open SF9 preview: "+(r&&r.error?r.error:"Unknown error"));
   });
-  document.getElementById("rcPrint").addEventListener("click", ()=>printCurrentView());
+  document.getElementById("rcPrint").addEventListener("click", async ()=>{
+    const st=cls.students.find(x=>x.id===sel.value)||cls.students[0];
+    if(!st)return;
+    const snapshot=`<!doctype html><html data-theme="${document.documentElement.dataset.theme||"light"}"><head><meta charset="utf-8"><title>SF9 — ${esc(st.name)}</title><style>${Array.from(document.styleSheets).map(ss=>{try{return Array.from(ss.cssRules||[]).map(r=>r.cssText).join("\n")}catch{return""}}).join("\n")}</style></head><body><main style="padding:20px;max-width:none;">${reportCardHtml(cls,st)}</main></body></html>`;
+    const r=await window.eclassAPI.runtimeInvoke("sf9:preview-html",{html:snapshot,name:st.name||"Learner"});
+    if(!r||!r.ok)alert("Could not open SF9 print preview: "+(r&&r.error?r.error:"Unknown error"));
+  });
   document.getElementById("rcPrintAll").addEventListener("click", ()=>{
     const container = document.getElementById("rcContainer");
     container.innerHTML = cls.students.map(s=>reportCardHtml(cls,s)).join("");
