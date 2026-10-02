@@ -622,23 +622,14 @@ function validateSf2Payload(payload) {
     if (!Array.isArray(st.marks) || st.marks.length !== payload.days.length) throw new Error(`SF2 attendance is incomplete for ${st.name || 'a learner'}.`);
     for (const mark of st.marks) if (!['P','A','L','C'].includes(String(mark || 'P'))) throw new Error('SF2 contains an unsupported attendance code.');
   }
-  // Adviser metadata may legitimately contain small structured app-only fields
-  // (for example adviserGradeSources). Official SF2 output only reads the scalar
-  // header fields it needs, so ignore bounded object/array metadata instead of
-  // rejecting an otherwise valid SF2 payload.
+  // Official SF2 accepts only the explicit scalar identity fields required
+  // by the preserved form. App-only configuration must never cross this boundary.
+  const allowedMeta = new Set(['schoolId','region','division','schoolName','schoolYear','gradeLevel','section','adviser','schoolHead']);
   for (const [key, value] of Object.entries(payload.meta)) {
+    if (!allowedMeta.has(key)) throw new Error(`Unsupported SF2 metadata field: ${key}.`);
     if (value === null || value === undefined) continue;
-    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
-      if (String(value).length > 1000) throw new Error(`SF2 metadata field is unexpectedly long: ${key}.`);
-      continue;
-    }
-    if (Array.isArray(value) || (typeof value === 'object' && Object.getPrototypeOf(value) === Object.prototype)) {
-      let encoded = '';
-      try { encoded = JSON.stringify(value); } catch { throw new Error(`Invalid SF2 metadata field: ${key}.`); }
-      if (encoded.length > 20000) throw new Error(`SF2 metadata field is unexpectedly large: ${key}.`);
-      continue;
-    }
-    throw new Error(`Invalid SF2 metadata field: ${key}.`);
+    if (!['string','number','boolean'].includes(typeof value)) throw new Error(`Invalid SF2 metadata field: ${key}.`);
+    if (String(value).length > 1000) throw new Error(`SF2 metadata field is unexpectedly long: ${key}.`);
   }
 }
 
