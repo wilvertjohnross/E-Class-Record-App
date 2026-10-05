@@ -466,81 +466,12 @@ function replacePngMediaFromDataUri(zip, entryName, dataUri) {
   } catch {}
 }
 
-function drawingMediaTargets(zip) {
-  const rels = new Map();
-  for (const entry of zip.getEntries()) {
-    const m = entry.entryName.match(/^xl\/drawings\/_rels\/(drawing\d+\.xml)\.rels$/);
-    if (!m) continue;
-    const xml = entry.getData().toString('utf8');
-    const map = new Map();
-    for (const hit of xml.matchAll(/<Relationship\b[^>]*\bId="([^"]+)"[^>]*\bTarget="([^"]+)"[^>]*\/>/g)) {
-      const target = hit[2].replace(/^\.\.\//, 'xl/');
-      map.set(hit[1], target);
-    }
-    rels.set(m[1], map);
-  }
-  return rels;
-}
-
-function swapDrawingImagePositions(zip, firstMediaEntryName, secondMediaEntryName) {
-  // The official templates were authored with the square school logo on the
-  // left and the landscape DepEd artwork on the right. To reverse their visual
-  // order without distorting either image, keep each picture's own geometry
-  // and exchange only their starting positions.
-  const rels = drawingMediaTargets(zip);
-  for (const entry of zip.getEntries()) {
-    const m = entry.entryName.match(/^xl\/drawings\/(drawing\d+\.xml)$/);
-    if (!m) continue;
-    const targetMap = rels.get(m[1]);
-    if (!targetMap) continue;
-
-    let xml = entry.getData().toString('utf8');
-    const anchors = [];
-    xml.replace(/<xdr:twoCellAnchor([^>]*)>([\s\S]*?)<\/xdr:twoCellAnchor>/g, (full, attrs, body) => {
-      const embed = (body.match(/<a:blip\b[^>]*r:embed="([^"]+)"/) || [])[1];
-      const target = embed ? targetMap.get(embed) : '';
-      if (target !== firstMediaEntryName && target !== secondMediaEntryName) return full;
-      const from = body.match(/<xdr:from>[\s\S]*?<\/xdr:from>/);
-      const ext = body.match(/<a:ext\s+cx="(\d+)"\s+cy="(\d+)"\s*\/>/);
-      if (!from || !ext) return full;
-      anchors.push({ full, attrs, body, target, from: from[0], cx: ext[1], cy: ext[2] });
-      return full;
-    });
-
-    const first = anchors.find(a => a.target === firstMediaEntryName);
-    const second = anchors.find(a => a.target === secondMediaEntryName);
-    if (!first || !second) continue;
-
-    const rewrite = (anchor, newFrom) => {
-      let body = anchor.body
-        .replace(/<xdr:from>[\s\S]*?<\/xdr:from>/, newFrom)
-        .replace(/<xdr:to>[\s\S]*?<\/xdr:to>/, '')
-        .replace(/<a:srcRect\b[^>]*\/>/g, '');
-      body = body.replace(/<a:picLocks\b([^>]*)\/>/g, (tag, attrs) => {
-        const clean = String(attrs || '').replace(/\s+noChangeAspect="[^"]*"/g, '');
-        return `<a:picLocks${clean} noChangeAspect="1"/>`;
-      });
-      if (!/<a:picLocks\b/.test(body)) {
-        body = body.replace(/<a:cNvPicPr\s*\/>/, '<a:cNvPicPr><a:picLocks noChangeAspect="1"/></a:cNvPicPr>');
-      }
-      body = body.replace(/<xdr:clientData([^>]*)\/>/, `<xdr:ext cx="${anchor.cx}" cy="${anchor.cy}"/><xdr:clientData$1/>`);
-      return `<xdr:oneCellAnchor${anchor.attrs}>${body}</xdr:oneCellAnchor>`;
-    };
-
-    const firstReplacement = rewrite(first, second.from);
-    const secondReplacement = rewrite(second, first.from);
-    xml = xml.replace(first.full, firstReplacement).replace(second.full, secondReplacement);
-    zip.updateFile(entry.entryName, Buffer.from(xml, 'utf8'));
-  }
-}
-
 function placeDepEdLeftAndSchoolRight(zip, schoolMediaEntryName, depedMediaEntryName, schoolLogoDataUri) {
-  // Root-source correction for the v1.5.0 logo-order regression:
-  // image1 remains the square school-logo object and image2 remains the
-  // landscape DepEd object. Replace only the school image bytes, then exchange
-  // the two drawing positions so each logo carries its original geometry.
+  // Restore the official template's authored logo contract:
+  // the square school-logo drawing remains in its original left position and
+  // the bundled landscape DepEd drawing remains in its original right position.
+  // Do not swap media, anchors, or drawing geometry.
   replacePngMediaFromDataUri(zip, schoolMediaEntryName, schoolLogoDataUri);
-  swapDrawingImagePositions(zip, schoolMediaEntryName, depedMediaEntryName);
 }
 
 function divisionHeading(value) {
