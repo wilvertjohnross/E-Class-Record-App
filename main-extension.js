@@ -466,18 +466,12 @@ function replacePngMediaFromDataUri(zip, entryName, dataUri) {
   } catch {}
 }
 
-function placeDepEdLeftAndSchoolRight(zip, leftEntryName, rightEntryName, schoolLogoDataUri) {
-  // The bundled official templates currently keep the DepEd artwork in the
-  // right-hand media slot. Move that exact bundled artwork to the left slot,
-  // then place the user-selected school/custom logo in the right slot.
-  const depedEntry = zip.getEntry(rightEntryName);
-  if (depedEntry) {
-    try {
-      const depedBytes = Buffer.from(depedEntry.getData());
-      if (depedBytes.length > 100) zip.updateFile(leftEntryName, depedBytes);
-    } catch {}
-  }
-  replacePngMediaFromDataUri(zip, rightEntryName, schoolLogoDataUri);
+function placeDepEdLeftAndSchoolRight(zip, schoolMediaEntryName, depedMediaEntryName, schoolLogoDataUri) {
+  // Restore the official template's authored logo contract:
+  // the square school-logo drawing remains in its original left position and
+  // the bundled landscape DepEd drawing remains in its original right position.
+  // Do not swap media, anchors, or drawing geometry.
+  replacePngMediaFromDataUri(zip, schoolMediaEntryName, schoolLogoDataUri);
 }
 
 function divisionHeading(value) {
@@ -622,9 +616,14 @@ function validateSf2Payload(payload) {
     if (!Array.isArray(st.marks) || st.marks.length !== payload.days.length) throw new Error(`SF2 attendance is incomplete for ${st.name || 'a learner'}.`);
     for (const mark of st.marks) if (!['P','A','L','C'].includes(String(mark || 'P'))) throw new Error('SF2 contains an unsupported attendance code.');
   }
+  // Official SF2 accepts only the explicit scalar identity fields required
+  // by the preserved form. App-only configuration must never cross this boundary.
+  const allowedMeta = new Set(['schoolId','region','division','schoolName','schoolYear','gradeLevel','section','adviser','schoolHead']);
   for (const [key, value] of Object.entries(payload.meta)) {
-    if (value !== null && value !== undefined && typeof value !== 'string' && typeof value !== 'number' && !(key === 'sf2Enabled' && typeof value === 'boolean')) throw new Error(`Invalid SF2 metadata field: ${key}.`);
-    if (String(value ?? '').length > 1000) throw new Error(`SF2 metadata field is unexpectedly long: ${key}.`);
+    if (!allowedMeta.has(key)) throw new Error(`Unsupported SF2 metadata field: ${key}.`);
+    if (value === null || value === undefined) continue;
+    if (!['string','number','boolean'].includes(typeof value)) throw new Error(`Invalid SF2 metadata field: ${key}.`);
+    if (String(value).length > 1000) throw new Error(`SF2 metadata field is unexpectedly long: ${key}.`);
   }
 }
 
@@ -949,8 +948,9 @@ function buildOfficialEcrBuffer(payload, ctx) {
 
   zip.updateFile('xl/worksheets/sheet1.xml', Buffer.from(xml, 'utf8'));
 
-  // Final logo order: DepEd on the left, user-selected school/custom logo on the right.
-  // In the bundled ECR template image1 is left and image2 is right.
+  // Preserve the official template's authored logo geometry: school logo in the
+  // square left slot and bundled DepEd logo in the landscape right slot.
+  // Only the configured school-logo image bytes are replaced; anchors are untouched.
   placeDepEdLeftAndSchoolRight(zip, 'xl/media/image1.png', 'xl/media/image2.png', payload.schoolLogoDataUri);
 
   const wbEntry = zip.getEntry('xl/workbook.xml');
@@ -1674,7 +1674,7 @@ function gsPreviewSignature(payload, ctx) {
 function previewSignature(payload, ctx) {
   const crypto = require('crypto');
   return crypto.createHash('sha256')
-    .update('ecr-preview-v1.0.20-stability-gate\n')
+    .update('ecr-preview-v1.7.6-authoritative-ecr-buffer\n')
     .update(templateFingerprint(ctx))
     .update('\n')
     .update(stableStringify(payload))
@@ -1878,10 +1878,10 @@ async function createOfficialPopupPreview(payload, context) {
     return { ok: true, preview: true, inAppPopup: true, cached: true, signature, xlsxPath, pdfPath };
   }
 
-  // v1.0.19 uses the same stable pipeline as the working Grading Sheet:
-  // clean formula-free official template -> direct app values -> Excel PDF render.
-  // Excel no longer writes cells, evaluates formulas, follows links, or breaks links.
-  fs.writeFileSync(xlsxPath, buildOfficialDocumentBuffer('ecr', payload, ctx));
+  // Preview and Save share the exact authoritative ECR workbook generator.
+  // The preview layer must never implement its own logo/layout transformation.
+  const previewWorkbookBuffer = buildOfficialDocumentBuffer('ecr', payload, ctx);
+  fs.writeFileSync(xlsxPath, previewWorkbookBuffer);
   let renderError = null;
   try {
     if (!excelEngine) excelEngine = new PersistentExcelRenderer(ctx);
@@ -1972,8 +1972,14 @@ async function createOfficialSf1PopupPreview(payload, context, autoPrint=false) 
   validateSf1ViewerPayload(payload);
   if(process.platform!=='win32') return {ok:false,previewUnavailable:true,error:'Official SF1 preview requires Windows and desktop Microsoft Excel.'};
   const {fs,path,dataPaths,resolveResource}=ctx;
-  const templatePath=resolveResource('templates/SF1 official Template.xls');
-  if(!fs.existsSync(templatePath)) return {ok:false,previewUnavailable:true,error:'The preserved official SF1 template is missing from this update.'};
+  let templatePath=resolveResource('templates/SF1 official Template.xls');
+  // Binary templates are part of the bootstrap installation and may be omitted
+  // from a renderer-only update overlay. Fall back to the packaged resource.
+  if(!fs.existsSync(templatePath) && ctx.app && typeof ctx.app.getAppPath === 'function'){
+    const packagedCandidate=path.join(ctx.app.getAppPath(),'templates','SF1 official Template.xls');
+    if(fs.existsSync(packagedCandidate)) templatePath=packagedCandidate;
+  }
+  if(!fs.existsSync(templatePath)) return {ok:false,previewUnavailable:true,error:'The preserved official SF1 template is missing from both the active update and the installed KLAS resources.'};
   const root=dataPaths().root;
   const previewDir=path.join(root,'Official SF1 Preview Cache');
   fs.mkdirSync(previewDir,{recursive:true});
@@ -2405,13 +2411,13 @@ async function importSummaryFile(context){
 function openSf9HtmlPreview(payload, context){
   const ctx={...(startupContext||{}),...(context||{})};if(!ctx.BrowserWindow)return{ok:false,error:'Preview window service is unavailable.'};
   const parent=typeof ctx.getMainWindow==='function'?ctx.getMainWindow():null;const win=new ctx.BrowserWindow({width:1200,height:880,minWidth:800,minHeight:600,parent:parent&&!parent.isDestroyed()?parent:undefined,modal:false,title:`SF9 Preview — ${String(payload&&payload.name||'Learner')}`,backgroundColor:'#525659',show:false,webPreferences:{contextIsolation:true,nodeIntegration:false,sandbox:true}});
-  previewWindows.add(win);if(ctx.Menu){const doPrint=()=>{if(!win.isDestroyed())win.webContents.print({silent:false,printBackground:true,color:true,margins:{marginType:'default'}});};win.setMenu(ctx.Menu.buildFromTemplate([{label:'File',submenu:[{label:'Print...',accelerator:'CmdOrCtrl+P',click:doPrint},{type:'separator'},{label:'Close Preview',accelerator:'Esc',click:()=>{if(!win.isDestroyed())win.close();}}]},{label:'View',submenu:[{role:'zoomIn'},{role:'zoomOut'},{role:'resetZoom'},{type:'separator'},{role:'togglefullscreen'}]}]));}
+  previewWindows.add(win);const doPrint=()=>{if(!win.isDestroyed())win.webContents.print({silent:false,printBackground:true,color:true,margins:{marginType:'default'}});};if(ctx.Menu){win.setMenu(ctx.Menu.buildFromTemplate([{label:'File',submenu:[{label:'Print...',accelerator:'CmdOrCtrl+P',click:doPrint},{type:'separator'},{label:'Close Preview',accelerator:'Esc',click:()=>{if(!win.isDestroyed())win.close();}}]},{label:'View',submenu:[{role:'zoomIn'},{role:'zoomOut'},{role:'resetZoom'},{type:'separator'},{role:'togglefullscreen'}]}]));}
   win.webContents.setWindowOpenHandler(()=>({action:'deny'}));
   win.webContents.on('will-navigate',(event,url)=>{if(!String(url).startsWith('data:text/html'))event.preventDefault();});
   const rawHtml=String(payload&&payload.html||'');
   const csp=`<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">`;
   const safeHtml=/<head[\s>]/i.test(rawHtml)?rawHtml.replace(/<head([^>]*)>/i,`<head$1>${csp}`):`<!doctype html><html><head>${csp}</head><body>${rawHtml}</body></html>`;
-  win.once('ready-to-show',()=>win.show());win.on('closed',()=>previewWindows.delete(win));win.loadURL('data:text/html;charset=utf-8,'+encodeURIComponent(safeHtml));return{ok:true};
+  win.once('ready-to-show',()=>win.show());win.on('closed',()=>previewWindows.delete(win));win.loadURL('data:text/html;charset=utf-8,'+encodeURIComponent(safeHtml));return{ok:true,preview:true};
 }
 
 module.exports = {

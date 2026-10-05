@@ -1,9 +1,9 @@
 {
-  "name": "e-class-record-app-gs-sf9",
-  "version": "1.5.9",
-  "description": "Offline-first E-Class Record App with official ECR, Grading Sheet, compliant SF2 Daily Attendance, SF9, SF1 import, secure local backups/updates, and app-owned grading/attendance logic",
+  "name": "klas",
+  "version": "1.7.5",
+  "description": "KLAS — an offline-first teacher productivity and school-record management application for class records, grading, attendance, and applicable school forms.",
   "main": "main.js",
-  "author": "",
+  "author": "Wilvert John Ross D. Tabangin",
   "license": "UNLICENSED",
   "private": true,
   "scripts": {
@@ -17,44 +17,24 @@
   },
   "build": {
     "appId": "ph.edu.eclassrecord.gs.sf9",
-    "productName": "E-Class Record App with GS and SF9",
+    "productName": "KLAS",
     "artifactName": "KLAS-Setup-${version}.${ext}",
-    "directories": {
-      "output": "dist"
-    },
-    "files": [
-      "main.js",
-      "preload.js",
-      "sf1-parser.js",
-      "flex-importers.js",
-      "thread-updater.js",
-      "main-extension.js",
-      "keyboard-menu.js",
-      "app/**/*",
-      "assets/**/*",
-      "templates/**/*"
-    ],
-    "win": {
-      "target": [
-        {
-          "target": "nsis",
-          "arch": [
-            "x64"
-          ]
-        }
-      ],
-      "icon": "assets/app.ico"
-    },
+    "directories": { "output": "dist" },
+    "files": ["main.js","preload.js","sf1-parser.js","flex-importers.js","thread-updater.js","main-extension.js","keyboard-menu.js","app/**/*","assets/**/*","templates/**/*"],
+    "win": { "target": [{ "target": "nsis", "arch": ["x64"] }], "icon": "assets/app.ico" },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "KLAS",
-      "deleteAppDataOnUninstall": false
+      "deleteAppDataOnUninstall": false,
+      "guid": "ph.edu.eclassrecord.gs.sf9",
+      "perMachine": false,
+      "runAfterFinish": true,
+      "uninstallDisplayName": "KLAS",
+      "include": "build/installer-compat.nsh"
     }
   },
-  "dependencies": {
-    "adm-zip": "0.6.0"
-  }
+  "dependencies": { "adm-zip": "0.6.1" }
 }

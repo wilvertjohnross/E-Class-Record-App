@@ -7,8 +7,11 @@ const AdmZip = require('adm-zip');
 const { parseOfficialSf1Xls } = require('./sf1-parser');
 const { ThreadUpdater } = require('./thread-updater');
 
-const PRODUCT_NAME = 'E-Class Record App with GS and SF9';
+const PRODUCT_NAME = 'KLAS';
+// Keep the legacy application ID through the v1.7.x compatibility window so
+// existing installations, updater trust, and local Electron state remain continuous.
 const APP_ID = 'ph.edu.eclassrecord.gs.sf9';
+const LEGACY_DATA_PRODUCT_NAME = 'E-Class Record App with GS and SF9';
 let mainWindow;
 let threadUpdater = null;
 let runtimeExtension = null;
@@ -27,12 +30,19 @@ function rejectUntrustedInvoke(event) {
 }
 
 function dataPaths() {
-  const root = path.join(app.getPath('documents'), PRODUCT_NAME);
+  const documents = app.getPath('documents');
+  const root = path.join(documents, PRODUCT_NAME);
+  const legacyRoot = path.join(documents, LEGACY_DATA_PRODUCT_NAME);
+  const legacyDataFile = path.join(legacyRoot, 'eclass-record-data.json');
+  const dataFile = path.join(root, 'klas-data.json');
+  const recoveryFile = path.join(root, 'klas-data.previous.json');
+  // Compatibility read-through: existing v1.6.x data remains readable until
+  // the first successful KLAS save creates the canonical KLAS data file.
+  const readableDataFile = fs.existsSync(dataFile) ? dataFile : (fs.existsSync(legacyDataFile) ? legacyDataFile : dataFile);
   return {
-    root,
-    dataFile: path.join(root, 'eclass-record-data.json'),
-    recoveryFile: path.join(root, 'eclass-record-data.previous.json'),
-    backupDir: path.join(root, 'Backups')
+    root,dataFile,recoveryFile,readableDataFile,
+    legacyRoot,legacyDataFile,
+    backupDir:path.join(root, 'Backups')
   };
 }
 
@@ -243,7 +253,9 @@ function buildMenu() {
     {
       label: 'View',
       submenu: [
-        { role: 'reload' }, { role: 'togglefullscreen' }
+        { role: 'reload' },
+        { label: 'Developer Tools', accelerator: 'CmdOrCtrl+Shift+I', click: () => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.toggleDevTools(); } },
+        { role: 'togglefullscreen' }
       ]
     },
     {
@@ -316,7 +328,9 @@ function buildMenu() {
 ipcMain.on('data:load-sync', (event) => {
   if (!isTrustedMainSender(event)) { event.returnValue = null; return; }
   const p = ensureDataFolders();
-  for (const candidate of [p.dataFile, p.recoveryFile]) {
+  // Prefer canonical KLAS primary/recovery files. Fall back to the legacy
+  // v1.6.x primary only when no valid KLAS copy can be loaded.
+  for (const candidate of [...new Set([p.dataFile, p.recoveryFile, p.readableDataFile])]) {
     try {
       if (!fs.existsSync(candidate)) continue;
       const raw = fs.readFileSync(candidate, 'utf8');
@@ -350,8 +364,8 @@ ipcMain.handle('backup:export', async (event, text) => {
     const normalized = JSON.stringify(parseAndValidateAppState(text), null, 2);
     const date = new Date().toISOString().slice(0, 10);
     const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
-      title: 'Export Gradebook Backup',
-      defaultPath: path.join(app.getPath('documents'), `eclass-record-backup-${date}.json`),
+      title: 'Export KLAS Backup',
+      defaultPath: path.join(app.getPath('documents'), `KLAS-backup-${date}.json`),
       filters: [{ name: 'JSON Backup', extensions: ['json'] }]
     });
     if (canceled || !filePath) return { ok: false, cancelled: true };
@@ -366,7 +380,7 @@ ipcMain.handle('backup:import', async (event) => {
   const rejected = rejectUntrustedInvoke(event); if (rejected) return rejected;
   try {
     const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
-      title: 'Import Gradebook Backup',
+      title: 'Import KLAS Backup',
       properties: ['openFile'],
       filters: [{ name: 'JSON Backup', extensions: ['json'] }]
     });
