@@ -942,7 +942,7 @@ function returnTargetFor(tab){
   if(tab==="sf9setup") return sf9SetupReturnTab==="report"?"report":"adviserhome";
   return RETURN_PARENT_TAB[tab]||null;
 }
-function navigateToTab(next,{termView="",fromSidebar=false}={}){
+function navigateToTab(next,{termView=""}={}){
   next=String(next||"").trim();
   if(!VALID_WORKFLOW_TABS.has(next)){
     console.warn("KLAS navigation ignored unknown tab:",next);
@@ -951,15 +951,9 @@ function navigateToTab(next,{termView="",fromSidebar=false}={}){
   if(termView && Object.prototype.hasOwnProperty.call(TERM_VIEW_MODE,next)) TERM_VIEW_MODE[next]=termView;
   if(next==="sf9setup") sf9SetupReturnTab=activeTab==="report"?"report":"adviserhome";
 
-  if(SUBJECT_WORKFLOW_TABS.has(next) && next!=="subjecthome" && !activeClass()){
-    // A sidebar destination must remain actionable. Class Setup is the only
-    // subject workspace that can establish a class when none exists.
-    next=fromSidebar?"setup":"subjecthome";
-  }
-  if(ADVISER_WORKFLOW_TABS.has(next) && next!=="adviserhome" && !adviserSf1Ready(ensureAdviserWorkspace())){
-    next="adviserhome";
-  }
-
+  // Navigation has one responsibility: record the requested destination.
+  // Workflow prerequisites are enforced centrally by render(), so sidebar,
+  // overview-card, return, and in-page navigation all follow the same path.
   if(next==="advisersummary"&&activeTab!=="advisersummary") SUMMARY_SUBJECT="";
   activeTab=next;
   render();
@@ -4174,7 +4168,7 @@ document.getElementById("sidebarHomeBrand").addEventListener("click",()=>{
 document.getElementById("tabs").addEventListener("click",e=>{
   const go=e.target.closest("[data-go-tab]");
   if(!go||go.disabled)return;
-  navigateToTab(go.dataset.goTab,{termView:go.dataset.termView||"",fromSidebar:true});
+  navigateToTab(go.dataset.goTab,{termView:go.dataset.termView||""});
 });
 document.querySelectorAll("#tabs .sidebar-branch").forEach(branch=>{
   branch.addEventListener("toggle",()=>{
