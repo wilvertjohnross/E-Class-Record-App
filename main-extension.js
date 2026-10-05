@@ -948,8 +948,9 @@ function buildOfficialEcrBuffer(payload, ctx) {
 
   zip.updateFile('xl/worksheets/sheet1.xml', Buffer.from(xml, 'utf8'));
 
-  // Final logo order: DepEd on the left, user-selected school/custom logo on the right.
-  // In the bundled ECR template image1 is left and image2 is right.
+  // Preserve the official template's authored logo geometry: school logo in the
+  // square left slot and bundled DepEd logo in the landscape right slot.
+  // Only the configured school-logo image bytes are replaced; anchors are untouched.
   placeDepEdLeftAndSchoolRight(zip, 'xl/media/image1.png', 'xl/media/image2.png', payload.schoolLogoDataUri);
 
   const wbEntry = zip.getEntry('xl/workbook.xml');
@@ -1673,7 +1674,7 @@ function gsPreviewSignature(payload, ctx) {
 function previewSignature(payload, ctx) {
   const crypto = require('crypto');
   return crypto.createHash('sha256')
-    .update('ecr-preview-v1.0.20-stability-gate\n')
+    .update('ecr-preview-v1.7.6-authoritative-ecr-buffer\n')
     .update(templateFingerprint(ctx))
     .update('\n')
     .update(stableStringify(payload))
@@ -1877,10 +1878,10 @@ async function createOfficialPopupPreview(payload, context) {
     return { ok: true, preview: true, inAppPopup: true, cached: true, signature, xlsxPath, pdfPath };
   }
 
-  // v1.0.19 uses the same stable pipeline as the working Grading Sheet:
-  // clean formula-free official template -> direct app values -> Excel PDF render.
-  // Excel no longer writes cells, evaluates formulas, follows links, or breaks links.
-  fs.writeFileSync(xlsxPath, buildOfficialDocumentBuffer('ecr', payload, ctx));
+  // Preview and Save share the exact authoritative ECR workbook generator.
+  // The preview layer must never implement its own logo/layout transformation.
+  const previewWorkbookBuffer = buildOfficialDocumentBuffer('ecr', payload, ctx);
+  fs.writeFileSync(xlsxPath, previewWorkbookBuffer);
   let renderError = null;
   try {
     if (!excelEngine) excelEngine = new PersistentExcelRenderer(ctx);
