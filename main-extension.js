@@ -467,10 +467,10 @@ function replacePngMediaFromDataUri(zip, entryName, dataUri) {
 }
 
 function placeDepEdLeftAndSchoolRight(zip, schoolMediaEntryName, depedMediaEntryName, schoolLogoDataUri) {
-  // Restore the official template's authored logo contract:
-  // the square school-logo drawing remains in its original left position and
-  // the bundled landscape DepEd drawing remains in its original right position.
-  // Do not swap media, anchors, or drawing geometry.
+  // Official ECR logo contract (v1.7.6):
+  // LEFT  = bundled landscape DepEd logo (image2 / rId2).
+  // RIGHT = replaceable square school logo (image1 / rId1).
+  // Template geometry owns placement; runtime replaces only school media.
   replacePngMediaFromDataUri(zip, schoolMediaEntryName, schoolLogoDataUri);
 }
 
@@ -1793,7 +1793,7 @@ function openPdfPopup(pdfPath, xlsxPath, payload, ctx) {
     minHeight: 650,
     parent: parent && !parent.isDestroyed() ? parent : undefined,
     modal: false,
-    title: `Official ECR Print Preview — ${className} — Term ${termNo}`,
+    title: `Official ECR Print Preview â€” ${className} â€” Term ${termNo}`,
     backgroundColor: '#525659',
     show: false,
     autoHideMenuBar: false,
@@ -1945,7 +1945,7 @@ function openSf1PdfPopup(pdfPath, payload, ctx, autoPrint=false) {
   const win = new BrowserWindow({
     width: 1320, height: 900, minWidth: 900, minHeight: 650,
     parent: parent && !parent.isDestroyed() ? parent : undefined,
-    modal:false, title:`Official SF1 Preview — ${label}`, backgroundColor:'#525659', show:false, autoHideMenuBar:false,
+    modal:false, title:`Official SF1 Preview â€” ${label}`, backgroundColor:'#525659', show:false, autoHideMenuBar:false,
     webPreferences:{contextIsolation:true,nodeIntegration:false,sandbox:true,plugins:true}
   });
   previewWindows.add(win);
@@ -2031,7 +2031,7 @@ function openGsPdfPopup(pdfPath, xlsxPath, payload, ctx) {
     width: 1280, height: 900, minWidth: 900, minHeight: 650,
     parent: parent && !parent.isDestroyed() ? parent : undefined,
     modal: false,
-    title: `Official Grading Sheet Print Preview — ${className} — Term ${termNo}`,
+    title: `Official Grading Sheet Print Preview â€” ${className} â€” Term ${termNo}`,
     backgroundColor: '#525659', show: false, autoHideMenuBar: false,
     webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, plugins: true }
   });
@@ -2127,7 +2127,7 @@ function openSf2PdfPopup(pdfPath, xlsxPath, payload, ctx) {
   const win = new BrowserWindow({
     width:1280,height:900,minWidth:900,minHeight:650,
     parent: parent && !parent.isDestroyed() ? parent : undefined,
-    modal:false,title:`Official SF2 Print Preview — ${className} — ${payload.monthLabel || ''}`,
+    modal:false,title:`Official SF2 Print Preview â€” ${className} â€” ${payload.monthLabel || ''}`,
     backgroundColor:'#525659',show:false,autoHideMenuBar:false,
     webPreferences:{contextIsolation:true,nodeIntegration:false,sandbox:true,plugins:true}
   });
@@ -2410,7 +2410,7 @@ async function importSummaryFile(context){
 }
 function openSf9HtmlPreview(payload, context){
   const ctx={...(startupContext||{}),...(context||{})};if(!ctx.BrowserWindow)return{ok:false,error:'Preview window service is unavailable.'};
-  const parent=typeof ctx.getMainWindow==='function'?ctx.getMainWindow():null;const win=new ctx.BrowserWindow({width:1200,height:880,minWidth:800,minHeight:600,parent:parent&&!parent.isDestroyed()?parent:undefined,modal:false,title:`SF9 Preview — ${String(payload&&payload.name||'Learner')}`,backgroundColor:'#525659',show:false,webPreferences:{contextIsolation:true,nodeIntegration:false,sandbox:true}});
+  const parent=typeof ctx.getMainWindow==='function'?ctx.getMainWindow():null;const win=new ctx.BrowserWindow({width:1200,height:880,minWidth:800,minHeight:600,parent:parent&&!parent.isDestroyed()?parent:undefined,modal:false,title:`SF9 Preview â€” ${String(payload&&payload.name||'Learner')}`,backgroundColor:'#525659',show:false,webPreferences:{contextIsolation:true,nodeIntegration:false,sandbox:true}});
   previewWindows.add(win);const doPrint=()=>{if(!win.isDestroyed())win.webContents.print({silent:false,printBackground:true,color:true,margins:{marginType:'default'}});};if(ctx.Menu){win.setMenu(ctx.Menu.buildFromTemplate([{label:'File',submenu:[{label:'Print...',accelerator:'CmdOrCtrl+P',click:doPrint},{type:'separator'},{label:'Close Preview',accelerator:'Esc',click:()=>{if(!win.isDestroyed())win.close();}}]},{label:'View',submenu:[{role:'zoomIn'},{role:'zoomOut'},{role:'resetZoom'},{type:'separator'},{role:'togglefullscreen'}]}]));}
   win.webContents.setWindowOpenHandler(()=>({action:'deny'}));
   win.webContents.on('will-navigate',(event,url)=>{if(!String(url).startsWith('data:text/html'))event.preventDefault();});
