@@ -1281,7 +1281,23 @@ html[data-theme="dark"] main::after{
 }
 </style>
 
-<link rel="stylesheet" href="teacher-auth.css">\n</head>
+<link rel="stylesheet" href="teacher-auth.css">\n
+<style id="klas-v176-interactive-sidebar-fix">
+/* KLAS v1.7.6 — interactive Level-2 sidebar root fix */
+nav.tabs .sidebar-nav-link,nav.tabs .sidebar-branch>summary{pointer-events:auto;cursor:pointer;}
+nav.tabs .sidebar-branch{display:block;width:100%;min-width:0;margin:0;}
+nav.tabs .sidebar-branch>summary{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;box-sizing:border-box;list-style:none;}
+nav.tabs .sidebar-branch>summary::-webkit-details-marker{display:none;}
+nav.tabs .sidebar-branch>summary::after{content:"›";flex:0 0 auto;font-size:16px;line-height:1;transition:transform 160ms ease;}
+nav.tabs .sidebar-branch[open]>summary::after{transform:rotate(90deg);}
+nav.tabs .sidebar-branch-children{display:none;flex-direction:column;gap:2px;padding:3px 0 5px;}
+nav.tabs .sidebar-branch[open]>.sidebar-branch-children{display:flex;}
+nav.tabs .sidebar-branch .location-subitem{display:block!important;pointer-events:auto;cursor:pointer;border:0;background:transparent;box-shadow:none;text-align:left;}
+nav.tabs .sidebar-branch .location-subitem:hover{background:rgba(255,255,255,.08);color:#fff;transform:none;}
+nav.tabs .sidebar-branch .location-subitem.active{background:#0d76d8;color:#fff;}
+@media(max-width:800px){nav.tabs .sidebar-branch{min-width:0;}nav.tabs .sidebar-branch>summary{justify-content:center;}}
+</style>
+</head>
 <body>
 
 <header class="appbar">
